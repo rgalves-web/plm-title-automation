@@ -164,6 +164,7 @@ def fill_ddr_template(
     _fill_plm_title_review(wb, manifest, to_summaries, ctx)
     _fill_agreements(wb, manifest, ctx)
     _fill_unit_and_pooling_agreements(wb, manifest, ctx)
+    _apply_title_case(wb, ctx)
     _scrub_placeholders(wb, ctx)
     _write_audit_trail_sheet(wb, ctx)
 
@@ -196,7 +197,19 @@ def fill_ddr_template(
 
 
 def _load(path: str | Path):
-    return load_workbook(path, data_only=False)
+    # Retry on PermissionError: on Windows, antivirus real-time scanning can hold
+    # a brief lock on a freshly-copied .xlsx, blocking the immediate re-open. The
+    # retry is output-neutral (it only re-attempts the same read).
+    import time as _t
+
+    last: Exception | None = None
+    for attempt in range(6):
+        try:
+            return load_workbook(path, data_only=False)
+        except PermissionError as exc:
+            last = exc
+            _t.sleep(0.3 * (attempt + 1))
+    raise last
 
 
 _DIFF_KEY_TO_CHECK = {
@@ -284,6 +297,36 @@ def _insert_rows_preserving_heights(ws, insert_at: int, amount: int) -> None:
     for row_number, height in moved.items():
         if height is not None:
             dims[row_number + amount].height = height
+
+
+# Client-facing text columns to normalize to Title Case (Collin item 4):
+# (sheet, first_data_row, [columns]). Numbers/fractions are never touched.
+_TITLE_CASE_TARGETS = (
+    ("Ownership Report", 8, (5, 6, 15)),   # WI Owner? no — lessor(5), lessee(6), legal(15)
+    ("Lease Review", 2, (3, 4, 7)),        # lessor(3), lessee(4), legal desc(7)
+)
+
+
+def _apply_title_case(wb, ctx: "DDRWriteContext | None" = None) -> None:
+    """Config-driven ALL-CAPS -> Title Case pass over the client-facing name /
+    legal columns of the Ownership Report and Lease Review tabs. Idempotent and
+    exception-aware (LLC, Jr., A-122...) via src.dd.title_case."""
+    from src.dd.title_case import to_title_case
+
+    for sheet_name, first_row, cols in _TITLE_CASE_TARGETS:
+        if sheet_name not in wb.sheetnames:
+            continue
+        ws = wb[sheet_name]
+        for row_number in range(first_row, ws.max_row + 1):
+            for col in cols:
+                cell = ws.cell(row_number, col)
+                if isinstance(cell, MergedCell) or not isinstance(cell.value, str):
+                    continue
+                new_value = to_title_case(cell.value)
+                if new_value != cell.value:
+                    cell.value = new_value
+                    if ctx is not None:
+                        ctx.own_cell(sheet_name, cell.coordinate)
 
 
 def _scrub_placeholders(wb, ctx: "DDRWriteContext | None" = None) -> int:

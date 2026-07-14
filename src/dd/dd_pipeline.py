@@ -255,6 +255,60 @@ def build_lease_review_rows(
     return rows
 
 
+def enrich_lease_rows_with_details(
+    lease_review_rows: list[dict[str, Any]],
+    manifest: UnitManifest,
+    controlling: dict[str, TitleOpinionExtraction],
+    reconciliation: "ReconciliationResult",
+) -> list[Any]:
+    """Fill per-lease MI/WI/royalty/tract-acres/legal on each row from the
+    controlling opinions' mineral ownership (Collin items 1-2), never
+    overwriting a value already resolved from a matched lease block. Returns the
+    QA gate results (MI-sums-to-1 per tract, Seller WI == expected)."""
+    from src.dd.lease_detail import build_lease_details
+    from src.dd.dd_qa_gates import mineral_interest_sums_to_one, seller_wi_matches_expected
+
+    royalty_by_lease = {
+        r["lease_no"]: (r.get("royalty_text") or r.get("royalty"))
+        for r in lease_review_rows
+        if r.get("lease_no") and (r.get("royalty_text") or r.get("royalty"))
+    }
+    details = {
+        d.lease_no: d
+        for d in build_lease_details(
+            manifest.leases, controlling, royalty_by_lease, tract_gross_fn=_tract_gross_acres
+        )
+    }
+    for row in lease_review_rows:
+        d = details.get(row.get("lease_no"))
+        if d is None:
+            continue
+        if row.get("mi_value") is None and d.mi_value is not None:
+            row["mi_value"] = d.mi_value
+        if row.get("wi_value") is None and d.wi_value is not None:
+            row["wi_value"] = d.wi_value
+        if row.get("tract_gross_acres") is None and d.tract_gross_acres is not None:
+            row["tract_gross_acres"] = d.tract_gross_acres
+        if not row.get("legal_description") and d.legal_description:
+            row["legal_description"] = d.legal_description
+        # Royalty into the Ownership Report (col G): prefer a carried Lease
+        # Review value, then the matched tract royalty.
+        if row.get("royalty") is None and d.royalty is not None:
+            parsed = parse_fraction_text(d.royalty)
+            if parsed is not None:
+                row["royalty"] = parsed
+        if not row.get("source_to_file_number") and d.source:
+            row["source_lease_detail"] = d.source
+        if d.notes:
+            row.setdefault("notes", []).extend(d.notes)
+
+    computed_wi = reconciliation.computed_wi if reconciliation and reconciliation.wi_status not in ("NOT_COMPUTED",) else None
+    return [
+        mineral_interest_sums_to_one(controlling),
+        seller_wi_matches_expected(computed_wi, manifest.expected_seller_wi),
+    ]
+
+
 def build_to_summaries(
     manifest: UnitManifest,
     to_extractions: dict[str, TitleOpinionExtraction],
@@ -951,6 +1005,17 @@ def run_dd_pipeline_for_unit(
     for summary in to_summaries:
         summary["controlling"] = summary["file_number"] in basis.chosen_file_numbers
 
+    # Per-lease MI/WI/royalty/legal from the controlling opinions' MINERALS
+    # section (Collin items 1-2): fills the 26/30 leases the lease-block match
+    # left blank, matching each lease's lessor to its mineral owner. Then run
+    # the MI-sums-to-1 and Seller-WI gates.
+    controlling = {
+        fn: to_extractions[fn] for fn in basis.chosen_file_numbers if fn in to_extractions
+    }
+    gate_results = enrich_lease_rows_with_details(
+        lease_review_rows, manifest, controlling, reconciliation,
+    )
+
     if aggregation is None or reconciliation is None:
         from src.dd.unit_aggregation import AggregationResult, ReconciliationResult
         from fractions import Fraction
@@ -982,6 +1047,17 @@ def run_dd_pipeline_for_unit(
         manifest, to_extractions, basis, reconciliation, controlling_date, xref_to_numbers,
         supplemental_search_complete=supplemental_search_complete,
     )
+    # Fold QA-gate failures into the review narrative and QA exceptions so a
+    # failing gate blocks a clean "done" and is itemized with its location.
+    for gate in gate_results:
+        if not gate.passed:
+            review_flags.potential_defects.append(f"QA gate '{gate.name}': {gate.detail}")
+            for loc in gate.locations:
+                review_flags.potential_defects.append(loc)
+            qa_exceptions.append(
+                QAException(severity="WARNING", code=f"DD_GATE_{gate.name.upper()}",
+                            message=gate.detail, field=gate.name)
+            )
 
     ddr_result = fill_ddr_template(
         template_path=ddr_template_path,
