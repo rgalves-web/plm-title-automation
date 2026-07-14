@@ -40,3 +40,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Agent runtime state (SQLite chat/workspace store)
+data/agent/
