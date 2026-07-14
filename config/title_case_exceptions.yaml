@@ -1,0 +1,61 @@
+# Title Case normalization exceptions for DDR client-facing text.
+#
+# The DDR writer applies Title Case to ALL-CAPS lessor/lessee/legal cells. Tokens
+# listed here keep an exact casing (entity forms, suffixes) or are recognized by
+# pattern (survey/abstract references, volume/page). Purely deterministic — no
+# LLM. Extend per client convention without touching code.
+
+# Tokens forced to an exact casing (matched case-insensitively, replaced verbatim).
+exact:
+  # Entity forms
+  - LLC
+  - L.L.C.
+  - LP
+  - L.P.
+  - LLP
+  - PLLC
+  - PC
+  - INC        -> Inc.
+  - INC.       -> Inc.
+  - CORP       -> Corp.
+  - CO         -> Co.
+  - LTD        -> Ltd.
+  - N.A.
+  - NA         -> N.A.
+  - USA
+  - TRUST      -> Trust
+  - ET         -> et
+  - AL         -> al
+  - UX         -> ux
+  - VIR        -> vir
+  # Name suffixes
+  - JR         -> Jr.
+  - JR.        -> Jr.
+  - SR         -> Sr.
+  - SR.        -> Sr.
+  - II
+  - III
+  - IV
+  # Estate / role abbreviations
+  - EST        -> Estate
+  - TRUSTEE    -> Trustee
+  - CO-TRUSTEE -> Co-Trustee
+  - ETUX       -> et ux
+  - ETAL       -> et al
+  # State/geography short forms that should stay upper
+  - TX
+  - OK
+  - N
+  - S
+  - E
+  - W
+
+# Regex patterns whose matched text is preserved verbatim (uppercased legal
+# references like survey abstracts "A-122", "A-1449", volume/page, section refs).
+preserve_patterns:
+  - '\bA-\d+\b'          # abstract / survey number, e.g. A-122
+  - '\bBLK\s*\d+\b'      # block number
+  - '\b\d+/\d+\b'        # fractions in prose
+  - '\bVol\.?\s*\d+'     # volume
+  - '\bPg\.?\s*\d+'      # page
+  - '\bNo\.?\s*\d+'      # number

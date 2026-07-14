@@ -129,6 +129,10 @@ class UnitManifest(BaseModel):
     leases: list[LeaseRef] = Field(default_factory=list)
     represented_interest: RepresentedInterest | None = None
     unit_gross_acres: str | None = None
+    # Expected Seller aggregate leasehold WI for the reconciliation gate
+    # (config/analyst-supplied per unit, e.g. "0.816596" for MAXWELL A UNIT).
+    # None disables the gate. Never hardcoded in code.
+    expected_seller_wi: str | None = None
     controlling_certification_date: date | None = None
     has_farmout_option_scenario: bool = False
     manifest_notes: list[str] = Field(default_factory=list)
