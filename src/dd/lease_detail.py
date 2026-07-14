@@ -10,6 +10,7 @@ only assembles the values, it does not fudge them to fit.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import Any
@@ -18,6 +19,17 @@ from rapidfuzz import fuzz
 
 from src.dd.unit_aggregation import parse_fraction_text
 from src.ownership import canonical_party_key
+
+_LEADING_FRACTION_RE = re.compile(r"(\d+\s*/\s*\d+|\d+(?:\.\d+)?\s*%|\d*\.\d+)")
+
+
+def _leading_fraction(text: str | None) -> Fraction | None:
+    """Parse the first fraction/percent/decimal in prose like
+    '1/2 mineral interest' or '62.5% working interest'."""
+    if not text:
+        return None
+    m = _LEADING_FRACTION_RE.search(str(text))
+    return parse_fraction_text(m.group(1)) if m else None
 
 # EOG holds the full working interest under a standard leasehold; the mineral
 # fraction (MI) does the allocation in the template's R×S×T net-acres formula.
@@ -68,6 +80,7 @@ def build_lease_details(
     """
     royalty_by_lease = royalty_by_lease or {}
     owners = list(_iter_tract_owners(controlling))
+    lease_blocks = list(_iter_lease_blocks(controlling))
 
     details: list[LeaseDetail] = []
     for lease in leases:
@@ -113,11 +126,58 @@ def build_lease_details(
                 "Legal description and tract gross acres populated at LEASE level "
                 "(full tract); lease-vs-unit definition awaits Trevor's guidance.")
         else:
-            detail.notes.append(
-                f"lessor {lessor!r} not matched to a mineral owner in the controlling "
-                "opinions — MI/WI left empty; consult the title opinion's MINERALS section.")
+            # Pooled lease: lessor is not itself a named mineral owner. Fall back
+            # to the lease-analysis block — match by lessor and read the mineral
+            # interest the lease covers.
+            block_match = _match_lease_block(lessor, lease_blocks)
+            if block_match is not None:
+                file_number, tract, block = block_match
+                mi = _leading_fraction(getattr(block.interest_covered, "value", None))
+                if mi is not None:
+                    detail.mi_value = mi
+                    detail.wi_value = _DEFAULT_LEASE_WI
+                if detail.tract_gross_acres is None:
+                    detail.tract_gross_acres = _tract_gross(tract, tract_gross_fn)
+                if not detail.legal_description:
+                    legal = getattr(block.land_covered, "value", None)
+                    detail.legal_description = legal
+                if detail.royalty is None:
+                    detail.royalty = getattr(block.royalty, "value", None)
+                detail.source = f"{file_number} · lease-analysis (lessor: {lessor})"
+                if detail.mi_value is None:
+                    detail.notes.append(
+                        f"matched lease block for {lessor!r} but its covered mineral interest "
+                        "did not parse — MI left empty; read the lease-analysis entry.")
+            else:
+                detail.notes.append(
+                    f"lessor {lessor!r} not matched to a mineral owner or lease-analysis "
+                    "entry in the controlling opinions — MI/WI left empty; consult the "
+                    "opinion's MINERALS and lease-analysis sections.")
         details.append(detail)
     return details
+
+
+def _iter_lease_blocks(controlling: dict[str, Any]):
+    for file_number, extraction in controlling.items():
+        for tract in getattr(extraction, "tracts", []) or []:
+            for block in getattr(tract, "leases", []) or []:
+                yield file_number, tract, block
+
+
+def _match_lease_block(lessor: str | None, lease_blocks: list):
+    if not lessor:
+        return None
+    key = canonical_party_key(lessor)
+    best = None
+    best_score = 0.0
+    for file_number, tract, block in lease_blocks:
+        block_lessor = getattr(block.lessor, "value", None)
+        if not block_lessor:
+            continue
+        score = fuzz.token_sort_ratio(key, canonical_party_key(str(block_lessor)))
+        if score > best_score and score >= _MATCH_THRESHOLD:
+            best_score, best = score, (file_number, tract, block)
+    return best
 
 
 def _tract_royalty_text(tract: Any) -> str | None:

@@ -36,8 +36,9 @@ from src.utils import get_logger
 
 logger = get_logger(__name__)
 
-DD_TO_CACHE_SCHEMA_VERSION = "dd_to_v1"
+DD_TO_CACHE_SCHEMA_VERSION = "dd_to_v2"  # v2: full lease-schedule extraction merged in
 MAX_OCR_CHARS = 16000
+MAX_SCHEDULE_OCR_CHARS = 48000  # the lease schedule can span many pages
 SELLER_MATCH_THRESHOLD = 80  # rapidfuzz token_sort_ratio
 
 
@@ -61,6 +62,7 @@ class TOWorkingInterestRow(BaseModel):
 
 
 class TOLeaseBlock(BaseModel):
+    lease_identifier: LLMFieldResult = Field(default_factory=LLMFieldResult)
     lease_date: LLMFieldResult = Field(default_factory=LLMFieldResult)
     recording_info: LLMFieldResult = Field(default_factory=LLMFieldResult)
     lessor: LLMFieldResult = Field(default_factory=LLMFieldResult)
@@ -154,12 +156,69 @@ def parse_title_opinion(
             error=str(exc),
         )
 
+    # Second, bounded pass: extract the FULL lease-analysis schedule so dense
+    # opinions (Cox: 20+ leases) are not truncated by the main call. Merge the
+    # fuller lease set onto the primary tract.
+    if not result.error and result.tracts:
+        try:
+            schedule = extract_lease_schedule(to_ref.file_number, ocr_text, model)
+        except LLMConfigError:
+            raise
+        except Exception as exc:
+            logger.warning("Lease-schedule extraction failed for %s: %s", to_ref.file_number, exc)
+            schedule = []
+        if len(schedule) > len(result.tracts[0].leases):
+            result.tracts[0].leases = schedule
+
     _resolve_seller_working_interest(result, seller_name)
 
     if cache_dir and not result.error:
         _save_cache(to_ref.file_number, model, result, cache_dir)
 
     return result
+
+
+def extract_lease_schedule(file_number: str, ocr_text: str, model: str) -> list[TOLeaseBlock]:
+    """Dedicated LLM call that extracts ONLY the lease-analysis schedule (every
+    lease block), so a dense opinion never truncates. Bounded output schema,
+    full-document OCR context. Returns [] on any failure — the caller keeps the
+    main extraction's leases in that case."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise LLMConfigError("ANTHROPIC_API_KEY is not set.")
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=api_key)
+    prompt = (
+        f"TITLE OPINION FILE NUMBER: {file_number}\n\n=== OCR TEXT ===\n"
+        f"{ocr_text[:MAX_SCHEDULE_OCR_CHARS]}\n=== END OCR TEXT ==="
+    )
+    last_exc: Exception | None = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=16000,
+                system=_LEASE_SCHEDULE_SYSTEM,
+                tools=[_LEASE_SCHEDULE_TOOL],
+                tool_choice={"type": "tool", "name": "extract_lease_schedule"},
+                messages=[{"role": "user", "content": prompt}],
+            )
+            block = next((b for b in response.content if getattr(b, "type", None) == "tool_use"), None)
+            if not block:
+                return []
+            leases = (block.input or {}).get("leases") or []
+            return [TOLeaseBlock(**{k: _field(v) for k, v in lease.items()}) for lease in leases]
+        except anthropic.RateLimitError as exc:
+            last_exc = exc
+            time.sleep(RETRY_BASE_DELAY * (2 ** attempt))
+        except anthropic.APITimeoutError as exc:
+            last_exc = exc
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(RETRY_BASE_DELAY)
+    if last_exc:
+        raise last_exc
+    return []
 
 
 def _resolve_seller_working_interest(
@@ -324,12 +383,44 @@ _LEASE_BLOCK_SCHEMA: dict[str, Any] = {
     "properties": {
         field: _FIELD_SCHEMA
         for field in (
-            "lease_date", "recording_info", "lessor", "lessee", "land_covered",
-            "interest_covered", "primary_term", "royalty", "shut_in_royalty",
-            "pooling", "pugh_clause", "continuous_development", "depth_limitations",
+            "lease_identifier", "lease_date", "recording_info", "lessor", "lessee",
+            "land_covered", "interest_covered", "primary_term", "royalty",
+            "shut_in_royalty", "pooling", "pugh_clause", "continuous_development",
+            "depth_limitations",
         )
     },
 }
+
+# Dedicated lease-schedule tool: a SECOND, bounded call that extracts ONLY the
+# lease-analysis schedule (every lease block) — no mineral/WI tables — so a
+# dense opinion (e.g. Cox: 20+ leases) never truncates the main extraction.
+_LEASE_SCHEDULE_TOOL: dict[str, Any] = {
+    "name": "extract_lease_schedule",
+    "description": "Extract EVERY oil & gas lease listed in a title opinion's lease-analysis section.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"leases": {"type": "array", "items": _LEASE_BLOCK_SCHEMA}},
+        "required": ["leases"],
+        "additionalProperties": False,
+    },
+}
+
+_LEASE_SCHEDULE_SYSTEM = """\
+You are an oil and gas title analyst. From the OCR text of a title opinion,
+extract EVERY lease in the lease-analysis / lease-schedule section — there are
+usually many (10-30), often numbered ("Lease No. 1", "1.", "Tract 1 Lease").
+Return ONLY a call to the `extract_lease_schedule` tool with one entry per lease.
+
+For each lease transcribe, exactly as printed (never compute):
+  lease_identifier (the lease number/label if given), lessor, lessee, lease_date,
+  recording_info (volume/page or instrument no.), land_covered, interest_covered
+  (the mineral interest/fraction the lease covers, e.g. "1/2 mineral interest"),
+  primary_term, royalty, shut_in_royalty, pooling, pugh_clause,
+  continuous_development, depth_limitations.
+Leave a field null with confidence < 0.4 if not stated. Do NOT skip leases; if the
+schedule lists 20 leases, return 20 entries. Provide a short `provenance` quote per
+value where practical.
+"""
 
 _TRACT_SCHEMA: dict[str, Any] = {
     "type": "object",

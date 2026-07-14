@@ -119,7 +119,9 @@ def test_parse_title_opinion_cache_hit_skips_api_call(tmp_path):
     to_ref = _to_ref(pdf_path=str(pdf_path))
 
     result1, mock_client1 = _call_parse(to_ref, tmp_path)
-    assert mock_client1.messages.create.call_count == 1
+    # First parse makes two calls: the main extraction + the bounded
+    # lease-schedule pass. The second parse must hit the cache and make none.
+    assert mock_client1.messages.create.call_count == 2
 
     # Second call should hit cache, not call API again
     with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-sk-key"}):
@@ -227,5 +229,5 @@ def test_cache_schema_version_namespace_does_not_collide_with_mor():
     dd_name = dd_cache_filename(identifier, model)
     mor_name = mor_cache_filename(identifier, model)
     assert dd_name != mor_name
-    assert "dd_to_v1" in dd_name
+    assert "dd_to_v2" in dd_name
     assert "dd_to_v1" not in mor_name
