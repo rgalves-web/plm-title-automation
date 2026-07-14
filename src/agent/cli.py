@@ -13,6 +13,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+try:  # load .env so pipeline tools that call the LLM find ANTHROPIC_API_KEY
+    from dotenv import load_dotenv
+    load_dotenv(override=False)
+except ImportError:
+    pass
+
 from src.agent.orchestrator import Orchestrator
 from src.agent.workspace import WorkspaceStore
 
