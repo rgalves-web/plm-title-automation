@@ -55,21 +55,24 @@ def mineral_interest_sums_to_one(controlling: dict[str, Any]) -> GateResult:
             if not owners:
                 continue
             total = Fraction(0)
-            unparsed = 0
+            unparsed_entries: list[str] = []
             for owner in owners:
                 frac = parse_fraction_text(owner.fraction_text)
                 if frac is None:
-                    unparsed += 1
+                    unparsed_entries.append(f"{owner.party!r} = {owner.fraction_text!r} [UNPARSED]")
                 else:
                     total += frac
             residual = Fraction(1) - total
-            if abs(residual) > _TOL or unparsed:
+            if abs(residual) > _TOL or unparsed_entries:
                 all_ok = False
                 locations.append(
-                    f"{file_number} · tract {i + 1} · MINERALS section: mineral interest sums to "
-                    f"{float(total):.8f} (residual {float(residual):+.8f}"
-                    + (f"; {unparsed} owner fraction(s) unparsed" if unparsed else "")
-                    + ") — reconcile the mineral ownership against the title opinion.")
+                    f"{file_number} · tract {i + 1} · MINERALS section: {len(owners)} owner(s), "
+                    f"parsed sum {float(total):.8f}, residual {float(residual):+.8f}"
+                    + (f", {len(unparsed_entries)} entry(ies) unparsed" if unparsed_entries else "")
+                    + " — reconcile the mineral ownership against the title opinion.")
+                # Pinpoint the exact unparsed MINERALS entries for the reviewer.
+                for entry in unparsed_entries:
+                    locations.append(f"    {file_number} · MINERALS · {entry}")
     return GateResult(
         "mineral_interest_sums_to_one", all_ok,
         "MI sums to 1/1 for every controlling tract." if all_ok

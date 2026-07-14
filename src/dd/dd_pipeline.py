@@ -260,7 +260,8 @@ def enrich_lease_rows_with_details(
     manifest: UnitManifest,
     controlling: dict[str, TitleOpinionExtraction],
     reconciliation: "ReconciliationResult",
-) -> list[Any]:
+    lease_document_details: dict[str, dict[str, Any]] | None = None,
+) -> tuple[list[Any], list[str]]:
     """Fill per-lease MI/WI/royalty/tract-acres/legal on each row from the
     controlling opinions' mineral ownership (Collin items 1-2), never
     overwriting a value already resolved from a matched lease block. Returns the
@@ -292,9 +293,11 @@ def enrich_lease_rows_with_details(
         if not row.get("legal_description") and d.legal_description:
             row["legal_description"] = d.legal_description
         # Royalty into the Ownership Report (col G): prefer a carried Lease
-        # Review value, then the matched tract royalty.
+        # Review value, then the matched tract royalty. Parse the leading
+        # fraction/percent from prose like "20% on oil, gas and casinghead gas".
         if row.get("royalty") is None and d.royalty is not None:
-            parsed = parse_fraction_text(d.royalty)
+            from src.dd.lease_detail import _leading_fraction
+            parsed = _leading_fraction(d.royalty)
             if parsed is not None:
                 row["royalty"] = parsed
         if not row.get("source_to_file_number") and d.source:
@@ -302,11 +305,67 @@ def enrich_lease_rows_with_details(
         if d.notes:
             row.setdefault("notes", []).extend(d.notes)
 
+    # Merge the authoritative recorded-lease-document fields. Fill empties; on a
+    # genuine TO-vs-document disagreement, itemize the conflict (never silent) —
+    # the recorded instrument wins for lease terms, but both values are reported.
+    conflicts = _merge_lease_document_details(lease_review_rows, lease_document_details or {})
+
     computed_wi = reconciliation.computed_wi if reconciliation and reconciliation.wi_status not in ("NOT_COMPUTED",) else None
-    return [
+    gate_results = [
         mineral_interest_sums_to_one(controlling),
         seller_wi_matches_expected(computed_wi, manifest.expected_seller_wi),
     ]
+    return gate_results, conflicts
+
+
+def _merge_lease_document_details(
+    lease_review_rows: list[dict[str, Any]],
+    lease_document_details: dict[str, dict[str, Any]],
+) -> list[str]:
+    conflicts: list[str] = []
+    rows_by_lease = {r.get("lease_no"): r for r in lease_review_rows}
+    for lease_no, fields in lease_document_details.items():
+        row = rows_by_lease.get(lease_no)
+        if row is None:
+            continue
+        source = fields.get("_source", "lease document")
+        for key, value in fields.items():
+            if key.startswith("_"):
+                continue
+            existing = row.get(key)
+            if existing in (None, "", "-"):
+                row[key] = value
+            elif _values_conflict(existing, value):
+                conflicts.append(
+                    f"{lease_no} · {key}: title opinion says {str(existing)[:50]!r}; "
+                    f"{source} says {str(value)[:50]!r} — using the recorded instrument; verify.")
+                row[key] = value
+        # Ownership Report royalty (col G) is a Fraction parsed from the text.
+        if row.get("royalty") is None and row.get("royalty_text"):
+            from src.dd.lease_detail import _leading_fraction
+            frac = _leading_fraction(row["royalty_text"])
+            if frac is not None:
+                row["royalty"] = frac
+        row["source_lease_document"] = source
+    return conflicts
+
+
+def _normalize_for_conflict(text: Any) -> str:
+    s = str(text).lower()
+    s = re.sub(r"\bvolume\b", "vol", s)
+    s = re.sub(r"\bpage\b", "pg", s)
+    s = re.sub(r"[^a-z0-9 ]+", " ", s)  # drop punctuation
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _values_conflict(a: Any, b: Any) -> bool:
+    """True only for a meaningful disagreement — normalize case / punctuation /
+    common abbreviations and ignore a pure substring/superset (a title-opinion
+    summary vs the fuller recorded-instrument text)."""
+    sa, sb = _normalize_for_conflict(a), _normalize_for_conflict(b)
+    if not sa or not sb or sa == sb:
+        return False
+    return sa not in sb and sb not in sa
 
 
 def build_to_summaries(
@@ -816,6 +875,8 @@ def run_dd_pipeline_for_unit(
     uploaded_title_opinion_pdfs: list[str | Path] | None = None,
     runsheet_clean_note: str | None = None,
     supplemental_search_complete: bool = False,
+    lease_document_dir: str | Path | None = None,
+    lease_document_cache_dir: str | Path | None = None,
 ) -> DDPipelineResult:
     """Run the full DD pipeline for one unit: build manifest, parse available
     title opinions, resolve the controlling certification date, filter and QA
@@ -1012,8 +1073,18 @@ def run_dd_pipeline_for_unit(
     controlling = {
         fn: to_extractions[fn] for fn in basis.chosen_file_numbers if fn in to_extractions
     }
-    gate_results = enrich_lease_rows_with_details(
-        lease_review_rows, manifest, controlling, reconciliation,
+    lease_document_details: dict[str, dict[str, Any]] = {}
+    if lease_document_dir is not None:
+        from src.dd.lease_document_source import build_lease_document_details
+        lease_document_details = build_lease_document_details(
+            lease_document_dir, manifest.leases,
+            work_dir=output_dir / "lease_document_work",
+            cache_dir=lease_document_cache_dir, progress=progress_callback,
+        )
+        _emit(progress_callback, "ok",
+              f"Unit {unit_name} — {len(lease_document_details)} lease document(s) read from the new-files folder")
+    gate_results, lease_conflicts = enrich_lease_rows_with_details(
+        lease_review_rows, manifest, controlling, reconciliation, lease_document_details,
     )
 
     if aggregation is None or reconciliation is None:
@@ -1047,6 +1118,9 @@ def run_dd_pipeline_for_unit(
         manifest, to_extractions, basis, reconciliation, controlling_date, xref_to_numbers,
         supplemental_search_complete=supplemental_search_complete,
     )
+    # Surface any TO-vs-lease-document conflicts (never silently resolved).
+    for conflict in lease_conflicts:
+        review_flags.potential_defects.append(f"Source conflict — {conflict}")
     # Fold QA-gate failures into the review narrative and QA exceptions so a
     # failing gate blocks a clean "done" and is itemized with its location.
     for gate in gate_results:

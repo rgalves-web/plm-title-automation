@@ -41,6 +41,21 @@ def test_mi_sums_to_one_fails_and_reports_residual():
     assert r.locations and "residual" in r.locations[0]
 
 
+def test_mi_gate_pinpoints_unparsed_owner_entries():
+    # A complex/garbled fraction that won't parse must be named per owner.
+    tract = TOTract(
+        tract_legal_description=LLMFieldResult(value="t", confidence=1.0),
+        mineral_owners=[
+            TOPartyInterest(party="Lynn W. Cox", fraction_text="1/2", confidence=1.0),
+            TOPartyInterest(party="Croxton Estate", fraction_text="[(1/4 x 1/9) plu", confidence=1.0),
+        ],
+    )
+    r = mineral_interest_sums_to_one({"TO_COX": _ext(tract)})
+    assert not r.passed
+    pinpoint = [loc for loc in r.locations if "Croxton Estate" in loc and "UNPARSED" in loc]
+    assert pinpoint, r.locations
+
+
 def test_seller_wi_gate_matches():
     r = seller_wi_matches_expected(Fraction("0.816596"), "0.816596")
     assert r.passed
