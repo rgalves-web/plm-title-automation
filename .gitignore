@@ -40,3 +40,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Agent runtime state
+data/agent/
