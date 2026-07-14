@@ -106,6 +106,92 @@ def seller_wi_matches_expected(computed_wi: Fraction | None, expected_wi: str | 
          f"{float(expected):.6f} — reconcile per-tract WI against the controlling opinions."])
 
 
+def mineral_interest_within_tract_not_over_one(rows: list[dict[str, Any]]) -> GateResult:
+    """Sheet-level sanity gate (Collin item 1 regression guard): the populated
+    Mineral Interest (MI) values of the leases drawing from one tract must not
+    sum to more than 1/1. A tract's mineral ownership is a partition of unity, so
+    a sum > 1 means MI was flattened — e.g. every lease in the tract was written
+    with the same owner's fraction (13 × 5/36 = 1.81), which this gate catches
+    before the workbook ships. Leases with no MI yet (pending) contribute 0."""
+    by_tract: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        key = row.get("tract_key")
+        mi = row.get("mi_value")
+        if key is None or mi is None:
+            continue
+        by_tract.setdefault(key, []).append(row)
+
+    locations: list[str] = []
+    for key, tract_rows in by_tract.items():
+        total = Fraction(0)
+        for row in tract_rows:
+            frac = row["mi_value"]
+            total += frac if isinstance(frac, Fraction) else Fraction(str(frac))
+        if total - Fraction(1) > _TOL:
+            leases = ", ".join(str(r.get("lease_no") or "?") for r in tract_rows)
+            locations.append(
+                f"tract {key!r}: {len(tract_rows)} lease(s) with populated MI sum to "
+                f"{float(total):.6f} (> 1/1) — MI is flattened/over-counted; each lessor's "
+                f"MI must be its OWN mineral-owner fraction. Leases: {leases}")
+    ok = not locations
+    return GateResult(
+        "mineral_interest_within_tract_not_over_one", ok,
+        "Populated MI within every tract sums to <= 1/1." if ok
+        else f"{len(locations)} tract(s) have populated MI summing to more than 1/1.",
+        locations)
+
+
+def workbook_headline_wi(
+    rows: list[dict[str, Any]],
+    unit_gross_acres: Fraction | None,
+    expected_wi: str | None,
+) -> GateResult:
+    """Validate the HEADLINE Seller WI the *workbook* itself displays (Collin
+    item 2). The Ownership Report's D5 = SUM(net acres)/A5, where each lease's
+    net acres = R(tract gross) x S(MI) x T(WI); a row missing any of the three
+    contributes zero. openpyxl does not evaluate formulas, so we replicate D5's
+    arithmetic here rather than trusting the internal aggregation. If rows are
+    still pending MI/acres the headline is UNDERSTATED versus the expected WI —
+    the gate fails and names how many rows are pending, so the number the client
+    sees is never silently different from the number the pipeline validated."""
+    if expected_wi is None or unit_gross_acres in (None, 0):
+        return GateResult("workbook_headline_wi", True,
+                          "No expected Seller WI / unit gross configured — gate skipped.")
+    expected = parse_fraction_text(str(expected_wi))
+    if expected is None:
+        return GateResult("workbook_headline_wi", False,
+                          f"Configured expected Seller WI is not parseable: {expected_wi!r}")
+
+    def _f(v):
+        if v is None:
+            return None
+        return v if isinstance(v, Fraction) else Fraction(str(v))
+
+    net_acres = Fraction(0)
+    pending: list[str] = []
+    for row in rows:
+        r, s, t = _f(row.get("tract_gross_acres")), _f(row.get("mi_value")), _f(row.get("wi_value"))
+        if r is None or s is None or t is None:
+            missing = [n for n, v in (("tract gross", r), ("MI", s), ("WI", t)) if v is None]
+            pending.append(f"{row.get('lease_no') or '?'} (missing {', '.join(missing)})")
+            continue
+        net_acres += r * s * t
+    headline = net_acres / Fraction(str(unit_gross_acres))
+    ok = abs(headline - expected) <= _TOL
+    detail = (f"Workbook headline Seller WI (Ownership Report D5) = {float(headline):.6f}; "
+              f"expected {float(expected):.6f}"
+              + (f"; {len(pending)} row(s) still pending MI/acres" if pending else "") + ".")
+    locations: list[str] = []
+    if not ok:
+        locations.append(
+            f"Ownership Report · D5 · workbook shows {float(headline):.6f} but pipeline expects "
+            f"{float(expected):.6f} — {len(pending)} row(s) pending MI/acres understate the headline; "
+            "resolve them or the Summary must state the headline is understated.")
+        for p in pending:
+            locations.append(f"    pending · {p}")
+    return GateResult("workbook_headline_wi", ok, detail, locations)
+
+
 def _scan_workbook(workbook, markers, gate_name: str, what: str) -> GateResult:
     locations: list[str] = []
     for sheet_name in workbook.sheetnames:

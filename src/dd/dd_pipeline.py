@@ -222,19 +222,17 @@ def build_lease_review_rows(
                     "source_to_file_number": file_number,
                 }
             )
-            # Pull MI / WI / royalty / ORRI numeric values from the matched tract
-            # so _fill_ownership_report can populate the Mineral Fraction and NMA
-            # columns (S/T/U) instead of leaving them blank.
-            if tract.mineral_owners:
-                mi_text = tract.mineral_owners[0].fraction_text
-                mi = parse_fraction_text(mi_text) if mi_text else None
-                if mi is not None:
-                    row["mi_value"] = mi
-            wi, _wi_needs_review = resolve_seller_wi(tract)
-            if wi is not None:
-                row["wi_value"] = wi
+            # MI and WI are intentionally NOT set here. Matching a lease *block*
+            # says nothing about which of a tract's several mineral owners this
+            # lessor is, so taking mineral_owners[0] (or the tract-aggregate WI)
+            # would flatten every lease in a multi-owner tract to one owner's
+            # fraction. Per-lease MI/WI come from enrich_lease_rows_with_details,
+            # which name-matches each lessor to its OWN mineral owner (the
+            # authoritative per-owner fraction). Only royalty/ORRI — which are
+            # genuinely tract-level here — are pulled from the matched tract.
             # Royalty: parse the first royalty_owner fraction; fall back to
             # block.royalty text (which is prose like "1/8 for oil").
+            royalty = None
             if tract.royalty_owners:
                 royalty = parse_fraction_text(tract.royalty_owners[0].fraction_text)
                 if royalty is not None:
@@ -267,7 +265,12 @@ def enrich_lease_rows_with_details(
     overwriting a value already resolved from a matched lease block. Returns the
     QA gate results (MI-sums-to-1 per tract, Seller WI == expected)."""
     from src.dd.lease_detail import build_lease_details
-    from src.dd.dd_qa_gates import mineral_interest_sums_to_one, seller_wi_matches_expected
+    from src.dd.dd_qa_gates import (
+        mineral_interest_sums_to_one,
+        mineral_interest_within_tract_not_over_one,
+        seller_wi_matches_expected,
+        workbook_headline_wi,
+    )
 
     royalty_by_lease = {
         r["lease_no"]: (r.get("royalty_text") or r.get("royalty"))
@@ -284,9 +287,16 @@ def enrich_lease_rows_with_details(
         d = details.get(row.get("lease_no"))
         if d is None:
             continue
-        if row.get("mi_value") is None and d.mi_value is not None:
-            row["mi_value"] = d.mi_value
-        if row.get("wi_value") is None and d.wi_value is not None:
+        # Name-matched per-owner MI is authoritative and ALWAYS wins — it must
+        # never be left flattened to a tract-uniform value. The lease-block
+        # interest_covered is only a fallback: it fills an empty MI, but never
+        # overwrites an owner match.
+        if d.mi_value is not None:
+            if d.mi_source == "mineral_owner" or row.get("mi_value") is None:
+                row["mi_value"] = d.mi_value
+                if d.wi_value is not None:
+                    row["wi_value"] = d.wi_value
+        elif row.get("wi_value") is None and d.wi_value is not None:
             row["wi_value"] = d.wi_value
         if row.get("tract_gross_acres") is None and d.tract_gross_acres is not None:
             row["tract_gross_acres"] = d.tract_gross_acres
@@ -300,6 +310,8 @@ def enrich_lease_rows_with_details(
             parsed = _leading_fraction(d.royalty)
             if parsed is not None:
                 row["royalty"] = parsed
+        if d.tract_key and not row.get("tract_key"):
+            row["tract_key"] = d.tract_key
         if not row.get("source_to_file_number") and d.source:
             row["source_lease_detail"] = d.source
         if d.notes:
@@ -311,9 +323,12 @@ def enrich_lease_rows_with_details(
     conflicts = _merge_lease_document_details(lease_review_rows, lease_document_details or {})
 
     computed_wi = reconciliation.computed_wi if reconciliation and reconciliation.wi_status not in ("NOT_COMPUTED",) else None
+    unit_gross = parse_fraction_text(str(manifest.unit_gross_acres)) if manifest.unit_gross_acres else None
     gate_results = [
         mineral_interest_sums_to_one(controlling),
+        mineral_interest_within_tract_not_over_one(lease_review_rows),
         seller_wi_matches_expected(computed_wi, manifest.expected_seller_wi),
+        workbook_headline_wi(lease_review_rows, unit_gross, manifest.expected_seller_wi),
     ]
     return gate_results, conflicts
 

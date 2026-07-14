@@ -45,9 +45,15 @@ class LeaseDetail:
     lessor: str | None = None
     mi_value: Fraction | None = None
     wi_value: Fraction | None = None
+    # How mi_value was resolved: "mineral_owner" = the lessor was name-matched to
+    # a MINERALS-section owner (AUTHORITATIVE — this per-owner fraction always
+    # wins); "lease_block" = fallback to the lease-analysis interest_covered when
+    # no owner match existed (fill-only, never overwrites an owner-matched value).
+    mi_source: str | None = None
     royalty: str | None = None
     tract_gross_acres: Fraction | None = None
     legal_description: str | None = None
+    tract_key: str | None = None       # stable per-tract id for the ≤1/1 MI-sum gate
     source: str | None = None          # TO filename (+ section) the values came from
     notes: list[str] = field(default_factory=list)
 
@@ -62,6 +68,14 @@ def _iter_tract_owners(controlling: dict[str, Any]):
 
 def _tract_gross(tract: Any, tract_gross_fn) -> Fraction | None:
     return tract_gross_fn(tract) if tract_gross_fn else None
+
+
+def _tract_key(file_number: str, tract: Any) -> str:
+    """Stable per-tract identifier so the ≤1/1 MI-sum gate can group the leases
+    that draw their mineral interest from the same tract."""
+    legal = getattr(tract, "tract_legal_description", None)
+    legal_val = getattr(legal, "value", None) if legal else None
+    return f"{file_number}::{(legal_val or '?')[:60]}"
 
 
 def build_lease_details(
@@ -111,12 +125,14 @@ def build_lease_details(
             if mi is not None:
                 detail.mi_value = mi
                 detail.wi_value = _DEFAULT_LEASE_WI
+                detail.mi_source = "mineral_owner"  # authoritative per-owner MI
             else:
                 detail.notes.append(
                     f"mineral fraction {owner.fraction_text!r} did not parse — MI left empty")
             detail.tract_gross_acres = _tract_gross(tract, tract_gross_fn)
             legal = getattr(tract, "tract_legal_description", None)
             detail.legal_description = getattr(legal, "value", None) if legal else None
+            detail.tract_key = _tract_key(file_number, tract)
             detail.source = f"{file_number} · MINERALS section (owner: {owner.party})"
             # Royalty fallback: the matched tract's royalty_owners / tract royalty.
             if detail.royalty is None:
@@ -136,11 +152,13 @@ def build_lease_details(
                 if mi is not None:
                     detail.mi_value = mi
                     detail.wi_value = _DEFAULT_LEASE_WI
+                    detail.mi_source = "lease_block"  # fallback only — never overwrites an owner match
                 if detail.tract_gross_acres is None:
                     detail.tract_gross_acres = _tract_gross(tract, tract_gross_fn)
                 if not detail.legal_description:
                     legal = getattr(block.land_covered, "value", None)
                     detail.legal_description = legal
+                detail.tract_key = _tract_key(file_number, tract)
                 if detail.royalty is None:
                     detail.royalty = getattr(block.royalty, "value", None)
                 detail.source = f"{file_number} · lease-analysis (lessor: {lessor})"

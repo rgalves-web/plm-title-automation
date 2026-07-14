@@ -42,6 +42,13 @@ exact:
   - CO-TRUSTEE -> Co-Trustee
   - ETUX       -> et ux
   - ETAL       -> et al
+  # Client / operator acronyms that must stay upper (never "Eog", "Xto", …)
+  - EOG
+  - XTO
+  - COG
+  - BHP
+  - HNG
+  - EGL
   # State/geography short forms that should stay upper
   - TX
   - OK

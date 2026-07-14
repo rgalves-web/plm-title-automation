@@ -12,7 +12,9 @@ def test_basic_all_caps_to_title():
 def test_entity_forms_preserved():
     assert to_title_case("JDMI LLC") == "Jdmi LLC"
     assert to_title_case("MOORE-BURROW LTD ET AL") == "Moore-Burrow Ltd. et al"
-    assert to_title_case("EOG RESOURCES INC") == "Eog Resources Inc."
+    # EOG (client operator acronym) must stay upper — never lowercased to "Eog".
+    assert to_title_case("EOG RESOURCES INC") == "EOG Resources Inc."
+    assert to_title_case("EOG A RESOURCES COMPANY LLC") == "EOG A Resources Company LLC"
 
 
 def test_name_suffixes_and_roles():

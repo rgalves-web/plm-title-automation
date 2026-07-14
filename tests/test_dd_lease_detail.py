@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from fractions import Fraction
+from types import SimpleNamespace
 
+from src.dd.dd_pipeline import enrich_lease_rows_with_details
 from src.dd.lease_detail import build_lease_details
 from src.dd.manifest import LeaseRef
 from src.dd.title_opinion_parser import TOPartyInterest, TOTract, TitleOpinionExtraction
@@ -60,3 +62,51 @@ def test_tract_gross_acres_uses_supplied_fn():
     d = build_lease_details(leases, _controlling(),
                             tract_gross_fn=lambda t: Fraction("140.9963"))[0]
     assert d.tract_gross_acres == Fraction("140.9963")
+
+
+# --- Collin item-1 regression: per-owner MI must stay distinct, never flattened ---
+
+def _distinct_cox_tract():
+    """Three Cox mineral owners with genuinely different fractions."""
+    return TOTract(
+        tract_legal_description=LLMFieldResult(value="Cox tract, A-122", confidence=1.0),
+        mineral_owners=[
+            TOPartyInterest(party="John A. Cox", fraction_text="1/36", confidence=1.0),
+            TOPartyInterest(party="Sandra Lynn Walker", fraction_text="5/72", confidence=1.0),
+            TOPartyInterest(party="Lynn W. Cox", fraction_text="5/36", confidence=1.0),
+        ],
+    )
+
+
+def test_cox_owners_get_distinct_per_owner_mi():
+    leases = [LeaseRef(lease_no="L1", lessor="JOHN A COX"),
+              LeaseRef(lease_no="L2", lessor="SANDRA LYNN WALKER"),
+              LeaseRef(lease_no="L3", lessor="LYNN W COX")]
+    controlling = {"TO_COX": TitleOpinionExtraction(file_number="TO_COX", tracts=[_distinct_cox_tract()])}
+    d = {x.lease_no: x for x in build_lease_details(leases, controlling)}
+    assert d["L1"].mi_value == Fraction(1, 36)
+    assert d["L2"].mi_value == Fraction(5, 72)
+    assert d["L3"].mi_value == Fraction(5, 36)
+    # All three are authoritative owner matches and must be distinct.
+    assert all(x.mi_source == "mineral_owner" for x in d.values())
+    assert len({x.mi_value for x in d.values()}) == 3
+
+
+def test_enrich_owner_match_overwrites_a_flattened_mi():
+    """The regression: rows arrive pre-flattened to one owner's fraction (5/36).
+    The name-matched per-owner MI must overwrite that uniform value."""
+    leases = [LeaseRef(lease_no="L1", lessor="JOHN A COX"),
+              LeaseRef(lease_no="L2", lessor="SANDRA LYNN WALKER"),
+              LeaseRef(lease_no="L3", lessor="LYNN W COX")]
+    controlling = {"TO_COX": TitleOpinionExtraction(file_number="TO_COX", tracts=[_distinct_cox_tract()])}
+    # Simulate the flattened state a lease-block match used to leave behind.
+    rows = [{"lease_no": lr.lease_no, "lessor": lr.lessor, "mi_value": Fraction(5, 36)}
+            for lr in leases]
+    manifest = SimpleNamespace(leases=leases, expected_seller_wi=None, unit_gross_acres=None)
+    reconciliation = SimpleNamespace(computed_wi=None, wi_status="NOT_COMPUTED")
+    enrich_lease_rows_with_details(rows, manifest, controlling, reconciliation)
+    by_lease = {r["lease_no"]: r["mi_value"] for r in rows}
+    assert by_lease["L1"] == Fraction(1, 36)   # overwritten, not the flattened 5/36
+    assert by_lease["L2"] == Fraction(5, 72)
+    assert by_lease["L3"] == Fraction(5, 36)
+    assert len(set(by_lease.values())) == 3

@@ -7,9 +7,11 @@ import openpyxl
 
 from src.dd.dd_qa_gates import (
     mineral_interest_sums_to_one,
+    mineral_interest_within_tract_not_over_one,
     no_commentary_in_client_cells,
     no_template_sample_data,
     seller_wi_matches_expected,
+    workbook_headline_wi,
 )
 from src.dd.title_opinion_parser import TOPartyInterest, TOTract, TitleOpinionExtraction
 from src.llm_extractor import LLMFieldResult
@@ -69,6 +71,55 @@ def test_seller_wi_gate_mismatch_reports_location():
 
 def test_seller_wi_gate_skipped_when_unconfigured():
     assert seller_wi_matches_expected(Fraction("0.5"), None).passed
+
+
+# --- Collin item 1: tract-level MI-sum sanity gate (catches the flattening) ---
+
+def test_mi_within_tract_flags_flattened_over_one():
+    # 13 leases in one tract all carrying 5/36 → 65/36 = 1.81 > 1 → must fail.
+    rows = [{"lease_no": f"L{i}", "tract_key": "TO_COX::cox", "mi_value": Fraction(5, 36)}
+            for i in range(13)]
+    r = mineral_interest_within_tract_not_over_one(rows)
+    assert not r.passed
+    assert r.locations and "1.8" in r.locations[0]
+
+
+def test_mi_within_tract_passes_distinct_partition():
+    rows = [{"lease_no": "L1", "tract_key": "T::x", "mi_value": Fraction(1, 36)},
+            {"lease_no": "L2", "tract_key": "T::x", "mi_value": Fraction(5, 72)},
+            {"lease_no": "L3", "tract_key": "T::x", "mi_value": Fraction(5, 36)}]
+    assert mineral_interest_within_tract_not_over_one(rows).passed
+
+
+def test_mi_within_tract_ignores_rows_without_mi_or_tract():
+    rows = [{"lease_no": "L1", "tract_key": "T::x", "mi_value": None},
+            {"lease_no": "L2", "mi_value": Fraction(9, 10)}]  # no tract_key
+    assert mineral_interest_within_tract_not_over_one(rows).passed
+
+
+# --- Collin item 2: workbook headline WI (replicates Ownership Report D5) ---
+
+def test_workbook_headline_wi_matches_when_all_rows_complete():
+    # One tract, gross 100 ac, MI summing to 0.8 at WI 1 → net 80 / 100 = 0.8.
+    rows = [{"lease_no": "L1", "tract_gross_acres": Fraction(100), "mi_value": Fraction(1, 2), "wi_value": Fraction(1)},
+            {"lease_no": "L2", "tract_gross_acres": Fraction(100), "mi_value": Fraction(3, 10), "wi_value": Fraction(1)}]
+    r = workbook_headline_wi(rows, Fraction(100), "0.8")
+    assert r.passed, r.detail
+
+
+def test_workbook_headline_wi_flags_understated_with_pending_count():
+    # Second row pending MI/acres → headline 50/100 = 0.5 < expected 0.8 → fail,
+    # and the gate must state a row is pending.
+    rows = [{"lease_no": "L1", "tract_gross_acres": Fraction(100), "mi_value": Fraction(1, 2), "wi_value": Fraction(1)},
+            {"lease_no": "L2", "tract_gross_acres": None, "mi_value": None, "wi_value": None}]
+    r = workbook_headline_wi(rows, Fraction(100), "0.8")
+    assert not r.passed
+    assert "pending" in r.detail
+    assert any("pending" in loc for loc in r.locations)
+
+
+def test_workbook_headline_wi_skipped_without_config():
+    assert workbook_headline_wi([], None, None).passed
 
 
 def _wb_with(sheet: str, cell: str, value: str):
