@@ -13,6 +13,7 @@ Seller-row selection is deterministic and auditable.
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import time
@@ -36,7 +37,11 @@ from src.utils import get_logger
 
 logger = get_logger(__name__)
 
-DD_TO_CACHE_SCHEMA_VERSION = "dd_to_v2"  # v2: full lease-schedule extraction merged in
+# Main extraction stays v1 so the reviewer-confirmed WI/mineral figures are
+# reused from cache and never destabilized by LLM re-extraction variance. The
+# lease schedule is a SEPARATE, additive cache (schedule_v1) merged on top.
+DD_TO_CACHE_SCHEMA_VERSION = "dd_to_v1"
+DD_SCHEDULE_CACHE_VERSION = "schedule_v1"
 MAX_OCR_CHARS = 16000
 MAX_SCHEDULE_OCR_CHARS = 48000  # the lease schedule can span many pages
 SELLER_MATCH_THRESHOLD = 80  # rapidfuzz token_sort_ratio
@@ -127,12 +132,7 @@ def parse_title_opinion(
 
     model = os.environ.get(LLM_MODEL_ENV, DEFAULT_MODEL)
 
-    if cache_dir:
-        cached = _load_cache(to_ref.file_number, model, cache_dir)
-        if cached is not None:
-            logger.debug("TO cache hit: %s", to_ref.file_number)
-            return cached
-
+    cached = _load_cache(to_ref.file_number, model, cache_dir) if cache_dir else None
     pdf_path = _materialize_to_pdf(to_ref, Path(work_dir))
 
     from src.pdf_reader import extract_document
@@ -141,41 +141,71 @@ def parse_title_opinion(
     extraction = extract_document(pdf_path, text_cache_dir=_OCR_CACHE_DIR)
     ocr_text = extraction.full_text or ""
 
-    try:
-        result = _call_claude(
-            to_ref.file_number, str(pdf_path), ocr_text, target_unit_name, model
-        )
-    except LLMConfigError:
-        raise
-    except Exception as exc:
-        logger.warning("TO extraction failed for %s: %s", to_ref.file_number, exc)
-        result = TitleOpinionExtraction(
-            file_number=to_ref.file_number,
-            source_pdf_path=str(pdf_path),
-            model=model,
-            error=str(exc),
-        )
-
-    # Second, bounded pass: extract the FULL lease-analysis schedule so dense
-    # opinions (Cox: 20+ leases) are not truncated by the main call. Merge the
-    # fuller lease set onto the primary tract.
-    if not result.error and result.tracts:
+    if cached is not None:
+        logger.debug("TO cache hit: %s", to_ref.file_number)
+        result = cached
+    else:
         try:
-            schedule = extract_lease_schedule(to_ref.file_number, ocr_text, model)
+            result = _call_claude(
+                to_ref.file_number, str(pdf_path), ocr_text, target_unit_name, model
+            )
         except LLMConfigError:
             raise
         except Exception as exc:
-            logger.warning("Lease-schedule extraction failed for %s: %s", to_ref.file_number, exc)
-            schedule = []
+            logger.warning("TO extraction failed for %s: %s", to_ref.file_number, exc)
+            result = TitleOpinionExtraction(
+                file_number=to_ref.file_number,
+                source_pdf_path=str(pdf_path),
+                model=model,
+                error=str(exc),
+            )
+        if cache_dir and not result.error:
+            _save_cache(to_ref.file_number, model, result, cache_dir)
+
+    # Additive second pass: the FULL lease-analysis schedule, cached SEPARATELY
+    # so it never re-runs — or destabilizes — the main extraction's WI/mineral
+    # data. Applies whether the main extraction was cached or freshly parsed.
+    if not result.error and result.tracts:
+        schedule = _load_or_extract_schedule(to_ref.file_number, ocr_text, model, cache_dir)
         if len(schedule) > len(result.tracts[0].leases):
             result.tracts[0].leases = schedule
 
     _resolve_seller_working_interest(result, seller_name)
-
-    if cache_dir and not result.error:
-        _save_cache(to_ref.file_number, model, result, cache_dir)
-
     return result
+
+
+def _load_or_extract_schedule(
+    file_number: str, ocr_text: str, model: str, cache_dir: str | Path | None
+) -> list[TOLeaseBlock]:
+    if cache_dir:
+        path = Path(cache_dir) / _schedule_cache_name(file_number, model)
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                return [TOLeaseBlock(**{k: _field(v) for k, v in b.items()}) for b in data]
+            except Exception:
+                pass
+    try:
+        schedule = extract_lease_schedule(file_number, ocr_text, model)
+    except LLMConfigError:
+        raise
+    except Exception as exc:
+        # A failed call is not a resolved result — return [] WITHOUT caching so
+        # it retries next run.
+        logger.warning("Lease-schedule extraction failed for %s: %s", file_number, exc)
+        return []
+    # Cache the successful result (even when empty — "no schedule found" is a
+    # resolved answer) so a re-run makes no call.
+    if cache_dir:
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+        (Path(cache_dir) / _schedule_cache_name(file_number, model)).write_text(
+            json.dumps([b.model_dump(mode="json") for b in schedule]), encoding="utf-8")
+    return schedule
+
+
+def _schedule_cache_name(file_number: str, model: str) -> str:
+    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in file_number)[:80]
+    return f"{safe}_{model.replace('.', '').replace('/', '_')[:24]}_{DD_SCHEDULE_CACHE_VERSION}.json"
 
 
 def extract_lease_schedule(file_number: str, ocr_text: str, model: str) -> list[TOLeaseBlock]:

@@ -229,5 +229,5 @@ def test_cache_schema_version_namespace_does_not_collide_with_mor():
     dd_name = dd_cache_filename(identifier, model)
     mor_name = mor_cache_filename(identifier, model)
     assert dd_name != mor_name
-    assert "dd_to_v2" in dd_name
+    assert "dd_to_v1" in dd_name
     assert "dd_to_v1" not in mor_name
