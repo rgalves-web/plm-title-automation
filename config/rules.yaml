@@ -1,0 +1,140 @@
+classification:
+  include_full:
+    patent:
+      - patent
+    mineral_deed:
+      - mineral deed
+      - mineral conveyance
+    warranty_deed:
+      - warranty deed
+      - special warranty deed
+    quit_claim_deed:
+      - quit claim deed
+      - quitclaim deed
+    oil_and_gas_lease:
+      - oil and gas lease
+      - oil & gas lease
+      - o&g lease
+    release_of_oil_and_gas_lease:
+      - release of oil and gas lease
+      - release of oil & gas lease
+      - release of o&g lease
+    probate:
+      - probate
+      - estate proceeding
+    affidavit_of_heirship:
+      - affidavit of heirship
+      - heirship affidavit
+    distribution_deed:
+      - distribution deed
+      - personal representative deed
+    decree_affecting_ownership:
+      - decree affecting ownership
+      - quiet title
+      - decree of distribution
+    death_certificate:
+      - death certificate
+    foreclosure_title_event:
+      - public trustee's deed
+      - public trustees deed
+      - foreclosure deed
+      - sheriff's deed
+      - sheriffs deed
+    lease_related_assignment:
+      - assignment of oil and gas lease
+      - assignment of oil & gas lease
+      - assignment of o&g lease
+      - bill of sale oil and gas
+      - bill of sale oil & gas
+      - leasehold assignment
+
+  include_limited:
+    chain_support:
+      - tax deed
+      - stipulation affecting title
+
+  redline:
+    easement:
+      - easement
+      - right of way
+      - right-of-way
+      - row agreement
+    surface_operations:
+      - road agreement
+      - surface use agreement
+      - gathering agreement
+      - transport agreement
+      - pipeline agreement
+    security_financing:
+      - deed of trust
+      - mortgage
+      - lien
+      - mechanic's lien
+      - mechanics lien
+      - ucc
+      - financing statement
+      - tax lien
+    survey_monument:
+      - monument
+      - corner record
+    commodity_specific:
+      - coal lease
+      - coal severance
+      - gravel lease
+      - gravel severance
+
+  review:
+    correction_deed:
+      - correction deed
+      - corrected deed
+    scrivener_affidavit:
+      - scrivener's affidavit
+      - scriveners affidavit
+    partial_release:
+      - partial release
+    unclear_assignment:
+      - assignment
+      - bill of sale
+    possible_title_effect:
+      - title effect
+      - reservation
+      - mineral reservation
+      - excepting and reserving
+    read_failure:
+      - ocr failure
+      - unreadable
+      - illegible
+    tract_mismatch:
+      - tract mismatch
+      - legal description mismatch
+
+precedence:
+  - DUPLICATE
+  - REDLINE
+  - REVIEW
+  - INCLUDE_FULL
+  - INCLUDE_LIMITED
+
+overrides:
+  title_event_terms:
+    - foreclosure
+    - public trustee
+    - sheriff
+  lease_terms:
+    - oil and gas lease
+    - oil & gas lease
+    - o&g lease
+    - leasehold
+  active_lease_terms:
+    - active
+    - held by production
+    - hbp
+    - extended
+  expired_lease_terms:
+    - expired
+    - expiration
+    - primary term expired
+  released_lease_terms:
+    - release of oil and gas lease
+    - released
+    - terminated

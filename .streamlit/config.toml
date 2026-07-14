@@ -1,0 +1,6 @@
+[server]
+# Streamlit's default per-file upload limit is 200 MB.
+# PLM title packages can include large PDF/ZIP batches, so the local app allows
+# uploads up to 2 GB per file.
+maxUploadSize = 2048
+maxMessageSize = 2048

@@ -1,0 +1,18 @@
+workflows:
+  - ALM/GAC
+  - Landman
+statuses:
+  INCLUDE_FULL: Relevant document requiring full extraction.
+  INCLUDE_LIMITED: Included with limited fields only.
+  REDLINE: Non-applicable but accounted for at the bottom of ALM/GAC runsheets.
+  REVIEW: Ambiguous document requiring human review.
+  DUPLICATE: Duplicate of another accounted-for document.
+lease_statuses:
+  - ACTIVE
+  - EXPIRED
+  - RELEASED
+  - REVIEW
+qa_severities:
+  ERROR: Must be fixed before final delivery.
+  WARNING: Human reviewer should resolve before reliance.
+  INFO: Audit note.

@@ -1,0 +1,105 @@
+from pathlib import Path
+
+import pytest
+
+from src.pdf_reader import (
+    LOW_CONFIDENCE_TEXT,
+    OCR_REQUIRED,
+    TEXT_EXTRACTED,
+    apply_extraction_to_record,
+    extract_pdf,
+)
+from src.schemas import ClassificationStatus, SourceDocument
+
+
+fitz = pytest.importorskip("fitz")
+
+
+def _write_pdf(path: Path, pages: list[str]) -> Path:
+    document = fitz.open()
+    for text in pages:
+        page = document.new_page()
+        if text:
+            page.insert_textbox((72, 72, 540, 720), text, fontsize=11)
+    document.save(path)
+    document.close()
+    return path
+
+
+def test_extract_pdf_structured_metadata_and_snippets(tmp_path):
+    pdf_path = _write_pdf(
+        tmp_path / "lease.pdf",
+        [
+            (
+                "Oil and Gas Lease between Jane Smith, a widow, and PLM Energy LLC. "
+                "Legal Description: Section 1 Township 4S Range 64W, Arapahoe County, Colorado. "
+                "This lease has a primary term of 5 years and as long thereafter as oil or gas is produced. "
+                "This text is long enough to be useful for extraction confidence but remains a possible signal only."
+            )
+        ],
+    )
+
+    result = extract_pdf(pdf_path)
+
+    assert result.page_count == 1
+    assert result.extraction_status == TEXT_EXTRACTED
+    assert result.extraction_confidence >= 0.55
+    assert "Oil and Gas Lease" in result.possible_document_type_keywords
+    assert any(
+        "Section 1 Township 4S Range 64W" in snippet
+        for snippet in result.possible_legal_description_snippets
+    )
+    assert any(
+        "primary term of 5 years" in snippet
+        for snippet in result.possible_lease_primary_term_snippets
+    )
+    assert "Oil and Gas Lease" in result.text_preview
+
+
+def test_blank_pdf_marks_needs_review(tmp_path):
+    """A blank/image-only PDF must push the record to REVIEW regardless of OCR availability.
+
+    With Tesseract installed: blank page → OCR runs → no useful text → LOW_CONFIDENCE_TEXT.
+    Without Tesseract: → OCR_REQUIRED.  Both are non-TEXT_EXTRACTED and require review.
+    """
+    pdf_path = _write_pdf(tmp_path / "blank.pdf", [""])
+    result = extract_pdf(pdf_path)
+
+    assert result.page_count == 1
+    assert result.extraction_status in {OCR_REQUIRED, LOW_CONFIDENCE_TEXT}
+    assert result.extraction_confidence == 0.0
+    assert result.review_required is True
+
+    record = SourceDocument(
+        source_document_id="DOC-000001",
+        source_row_number=2,
+        document_type="Unknown",
+    )
+    apply_extraction_to_record(record, result)
+
+    assert record.pdf_extraction_status in {OCR_REQUIRED, LOW_CONFIDENCE_TEXT}
+    assert record.status == ClassificationStatus.REVIEW
+    assert record.review_question
+
+
+def test_low_confidence_text_marks_review_without_final_legal_conclusion(tmp_path):
+    pdf_path = _write_pdf(
+        tmp_path / "weak.pdf",
+        ["Patent Section 1 Township 4S Range 64W."],
+    )
+    result = extract_pdf(pdf_path)
+
+    assert result.extraction_status == LOW_CONFIDENCE_TEXT
+    assert result.review_required is True
+    assert "Patent" in result.possible_document_type_keywords
+
+    record = SourceDocument(
+        source_document_id="DOC-000002",
+        source_row_number=3,
+    )
+    apply_extraction_to_record(record, result)
+
+    assert record.status == ClassificationStatus.REVIEW
+    assert record.document_type is None
+    assert record.classification_reason is None
+    assert record.possible_document_type_keywords == ["Patent"]

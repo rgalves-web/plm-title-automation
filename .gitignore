@@ -1,0 +1,42 @@
+# Environment / secrets
+.env
+*.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Data — keep only synthetic sample inputs + golden-set structure.
+# Everything else under data/ is client material (invariant #7): never commit.
+data/working/
+data/output/
+data/archive/
+data/input/dd/
+data/input/document_packages/
+
+# Client-derived sample workbook at repo root (Arapahoe Section 15).
+/Section15_SAMPLE_improved.xlsx
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp

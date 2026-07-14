@@ -1,0 +1,113 @@
+runsheet_sheet_names:
+  - Runsheet
+  - Run Sheet
+  - Limited Title Runsheet
+  - Runsheet - NE
+  - Runsheet - W2, SE
+  - MOR
+  - Mineral Ownership Report
+header_scan_rows: 25
+required_columns:
+  sequence_number:
+    - "NO."
+    - "NO"
+    - Number
+    - "#"
+  document_type:
+    - Instrument
+    - Document Type
+    - Instrument Type
+  instrument_number:
+    - Instrument Number
+    - Reception Number
+    - Recording Number
+  effective_date:
+    - Effective Date
+  instrument_date:
+    - Instrument Date
+    - Date
+    - Document Date
+  recording_date:
+    - Recording Date
+    - Recorded Date
+  grantor:
+    - Grantor
+    - From
+  grantee:
+    - Grantee
+    - To
+  acreage:
+    - Acreage
+    - Acres
+  conveyance:
+    - Conveyance
+  comments:
+    - Comments
+    - Notes
+optional_columns:
+  book:
+    - Book
+    - Book No.
+  page:
+    - Page
+    - Page No.
+chronology_date_fields:
+  - instrument_date
+  - recording_date
+redline_fill: FFC7CE
+review_fill: FFEB9C
+
+ownership_sheet_names:
+  - Ownership - Worksheet
+  - Ownership
+  - MOR Ownership
+  - Ownership Worksheet
+
+ownership_columns:
+  mineral_owner:
+    - MINERAL OWNER/SELLER
+    - MINERAL OWNER
+    - Owner
+  source_deed:
+    - SOURCE DEED
+    - Deed Number
+    - Instrument
+  interest_type:
+    - INTEREST TYPE
+    - Type
+  status:
+    - STATUS
+  section:
+    - SECTION
+  township:
+    - TOWNSHIP
+  range:
+    - RANGE
+  legal_description:
+    - LEGAL DESCRIPTION
+    - Lands
+  gross_acres:
+    - TRACT GROSS ACRES
+    - GROSS ACRES
+    - Acres
+  mineral_interest:
+    - MINERAL INTEREST
+    - Interest
+  executive_rights:
+    - EXECUTIVE RIGHTS
+  right_to_bonus:
+    - RIGHT TO BONUS
+  burdens:
+    - BURDENS
+  nma:
+    - NMA
+  open_of_record:
+    - OPEN OF RECORD
+  comments:
+    - COMMENTS
+
+# Instrument numbers whose source PDFs are acknowledged absent by the analyst.
+# Adds them to this list downgrades SOURCE_FILE_NOT_MATCHED from ERROR to WARNING.
+accepted_missing_sources:
+  - "56937-1979"
+  - "64392-1987"
