@@ -488,12 +488,29 @@ def _extract_image_ocr(
 
     _configure_tesseract()
 
+    # Recorded instruments are routinely MULTI-PAGE TIFs (a Declaration of Pooled
+    # Unit and its Exhibit A lease list, a recorded lease and its exhibits). PIL
+    # opens such a file positioned on frame 0, so OCR'ing the image as-is reads
+    # page 1 and silently discards the rest — the pages carrying the lease
+    # schedule. Every frame is OCR'd and page_count reflects the real total.
     try:
+        from PIL import ImageSequence
+
         img = PILImage.open(path)
-        ocr_text = pytesseract.image_to_string(img, lang="eng", config="--psm 6")
+        page_texts: list[str] = [
+            pytesseract.image_to_string(frame, lang="eng", config="--psm 6")
+            for frame in ImageSequence.Iterator(img)
+        ]
     except Exception as exc:
         logger.warning("Image OCR failed for %s: %s", path, exc)
         return _ocr_required_result(path, 1, f"Image OCR failed: {exc}")
+
+    page_count = len(page_texts) or 1
+    # Same page separator the PDF OCR path uses, so downstream text handling
+    # (page splitting, snippet offsets) behaves identically for both.
+    ocr_text = "\n\f\n".join(page_texts)
+    if page_count > 1:
+        logger.debug("OCR'd %s pages of multi-page image %s", page_count, path.name)
 
     if text_cache_dir:
         _save_ocr_cache(path, text_cache_dir, ocr_text)
@@ -501,7 +518,7 @@ def _extract_image_ocr(
     if not _has_useful_text(ocr_text):
         return PDFExtractionResult(
             file_path=str(path),
-            page_count=1,
+            page_count=page_count,
             extraction_status=LOW_CONFIDENCE_TEXT,
             extraction_confidence=0.0,
             extraction_engine="tesseract_ocr",
@@ -511,7 +528,7 @@ def _extract_image_ocr(
         )
 
     return _build_result_from_text(
-        path, 1, ocr_text, engine="tesseract_ocr", ocr_penalty=True
+        path, page_count, ocr_text, engine="tesseract_ocr", ocr_penalty=True
     )
 
 
