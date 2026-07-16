@@ -486,3 +486,154 @@ def test_console_summary_includes_the_truth_table():
     report.truth = _truth(mismatches=1)
     text = console_summary(report)
     assert "SOURCE TRUTH" in text and "MISMATCH" in text
+
+
+# --- PLM submission checklist: item 7 (date), 8 (disclaimer), 10 (headers) ---
+
+def _sheet_wb(cells: dict[str, dict[str, object]]):
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    for name, values in cells.items():
+        ws = wb.create_sheet(name)
+        for coord, value in values.items():
+            ws[coord] = value
+    return wb
+
+
+def test_hardcoded_past_submission_date_fails():
+    from datetime import date
+    from src.dd.ddr_validator import check_submission_date
+    wb = _sheet_wb({"PLM Title Review": {"A7": "Date:", "B7": "7/7/2026"}})
+    hits = check_submission_date(wb, today=date(2026, 7, 16))
+    assert hits and hits[0].severity == FAIL
+    assert "in the past" in hits[0].expected and hits[0].cell == "B7"
+
+
+def test_submission_date_token_is_pending_confirm_not_a_failure():
+    from datetime import date
+    from src.dd.ddr_validator import SUBMISSION_DATE_TOKEN, check_submission_date
+    wb = _sheet_wb({"PLM Title Review": {"A7": "Date:", "B7": SUBMISSION_DATE_TOKEN}})
+    hits = check_submission_date(wb, today=date(2026, 7, 16))
+    assert hits and hits[0].severity == PENDING
+    assert "confirm submission date" in hits[0].expected
+
+
+def test_todays_submission_date_passes():
+    from datetime import date
+    from src.dd.ddr_validator import check_submission_date
+    wb = _sheet_wb({"Summary": {"A9": "Date Submitted:", "B9": "7/16/2026"}})
+    assert check_submission_date(wb, today=date(2026, 7, 16)) == []
+
+
+def test_date_submitted_label_is_checked_too():
+    from datetime import date
+    from src.dd.ddr_validator import check_submission_date
+    wb = _sheet_wb({"Summary": {"A9": "Date Submitted:", "B9": "7/7/2026"}})
+    assert check_submission_date(wb, today=date(2026, 7, 16))[0].severity == FAIL
+
+
+def test_disclaimer_stand_in_company_fails():
+    from src.dd.ddr_validator import check_disclaimer_names_the_client
+    wb = _sheet_wb({"Disclaimer": {"B6": "shall become the property of ABC, LLC and its subsidiaries."}})
+    hits = check_disclaimer_names_the_client(wb, "BKV Corp.")
+    assert hits and hits[0].rule == "disclaimer_names_the_client"
+    assert "BKV Corp." in hits[0].expected
+
+
+def test_disclaimer_naming_the_client_passes():
+    from src.dd.ddr_validator import check_disclaimer_names_the_client
+    wb = _sheet_wb({"Disclaimer": {"B6": "shall become the property of BKV Corp. and its subsidiaries."}})
+    assert check_disclaimer_names_the_client(wb, "BKV Corp.") == []
+
+
+def test_disclaimer_that_names_nobody_fails():
+    from src.dd.ddr_validator import check_disclaimer_names_the_client
+    wb = _sheet_wb({"Disclaimer": {"B6": "shall become the property of the undersigned."}})
+    hits = check_disclaimer_names_the_client(wb, "BKV Corp.")
+    assert hits and "never names the client" in hits[0].expected
+
+
+def test_template_placeholder_in_a_header_fails():
+    from src.dd.ddr_validator import check_headers_have_no_placeholder
+    wb = _sheet_wb({"Ownership Report": {"A1": "636.13 acres in Reeves County"}})
+    hits = check_headers_have_no_placeholder(wb)
+    assert hits and hits[0].rule == "template_placeholder_in_header"
+
+
+def test_a_real_unit_header_passes():
+    from src.dd.ddr_validator import check_headers_have_no_placeholder
+    wb = _sheet_wb({"Ownership Report": {
+        "A1": "Verified Lease Ownership Interests\n\nMAXWELL A UNIT, MONTAGUE County, Texas"}})
+    assert check_headers_have_no_placeholder(wb) == []
+
+
+def test_placeholder_below_the_header_rows_is_not_this_rule():
+    from src.dd.ddr_validator import check_headers_have_no_placeholder
+    wb = _sheet_wb({"Ownership Report": {"A9": "Reeves"}})   # body, not header
+    assert check_headers_have_no_placeholder(wb) == []
+
+
+def test_header_identical_to_the_templates_legal_description_fails():
+    # The real miss: "Ownership - 1H" shipped with the template's 704.04-acre
+    # W.W. Boaton legal description verbatim. A token list never caught it.
+    from src.dd.ddr_validator import check_headers_have_no_placeholder
+    legal = ("Verified Lease Ownership Interests\n\nBeing 704.04 acres of land, more or "
+             "less, out of the W.W. Boaton Survey, A-113")
+    tpl = _sheet_wb({"Ownership - 1H (No FO Option)": {"A1": legal}})
+    ddr = _sheet_wb({"Ownership - 1H (No FO Option)": {"A1": legal}})
+    hits = check_headers_have_no_placeholder(ddr, tpl)
+    assert hits and "never filled in" in hits[0].expected
+
+
+def test_header_filled_with_this_units_legal_passes():
+    from src.dd.ddr_validator import check_headers_have_no_placeholder
+    tpl = _sheet_wb({"Ownership - 1H (No FO Option)": {
+        "A1": "Verified Lease Ownership Interests\n\nBeing 704.04 acres out of the W.W. Boaton Survey, A-113"}})
+    ddr = _sheet_wb({"Ownership - 1H (No FO Option)": {
+        "A1": "Verified Lease Ownership Interests\n\n160 acres, Calhoun County School Land Survey, League 12, A-122"}})
+    assert check_headers_have_no_placeholder(ddr, tpl) == []
+
+
+def test_a_shared_non_legal_header_is_not_a_placeholder():
+    # "Verified Lease Ownership Interests" matches the template by design.
+    from src.dd.ddr_validator import check_headers_have_no_placeholder
+    tpl = _sheet_wb({"Ownership Report": {"A1": "Verified Lease Ownership Interests"}})
+    ddr = _sheet_wb({"Ownership Report": {"A1": "Verified Lease Ownership Interests"}})
+    assert check_headers_have_no_placeholder(ddr, tpl) == []
+
+
+def test_template_example_left_on_a_filled_row_fails():
+    # The real defect: every Lease Review row got its real lease number, but the
+    # pooling-clause column kept the template's example clause verbatim — all 30.
+    from src.dd.ddr_validator import check_template_value_not_replaced
+    clause = "Yes (Pooling units for oil up to 40 acres with 10% tolerance)"
+    tpl = _sheet_wb({"Lease Review": {"A2": "L1", "O2": clause}})
+    ddr = _sheet_wb({"Lease Review": {"A2": "0190122-001", "O2": clause}})
+    hits = check_template_value_not_replaced(ddr, tpl)
+    assert hits and hits[0].cell == "O2"
+    assert "never filled" in hits[0].expected
+
+
+def test_a_row_the_writer_never_touched_is_not_flagged():
+    # Untouched template rows are the template's business, not a filled-row defect.
+    from src.dd.ddr_validator import check_template_value_not_replaced
+    clause = "Yes (Pooling units for oil up to 40 acres with 10% tolerance)"
+    tpl = _sheet_wb({"Lease Review": {"A2": "L1", "O2": clause}})
+    ddr = _sheet_wb({"Lease Review": {"A2": "L1", "O2": clause}})
+    assert check_template_value_not_replaced(ddr, tpl) == []
+
+
+def test_a_genuinely_filled_cell_passes():
+    from src.dd.ddr_validator import check_template_value_not_replaced
+    tpl = _sheet_wb({"Lease Review": {"A2": "L1", "O2": "Yes (Pooling units up to 40 acres)"}})
+    ddr = _sheet_wb({"Lease Review": {"A2": "0190122-001",
+                                       "O2": "Lessee may pool without Lessor consent, 640-acre gas units"}})
+    assert check_template_value_not_replaced(ddr, tpl) == []
+
+
+def test_short_shared_labels_are_not_flagged():
+    # "Fee", "Yes", "N/A" legitimately coincide with the template.
+    from src.dd.ddr_validator import check_template_value_not_replaced
+    tpl = _sheet_wb({"Lease Review": {"A2": "L1", "D2": "Fee"}})
+    ddr = _sheet_wb({"Lease Review": {"A2": "0190122-001", "D2": "Fee"}})
+    assert check_template_value_not_replaced(ddr, tpl) == []

@@ -437,6 +437,199 @@ def check_sheet_set(workbook, expected: set[str] | None) -> list[Finding]:
     return findings
 
 
+# ---------------------------------------------------------------------------
+# PLM submission-checklist rules
+# ---------------------------------------------------------------------------
+
+# The token a reviewer fills at send time. Unmistakable on sight — a stale date
+# looks valid and ships silently; this cannot be mistaken for a real date.
+SUBMISSION_DATE_TOKEN = "{SUBMISSION_DATE}"
+
+_DATE_LABEL_RE = re.compile(r"^\s*date(\s*submitted)?\s*:?\s*$", re.IGNORECASE)
+_DATE_VALUE_RE = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")
+
+# Placeholders the client's blank template ships with, checked in header rows.
+_HEADER_PLACEHOLDER_TOKENS = ("REEVES", "636.13", "A.E. CARROLL", "FOREST OIL",
+                              "ARAPAHOE", "TEXACO", "***", "3-11")
+
+
+def check_submission_date(workbook, today=None) -> list[Finding]:
+    """A "Date:"/"Date Submitted:" cell must not carry a hard-coded past date.
+
+    The DDR is dated when it is SENT. A date baked in on the day the pipeline
+    happened to run ships as a lie about when the work was certified, and it
+    looks perfectly valid — nobody catches it by reading. Either the reviewer
+    fills SUBMISSION_DATE_TOKEN at send, or the date is today; a past date FAILS.
+    """
+    from datetime import date as _date, datetime as _datetime
+
+    today = today or _date.today()
+    findings: list[Finding] = []
+    for sheet_name in workbook.sheetnames:
+        if sheet_name == _AUDIT_SHEET:
+            continue
+        ws = workbook[sheet_name]
+        for row in ws.iter_rows():
+            for cell in row:
+                if not isinstance(cell.value, str) or not _DATE_LABEL_RE.match(cell.value):
+                    continue
+                value_cell = ws.cell(cell.row, cell.column + 1)
+                value = value_cell.value
+                if value is None or str(value).strip() == "":
+                    continue
+                if SUBMISSION_DATE_TOKEN in str(value):
+                    findings.append(Finding(
+                        sheet_name, value_cell.coordinate, value, "submission_date",
+                        "confirm submission date — fill the token at send time",
+                        severity=PENDING))
+                    continue
+                stamped = None
+                if isinstance(value, (_datetime, _date)):
+                    stamped = value.date() if isinstance(value, _datetime) else value
+                else:
+                    m = _DATE_VALUE_RE.search(str(value))
+                    if m:
+                        try:
+                            stamped = _date(int(m.group(3)), int(m.group(1)), int(m.group(2)))
+                        except ValueError:
+                            stamped = None
+                if stamped is None:
+                    continue
+                if stamped < today:
+                    findings.append(Finding(
+                        sheet_name, value_cell.coordinate, value, "submission_date",
+                        f"the submission date is hard-coded to {stamped.isoformat()}, in the past — "
+                        f"use {SUBMISSION_DATE_TOKEN} or today's date"))
+    return findings
+
+
+def check_disclaimer_names_the_client(workbook, client_name: str | None) -> list[Finding]:
+    """The Disclaimer assigns ownership of the work product — to the CLIENT, by
+    name. The template ships with a stand-in ("ABC, LLC"); shipping that assigns
+    the report to a company that does not exist."""
+    if "Disclaimer" not in workbook.sheetnames or not client_name:
+        return []
+    ws = workbook["Disclaimer"]
+    findings: list[Finding] = []
+    named = False
+    for row in ws.iter_rows():
+        for cell in row:
+            if not isinstance(cell.value, str):
+                continue
+            text = cell.value
+            if normalize_client(client_name) in normalize_client(text):
+                named = True
+            for stand_in in ("ABC, LLC", "ABC LLC", "XYZ, LLC"):
+                if stand_in.upper() in text.upper():
+                    findings.append(Finding(
+                        "Disclaimer", cell.coordinate, stand_in, "disclaimer_names_the_client",
+                        f"the template's stand-in {stand_in!r} must be the client "
+                        f"({client_name}) — this clause assigns ownership of the report"))
+    if not named and not findings:
+        findings.append(Finding(
+            "Disclaimer", "(sheet)", None, "disclaimer_names_the_client",
+            f"the Disclaimer never names the client ({client_name})"))
+    return findings
+
+
+def normalize_client(text: str) -> str:
+    return re.sub(r"[^A-Z0-9]+", "", str(text).upper())
+
+
+# A header that still describes land — acreage, a survey, an abstract — is a
+# legal description, and a legal description is unit-specific by definition.
+_LEGAL_DESCRIPTION_RE = re.compile(
+    r"\b\d[\d,.]*\s*acres?\b|\bsurvey\b|\bA-\d+\b|\bblock\b|\bsection\b", re.IGNORECASE)
+
+
+def check_headers_have_no_placeholder(workbook, template_workbook=None,
+                                      header_rows: int = 3) -> list[Finding]:
+    """A header naming another deal's property is the loudest possible defect —
+    it is the first thing the reader sees.
+
+    The authority is the TEMPLATE, not a token list. A hardcoded list of the
+    template's example words ("Reeves", "636.13") only catches the examples
+    someone thought to write down: it missed this template's OTHER example, the
+    704.04-acre W.W. Boaton tract on the "Ownership - 1H" tab, which shipped
+    unfilled. So the rule is structural instead: if a header cell still holds a
+    LEGAL DESCRIPTION byte-identical to the template's, nobody filled it in.
+    """
+    findings: list[Finding] = []
+    for sheet_name in workbook.sheetnames:
+        if sheet_name == _AUDIT_SHEET:
+            continue
+        ws = workbook[sheet_name]
+        template_ws = (template_workbook[sheet_name]
+                       if template_workbook and sheet_name in template_workbook.sheetnames
+                       else None)
+        for row in ws.iter_rows(min_row=1, max_row=header_rows):
+            for cell in row:
+                if not isinstance(cell.value, str):
+                    continue
+                upper = cell.value.upper()
+                hit = next((t for t in _HEADER_PLACEHOLDER_TOKENS if t in upper), None)
+                if hit:
+                    findings.append(Finding(
+                        sheet_name, cell.coordinate, cell.value[:60],
+                        "template_placeholder_in_header",
+                        f"a header must name THIS unit, not the template's example ({hit!r})"))
+                    continue
+                if template_ws is None:
+                    continue
+                template_value = template_ws[cell.coordinate].value
+                if (isinstance(template_value, str)
+                        and cell.value.strip() == template_value.strip()
+                        and _LEGAL_DESCRIPTION_RE.search(cell.value)):
+                    findings.append(Finding(
+                        sheet_name, cell.coordinate, cell.value[:60],
+                        "template_placeholder_in_header",
+                        "this header still holds the TEMPLATE's legal description verbatim — "
+                        "it was never filled in for this unit"))
+    return findings
+
+
+def check_template_value_not_replaced(workbook, template_workbook,
+                                      key_col: int = 1) -> list[Finding]:
+    """A cell the writer left holding the TEMPLATE's example value, on a row it
+    otherwise filled with real data.
+
+    This is the generalisation of the header rule, and it exists because that
+    rule was too narrow: scanning only rows 1-3, it reported 2 stale cells on
+    Lease Review when in truth all 30 rows of the pooling-clause column still
+    held the template's example verbatim. The template's own text is the
+    authority — no token list required, and no example can hide from it.
+
+    The discriminator is the ROW: if the row's key cell differs from the
+    template (a real lease number where the template says "L1"), the writer
+    touched this row. Any cell on it still identical to the template was simply
+    never filled, and it is now asserting another deal's terms about this lease.
+    """
+    findings: list[Finding] = []
+    for sheet_name in workbook.sheetnames:
+        if sheet_name == _AUDIT_SHEET or sheet_name not in template_workbook.sheetnames:
+            continue
+        ws, tws = workbook[sheet_name], template_workbook[sheet_name]
+        for row in ws.iter_rows():
+            key, template_key = ws.cell(row[0].row, key_col).value, tws.cell(row[0].row, key_col).value
+            # Only rows the writer actually filled: key present and changed.
+            if not is_populated(key) or key == template_key:
+                continue
+            for cell in row:
+                if not is_populated(cell.value) or not isinstance(cell.value, str):
+                    continue
+                template_value = tws[cell.coordinate].value
+                if not isinstance(template_value, str):
+                    continue
+                if cell.value.strip() == template_value.strip() and len(cell.value.strip()) > 12:
+                    findings.append(Finding(
+                        sheet_name, cell.coordinate, cell.value[:56],
+                        "template_value_not_replaced",
+                        f"row {row[0].row} holds real data ({str(key)[:14]!r}) but this cell is "
+                        "still the template's example verbatim — it was never filled, and now "
+                        "states another deal's terms about this lease"))
+    return findings
+
+
 def check_orphan_cells(sheet_name: str, cells, spec: SheetSpec) -> list[Finding]:
     """Populated cells outside the sheet's declared block."""
     end = declared_block_end(cells, spec)
@@ -636,7 +829,10 @@ def _audit_index(workbook) -> tuple[set[str], dict[str, str]]:
 
 def validate_ddr(workbook, allowlist: UnitAllowlist | None = None,
                  expected_sheets: set[str] | None = None,
-                 documents_available: set[str] | None = None) -> ValidationReport:
+                 documents_available: set[str] | None = None,
+                 client_name: str | None = None,
+                 template_workbook=None,
+                 today=None) -> ValidationReport:
     """Run every rule over every populated cell. Nothing is sampled.
 
     expected_sheets: the tab set the deliverable must have (see
@@ -649,6 +845,12 @@ def validate_ddr(workbook, allowlist: UnitAllowlist | None = None,
     report = ValidationReport()
     audited, pending_reasons = _audit_index(workbook)
     report.findings.extend(check_sheet_set(workbook, expected_sheets))
+    # PLM submission checklist — workbook-wide, so they run once, not per sheet.
+    report.findings.extend(check_submission_date(workbook, today=today))
+    report.findings.extend(check_disclaimer_names_the_client(workbook, client_name))
+    report.findings.extend(check_headers_have_no_placeholder(workbook, template_workbook))
+    if template_workbook is not None:
+        report.findings.extend(check_template_value_not_replaced(workbook, template_workbook))
 
     for sheet_name in workbook.sheetnames:
         worksheet = workbook[sheet_name]
