@@ -167,8 +167,11 @@ def fill_ddr_template(
     _fill_unit_and_pooling_agreements(wb, manifest, ctx)
     _apply_title_case(wb, ctx)
     _scrub_placeholders(wb, ctx)
+    # Pending reasons go into DD_Audit_Trail, not a tab of their own: the
+    # deliverable's tab set must equal the template's plus DD_Audit_Trail.
+    # Recorded BEFORE the sheet is written, or they never reach it.
+    _record_pending_reasons(ctx, pending_registry)
     _write_audit_trail_sheet(wb, ctx)
-    _write_pending_items_sheet(wb, pending_registry)
 
     wb.save(output_path)
 
@@ -177,9 +180,8 @@ def fill_ddr_template(
     # are added BY DESIGN — drop them from the comparison copy so
     # sheet_names_preserved checks the template's own tabs only. The saved file
     # on disk keeps both.
-    for added_sheet in ("DD_Audit_Trail", "Pending Items"):
-        if added_sheet in saved_workbook.sheetnames:
-            del saved_workbook[added_sheet]
+    if "DD_Audit_Trail" in saved_workbook.sheetnames:
+        del saved_workbook["DD_Audit_Trail"]
     integrity_report = _build_template_integrity_report(
         template_path=template_path,
         output_path=output_path,
@@ -1057,6 +1059,15 @@ def _fill_unit_and_pooling_agreements(wb, manifest: UnitManifest, ctx: DDRWriteC
 # explicit clean-export step)
 # ---------------------------------------------------------------------------
 
+def _record_pending_reasons(ctx: DDRWriteContext, registry) -> None:
+    """Fold every pending reason into the audit trail — the provenance layer is
+    where a blank's reason belongs, not a tab of its own."""
+    if registry is None:
+        return
+    for row in registry.audit_rows():
+        ctx.record(*row)
+
+
 def _write_audit_trail_sheet(wb, ctx: DDRWriteContext) -> None:
     ws = wb.create_sheet("DD_Audit_Trail")
     ws.append(["Sheet", "Location", "Source Type", "Source Reference", "Confidence", "Extracted Text"])
@@ -1064,32 +1075,3 @@ def _write_audit_trail_sheet(wb, ctx: DDRWriteContext) -> None:
         ws.append([row.sheet, row.location, row.source_type, row.source_reference, row.confidence, row.extracted_text])
     ws.sheet_state = "hidden"
 
-
-def _write_pending_items_sheet(wb, registry) -> None:
-    """The "Pending Items" report: every blank the pipeline left, with the reason
-    it is blank and where to look to resolve it.
-
-    A blank cell cannot say why it is blank, and the reason must never be written
-    into a client cell. This sheet is where the reader finds out — visible (not
-    hidden like the audit trail), because it IS the work list.
-    """
-    if registry is None:
-        return
-    if "Pending Items" in wb.sheetnames:
-        del wb["Pending Items"]
-    ws = wb.create_sheet("Pending Items")
-    rows = registry.report_rows()
-    for row in rows:
-        ws.append(row)
-    header = ws[1]
-    for cell in header:
-        cell.font = Font(bold=True)
-    for column, width in zip("ABCDEF", (22, 26, 22, 26, 18, 78)):
-        ws.column_dimensions[column].width = width
-    ws.freeze_panes = "A2"
-    for row in ws.iter_rows(min_row=2):
-        row[-1].alignment = Alignment(wrap_text=True, vertical="top")
-    if len(rows) == 1:  # header only
-        ws.append(["", "", "", "None", "",
-                   "No pipeline-owned blanks — every client-facing cell is either "
-                   "populated or explained."])

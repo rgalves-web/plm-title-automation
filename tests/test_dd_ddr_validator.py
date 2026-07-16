@@ -23,8 +23,9 @@ from src.dd.ddr_validator import (
     UnitAllowlist,
     build_allowlist,
     console_summary,
+    expected_sheet_set,
     validate_ddr,
-    write_validation_sheet,
+    write_validation_sidecar,
 )
 
 _MAXWELL_LEASES = {"0190122-001", "0220344-013", "0220344-027", "0222854-000"}
@@ -217,24 +218,24 @@ def test_findings_carry_sheet_cell_value_rule_and_expected():
     assert "C815" in finding.describe()
 
 
-def test_validation_sheet_is_written_into_the_workbook():
+def test_report_goes_to_a_sidecar_and_never_into_the_deliverable(tmp_path):
     wb = _ddr([_own_row()], _audited())
     wb["Ownership Report"]["C815"] = "A"
     report = validate_ddr(wb, _allow())
-    write_validation_sheet(wb, report)
-    ws = wb["DD_Validation"]
-    assert ws["A1"].value == "DDR Validation"
-    body = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
+    ddr = tmp_path / "MAXWELL_A_UNIT_DDR_20260716.xlsx"
+    wb.save(ddr)
+    before = set(openpyxl.load_workbook(ddr).sheetnames)
+
+    sidecar = write_validation_sidecar(report, ddr)
+
+    assert sidecar.name == "MAXWELL_A_UNIT_DDR_20260716_validation.txt"
+    assert sidecar.parent == ddr.parent               # next to the DDR
+    body = sidecar.read_text(encoding="utf-8")
     assert "C815" in body and "orphan_cell" in body
+    # The deliverable is untouched: no tab added, nothing rewritten.
+    assert set(openpyxl.load_workbook(ddr).sheetnames) == before
+    assert "DD_Validation" not in before
 
-
-def test_validation_sheet_is_not_itself_validated():
-    wb = _ddr([_own_row()], _audited())
-    report = validate_ddr(wb, _allow())
-    write_validation_sheet(wb, report)
-    again = validate_ddr(wb, _allow())
-    assert "DD_Validation" not in {c.sheet for c in again.coverage}
-    assert again.ready
 
 
 def test_console_summary_itemizes_every_failure():
@@ -311,3 +312,68 @@ def test_another_units_name_phrase_is_still_caught():
     report = validate_ddr(wb, _allow())
     assert any(f.rule == "foreign_unit_leakage" and "WIESE" in f.expected.upper()
                for f in report.failures)
+
+
+# --- the deliverable's tab set must equal the template's ---
+
+def _template(tabs=("Summary", "Ownership Report", "Ownership - Wells", "Lease Review",
+                    "Agreements", "Unit and Pooling Agreements", "Runsheet",
+                    "PLM Title Review", "Disclaimer", "Ownership - 1H (No FO Option)",
+                    "delete - A.E. Carroll 4H")):
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    for t in tabs:
+        wb.create_sheet(t)
+    return wb
+
+
+def test_expected_set_drops_the_templates_scratch_tab_and_adds_the_audit_trail():
+    expected = expected_sheet_set(_template())
+    assert "delete - A.E. Carroll 4H" not in expected   # must never ship
+    assert "DD_Audit_Trail" in expected                 # invariant 5: traceability
+    assert "Ownership Report" in expected
+
+
+def test_an_extra_tab_fails():
+    wb = _ddr([_own_row()], _audited(), extra={"Scratch copy": {"A1": "x"}})
+    expected = {"Ownership Report", "DD_Audit_Trail"}
+    report = validate_ddr(wb, _allow(), expected_sheets=expected)
+    assert any(f.rule == "sheet_set" and f.cell == "Scratch copy" for f in report.failures)
+    assert not report.ready
+
+
+def test_the_validators_own_tab_would_fail(tmp_path):
+    # The reason the report is a sidecar: emitting DD_Validation into the
+    # deliverable would make the workbook fail its own tab-set rule.
+    wb = _ddr([_own_row()], _audited())
+    wb.create_sheet("DD_Validation")
+    report = validate_ddr(wb, _allow(), expected_sheets={"Ownership Report", "DD_Audit_Trail"})
+    assert any(f.rule == "sheet_set" and f.cell == "DD_Validation" for f in report.failures)
+
+
+def test_a_missing_template_tab_fails():
+    wb = _ddr([_own_row()], _audited())
+    expected = {"Ownership Report", "DD_Audit_Trail", "Disclaimer"}
+    report = validate_ddr(wb, _allow(), expected_sheets=expected)
+    assert any(f.rule == "sheet_set" and f.cell == "Disclaimer" and f.value is None
+               for f in report.failures)
+
+
+def test_the_scratch_tab_shipping_fails():
+    wb = _ddr([_own_row()], _audited(), extra={"delete - A.E. Carroll 4H": {"A1": "sample"}})
+    report = validate_ddr(wb, _allow(), expected_sheets={"Ownership Report", "DD_Audit_Trail"})
+    scratch = [f for f in report.failures if f.rule == "sheet_set"]
+    assert any("never ship" in f.expected for f in scratch)
+
+
+def test_the_exact_expected_tab_set_passes():
+    wb = _ddr([_own_row()], _audited())
+    report = validate_ddr(wb, _allow(), expected_sheets={"Ownership Report", "DD_Audit_Trail"})
+    assert not [f for f in report.failures if f.rule == "sheet_set"]
+    assert report.ready
+
+
+def test_tab_set_rule_is_skipped_when_no_template_is_supplied():
+    wb = _ddr([_own_row()], _audited(), extra={"Whatever": {"A1": "x"}})
+    report = validate_ddr(wb, _allow())          # expected_sheets=None
+    assert not [f for f in report.failures if f.rule == "sheet_set"]

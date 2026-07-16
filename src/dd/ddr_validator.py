@@ -35,8 +35,16 @@ PENDING = "PENDING"
 
 # Provenance layer: not client-facing, but still counted and orphan-checked.
 _AUDIT_SHEET = "DD_Audit_Trail"
-_REPORT_SHEET = "DD_Validation"
-_PENDING_SHEET = "Pending Items"
+
+# The ONLY tab the pipeline may add to the template's own. It carries the source
+# of every value (invariant 5) and is present in the approved deliverable.
+# The validator itself adds nothing: its report is a sidecar file, never a tab —
+# a quality gate that edits the artefact it is judging is not a gate.
+SANCTIONED_EXTRA_SHEETS = frozenset({_AUDIT_SHEET})
+
+# Template tabs that are scratch and must NEVER ship. The PLM template carries a
+# worked example ("delete - A.E. Carroll 4H") whose name says so.
+_TEMPLATE_SCRATCH_RE = re.compile(r"^\s*delete\s*-", re.IGNORECASE)
 
 _EMPTY = {"", "-", "--", "—", "N/A"}
 
@@ -154,8 +162,6 @@ _SHEET_SPECS: dict[str, SheetSpec] = {
     "Disclaimer": SheetSpec(max_col=11),
     "Ownership - 1H (No FO Option)": SheetSpec(max_col=26),
     _AUDIT_SHEET: SheetSpec(max_col=6),
-    _PENDING_SHEET: SheetSpec(max_col=6),
-    _REPORT_SHEET: SheetSpec(max_col=6),
 }
 _DEFAULT_SPEC = SheetSpec(max_col=30)
 
@@ -338,6 +344,40 @@ def _as_fraction(value: Any) -> Fraction | None:
         return None
 
 
+def expected_sheet_set(template_workbook,
+                       sanctioned: Iterable[str] = SANCTIONED_EXTRA_SHEETS) -> set[str]:
+    """The tabs a finished DDR must have: the template's, minus its scratch tab,
+    plus the sanctioned provenance tab.
+
+    Not literally "the template's tabs": the template ships a worked example
+    ("delete - A.E. Carroll 4H") that must never reach a client, and the
+    deliverable carries DD_Audit_Trail, which the template has no reason to hold.
+    Everything else is a defect — a tab nobody meant to ship (a stray copy, a
+    scratch sheet, a tool writing its own output into the deliverable).
+    """
+    template_tabs = {s for s in template_workbook.sheetnames
+                     if not _TEMPLATE_SCRATCH_RE.match(s)}
+    return template_tabs | set(sanctioned)
+
+
+def check_sheet_set(workbook, expected: set[str] | None) -> list[Finding]:
+    """The workbook's tab set must equal the expected set exactly."""
+    if not expected:
+        return []
+    actual = set(workbook.sheetnames)
+    findings = []
+    for extra in sorted(actual - expected):
+        reason = ("this tab is the template's scratch example and must never ship"
+                  if _TEMPLATE_SCRATCH_RE.match(extra)
+                  else "no tab may be added to the deliverable beyond the template's "
+                       f"plus {sorted(SANCTIONED_EXTRA_SHEETS)}")
+        findings.append(Finding("(workbook)", extra, extra, "sheet_set", reason))
+    for missing in sorted(expected - actual):
+        findings.append(Finding("(workbook)", missing, None, "sheet_set",
+                                "the template defines this tab; the deliverable is missing it"))
+    return findings
+
+
 def check_orphan_cells(sheet_name: str, cells, spec: SheetSpec) -> list[Finding]:
     """Populated cells outside the sheet's declared block."""
     end = declared_block_end(cells, spec)
@@ -356,7 +396,7 @@ def check_orphan_cells(sheet_name: str, cells, spec: SheetSpec) -> list[Finding]
 
 def check_client_facing(sheet_name: str, cells) -> list[Finding]:
     """A client cell holds a value, a citation, or nothing — never commentary."""
-    if sheet_name in (_AUDIT_SHEET, _PENDING_SHEET, _REPORT_SHEET):
+    if sheet_name == _AUDIT_SHEET:
         return []
     findings = []
     for coord, _row, _col, value in cells:
@@ -379,7 +419,7 @@ def check_client_facing(sheet_name: str, cells) -> list[Finding]:
 
 def check_template_sample(sheet_name: str, cells) -> list[Finding]:
     """The PLM template ships populated with another deal's data."""
-    if sheet_name in (_AUDIT_SHEET, _PENDING_SHEET, _REPORT_SHEET):
+    if sheet_name == _AUDIT_SHEET:
         return []
     findings = []
     for coord, _row, _col, value in cells:
@@ -396,7 +436,7 @@ def check_template_sample(sheet_name: str, cells) -> list[Finding]:
 
 def check_foreign_unit(sheet_name: str, cells, allow: UnitAllowlist) -> list[Finding]:
     """Identifiers and unit names that do not belong to THIS unit."""
-    if sheet_name in (_AUDIT_SHEET, _PENDING_SHEET, _REPORT_SHEET) or allow is None:
+    if sheet_name == _AUDIT_SHEET or allow is None:
         return []
     findings = []
     for coord, _row, _col, value in cells:
@@ -529,23 +569,25 @@ def _audit_index(workbook) -> tuple[set[str], dict[str, str]]:
                 located.add(str(location).strip())
                 if "pending" in source_type.lower() or "flagged" in source_type.lower():
                     reasons[str(location).strip()] = source_type
-    if _PENDING_SHEET in workbook.sheetnames:
-        ws = workbook[_PENDING_SHEET]
-        for row in range(2, ws.max_row + 1):
-            location = ws.cell(row, 2).value
-            if location:
-                reasons[str(location).strip()] = str(ws.cell(row, 4).value or "pending")
+    # Pending reasons live in the audit trail (source_type "pending:*" /
+    # "flagged_pending"), read above — there is no separate Pending Items tab:
+    # the deliverable carries the template's tabs plus DD_Audit_Trail, nothing else.
     return located, reasons
 
 
-def validate_ddr(workbook, allowlist: UnitAllowlist | None = None) -> ValidationReport:
-    """Run every rule over every populated cell. Nothing is sampled."""
+def validate_ddr(workbook, allowlist: UnitAllowlist | None = None,
+                 expected_sheets: set[str] | None = None) -> ValidationReport:
+    """Run every rule over every populated cell. Nothing is sampled.
+
+    expected_sheets: the tab set the deliverable must have (see
+    expected_sheet_set). When None the tab-set rule is skipped — pass it from the
+    template for a real run.
+    """
     report = ValidationReport()
     audited, pending_reasons = _audit_index(workbook)
+    report.findings.extend(check_sheet_set(workbook, expected_sheets))
 
     for sheet_name in workbook.sheetnames:
-        if sheet_name == _REPORT_SHEET:
-            continue
         worksheet = workbook[sheet_name]
         spec = _spec(sheet_name)
         cells = populated_cells(worksheet)
@@ -572,27 +614,20 @@ def validate_ddr(workbook, allowlist: UnitAllowlist | None = None) -> Validation
     return report
 
 
-def write_validation_sheet(workbook, report: ValidationReport) -> None:
-    """Render the report into the workbook itself."""
-    from openpyxl.styles import Font
+def write_validation_sidecar(report: ValidationReport, ddr_path) -> "Path":
+    """Write the report NEXT TO the DDR as <name>_validation.txt.
 
-    if _REPORT_SHEET in workbook.sheetnames:
-        del workbook[_REPORT_SHEET]
-    ws = workbook.create_sheet(_REPORT_SHEET)
-    ws.append(["DDR Validation", report.summary()])
-    ws.append([])
-    ws.append(["Sheet", "Populated", "Checked", "Reconciled"])
-    for c in report.coverage:
-        ws.append([c.sheet, c.populated, c.visited, "yes" if c.reconciled else "NO"])
-    ws.append([])
-    ws.append(["Severity", "Sheet", "Cell", "Rule", "Value", "Expected"])
-    for finding in sorted(report.findings, key=lambda f: (f.severity != FAIL, f.sheet, f.cell)):
-        ws.append([finding.severity, finding.sheet, finding.cell, finding.rule,
-                   str(finding.value)[:60], finding.expected])
-    for cell in (ws[1][0], ws[3][0], ws[3][1], ws[3][2], ws[3][3]):
-        cell.font = Font(bold=True)
-    for column, width in zip("ABCDEF", (12, 26, 14, 26, 40, 76)):
-        ws.column_dimensions[column].width = width
+    The validator never writes into the deliverable. A gate that edits the
+    artefact it is judging is not a gate — and the deliverable's tab set is part
+    of what it checks, so emitting its own tab would have made the workbook fail
+    its own rule. The report is a sidecar; the DDR is untouched.
+    """
+    from pathlib import Path
+
+    ddr_path = Path(ddr_path)
+    sidecar = ddr_path.with_name(f"{ddr_path.stem}_validation.txt")
+    sidecar.write_text(console_summary(report), encoding="utf-8")
+    return sidecar
 
 
 def console_summary(report: ValidationReport) -> str:
