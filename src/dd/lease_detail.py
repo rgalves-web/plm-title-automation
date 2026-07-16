@@ -15,10 +15,12 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import Any
 
-from rapidfuzz import fuzz
-
-from src.dd.unit_aggregation import parse_fraction_text
-from src.ownership import canonical_party_key
+from src.dd.name_match import match_person
+from src.dd.unit_aggregation import (
+    parse_fraction_text,
+    reconcile_mineral_fraction,
+    royalty_from_leasehold_formula,
+)
 
 _LEADING_FRACTION_RE = re.compile(r"(\d+\s*/\s*\d+|\d+(?:\.\d+)?\s*%|\d*\.\d+)")
 
@@ -50,7 +52,12 @@ class LeaseDetail:
     # wins); "lease_block" = fallback to the lease-analysis interest_covered when
     # no owner match existed (fill-only, never overwrites an owner-matched value).
     mi_source: str | None = None
+    # Why MI is empty, when it is (pending-reasons layer, Maxwell lessons item 1):
+    # one of the reason slugs in dd_pending.PendingReason. Recorded in the audit
+    # layer — never written into a client-facing cell.
+    mi_reason: str | None = None
     royalty: str | None = None
+    royalty_source: str | None = None   # e.g. "leasehold_royalty_formula"
     tract_gross_acres: Fraction | None = None
     legal_description: str | None = None
     tract_key: str | None = None       # stable per-tract id for the ≤1/1 MI-sum gate
@@ -107,26 +114,32 @@ def build_lease_details(
             detail.royalty = royalty_by_lease[lease_no]
 
         # Match lessor -> mineral owner for MI + the owning tract's acreage/legal.
+        # Structural name matching (surname + a given name), never a fuzzy score:
+        # an ambiguous match yields NO value and is itemized for review.
         best = None
-        best_score = 0.0
-        if lessor:
-            lessor_key = canonical_party_key(lessor)
-            for file_number, ti, tract, owner in owners:
-                owner_key = canonical_party_key(str(owner.party))
-                if not owner_key:
-                    continue
-                score = fuzz.token_sort_ratio(lessor_key, owner_key)
-                if score > best_score and score >= _MATCH_THRESHOLD:
-                    best_score, best = score, (file_number, tract, owner)
+        owner_match = match_person(lessor, [str(o.party) for (_fn, _ti, _t, o) in owners])
+        if owner_match.matched:
+            file_number, _ti, tract, owner = owners[owner_match.index]
+            best = (file_number, tract, owner)
+        elif owner_match.ambiguous:
+            detail.mi_reason = "unresolved_identity"
+            detail.notes.append(f"unresolved_identity — {owner_match.reason}")
 
         if best is not None:
             file_number, tract, owner = best
-            mi = parse_fraction_text(owner.fraction_text)
+            # Resolve MI, cross-validating a formula-vs-decimal conflict against
+            # this owner's leasehold-royalty formula (a probable source typo is
+            # reported, never silently corrected).
+            mi, typo_note = reconcile_mineral_fraction(
+                owner.fraction_text, _owner_royalty_formula(tract, owner))
             if mi is not None:
                 detail.mi_value = mi
                 detail.wi_value = _DEFAULT_LEASE_WI
                 detail.mi_source = "mineral_owner"  # authoritative per-owner MI
+                if typo_note:
+                    detail.notes.append(typo_note)
             else:
+                detail.mi_reason = "unresolved_fraction"
                 detail.notes.append(
                     f"mineral fraction {owner.fraction_text!r} did not parse — MI left empty")
             detail.tract_gross_acres = _tract_gross(tract, tract_gross_fn)
@@ -134,7 +147,14 @@ def build_lease_details(
             detail.legal_description = getattr(legal, "value", None) if legal else None
             detail.tract_key = _tract_key(file_number, tract)
             detail.source = f"{file_number} · MINERALS section (owner: {owner.party})"
-            # Royalty fallback: the matched tract's royalty_owners / tract royalty.
+            # Royalty: when the lease analysis carries no explicit royalty, this
+            # owner's leasehold-royalty formula ends in the lease royalty
+            # (… x 1/5 -> 1/5), which is an exact statement of it.
+            if detail.royalty is None:
+                own_royalty = royalty_from_leasehold_formula(_owner_royalty_formula(tract, owner))
+                if own_royalty is not None:
+                    detail.royalty = str(own_royalty)
+                    detail.royalty_source = "leasehold_royalty_formula"
             if detail.royalty is None:
                 detail.royalty = _tract_royalty_text(tract)
             # Lease-vs-unit definition for legal/acreage is an open item (Trevor).
@@ -163,10 +183,15 @@ def build_lease_details(
                     detail.royalty = getattr(block.royalty, "value", None)
                 detail.source = f"{file_number} · lease-analysis (lessor: {lessor})"
                 if detail.mi_value is None:
+                    detail.mi_reason = detail.mi_reason or "unresolved_fraction"
                     detail.notes.append(
                         f"matched lease block for {lessor!r} but its covered mineral interest "
                         "did not parse — MI left empty; read the lease-analysis entry.")
             else:
+                # The lessor holds no attributed mineral interest in the
+                # controlling opinions — a scope question for the reviewer, not a
+                # value to guess (Maxwell lessons item 8).
+                detail.mi_reason = detail.mi_reason or "awaiting_reviewer_decision"
                 detail.notes.append(
                     f"lessor {lessor!r} not matched to a mineral owner or lease-analysis "
                     "entry in the controlling opinions — MI/WI left empty; consult the "
@@ -183,19 +208,27 @@ def _iter_lease_blocks(controlling: dict[str, Any]):
 
 
 def _match_lease_block(lessor: str | None, lease_blocks: list):
+    """The lease-analysis block whose lessor is the same party, by the same
+    structural rule as the MINERALS match (ambiguity -> no match)."""
     if not lessor:
         return None
-    key = canonical_party_key(lessor)
-    best = None
-    best_score = 0.0
-    for file_number, tract, block in lease_blocks:
-        block_lessor = getattr(block.lessor, "value", None)
-        if not block_lessor:
-            continue
-        score = fuzz.token_sort_ratio(key, canonical_party_key(str(block_lessor)))
-        if score > best_score and score >= _MATCH_THRESHOLD:
-            best_score, best = score, (file_number, tract, block)
-    return best
+    candidates = [str(getattr(block.lessor, "value", "") or "")
+                  for _fn, _tract, block in lease_blocks]
+    result = match_person(lessor, candidates)
+    return lease_blocks[result.index] if result.matched else None
+
+
+def _owner_royalty_formula(tract: Any, owner: Any) -> str | None:
+    """This owner's LEASEHOLD ROYALTY formula, used to cross-validate a MINERALS
+    formula that contradicts its own printed decimal. Matched by party name so we
+    compare the same person's two statements of the same interest."""
+    royalty_owners = list(getattr(tract, "royalty_owners", []) or [])
+    if not royalty_owners:
+        return None
+    result = match_person(str(owner.party), [str(o.party) for o in royalty_owners])
+    if not result.matched:
+        return None
+    return getattr(royalty_owners[result.index], "fraction_text", None)
 
 
 def _tract_royalty_text(tract: Any) -> str | None:

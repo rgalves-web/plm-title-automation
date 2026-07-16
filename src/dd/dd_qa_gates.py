@@ -192,6 +192,35 @@ def workbook_headline_wi(
     return GateResult("workbook_headline_wi", ok, detail, locations)
 
 
+def every_blank_has_a_reason(
+    blanks: list[tuple[str, str, str]],
+    registry: Any,
+) -> GateResult:
+    """No silent blanks (Maxwell lessons item 1): every client-facing cell the
+    pipeline is RESPONSIBLE for and left empty must carry a recorded reason in
+    the audit layer. A blank with no reason is indistinguishable from work not
+    done, so it fails the run rather than shipping.
+
+    blanks: (sheet, location, field_name) the writer owns but did not populate.
+    registry: a PendingRegistry holding the recorded reasons.
+    """
+    missing = [b for b in blanks if not registry.has(*b)]
+    locations = [
+        f"{sheet} · {location} · {field_name} is blank with no recorded reason — "
+        "record a PendingReason (pending_document / awaiting_reviewer_decision / "
+        "clause_absent / source_not_title / unresolved_identity / not_found) or populate it."
+        for sheet, location, field_name in missing[:40]
+    ]
+    if len(missing) > 40:
+        locations.append(f"    … and {len(missing) - 40} more unexplained blank(s).")
+    ok = not missing
+    return GateResult(
+        "every_blank_has_a_reason", ok,
+        f"All {len(blanks)} pipeline-owned blank(s) carry a reason." if ok
+        else f"{len(missing)} client-facing blank(s) have no recorded reason.",
+        locations)
+
+
 def _scan_workbook(workbook, markers, gate_name: str, what: str) -> GateResult:
     locations: list[str] = []
     for sheet_name in workbook.sheetnames:

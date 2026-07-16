@@ -14,7 +14,9 @@ from src.dd.unit_aggregation import (
     derive_wi_from_nri_formula,
     parse_fraction_text,
     reconcile,
+    reconcile_mineral_fraction,
     reconciliation_qa_exceptions,
+    royalty_from_leasehold_formula,
     run_dd_aggregation,
 )
 
@@ -48,6 +50,82 @@ def test_unparseable_text_returns_none():
     assert parse_fraction_text("see attached exhibit") is None
     assert parse_fraction_text("") is None
     assert parse_fraction_text(None) is None
+
+
+# ---------------------------------------------------------------------------
+# {}-brace tokenizer + cross-validation (Maxwell lessons item 4)
+# Golden values independently verified against the approved v5 baseline.
+# ---------------------------------------------------------------------------
+
+_HULME = ("[(1/3 x 1/9 x 1/4) plus (1/4 x 1/3 x 1/9 x 1/4)] plus "
+          "{1/2 x [(1/3 x 1/9 x 1/4) plus (1/4 x 1/3 x 1/9 x 1/4)]} .01736111")
+_SELF = "{1/2 x [(1/3 x 1/9 x 1/4) plus (1/4 x 1/3 x 1/9 x 1/4)]} .00578704"
+_C_CROXTON = ("(1/2 x [(1/3 x 1/9 x 1/4) plus {1/2 x [(1/3 x 1/9 x 1/4) plus "
+              "(1/3 x 1/9 x 1/4)]}]) .00925926")
+_EST_CROXTON = "{1/2 x [(1/3 x 1/9 x 1/4) plus (1/3 x 1/9 x 1/4)]} .00925926"
+# Wallace: MINERALS prints 1/8 (=1/192, .00520833) but the opinion's own decimal
+# says .00462963; the royalty formula confirms 1/9 -> 1/216.
+_WALLACE_MINERALS = "(1/2 x 1/3 x 1/8 x 1/4) .00462963"
+_WALLACE_ROYALTY = "(1/2 x 1/3 x 1/9 x 1/4 x 1/5) .00092593"
+
+
+@pytest.mark.parametrize("text, expected", [
+    (_HULME, Fraction(5, 288)),
+    (_SELF, Fraction(5, 864)),
+    (_C_CROXTON, Fraction(1, 108)),
+    (_EST_CROXTON, Fraction(1, 108)),
+])
+def test_nested_brace_minerals_formulas_parse_to_golden_values(text, expected):
+    assert parse_fraction_text(text) == expected
+
+
+def test_brace_grouping_is_equivalent_to_parens_and_brackets():
+    assert parse_fraction_text("{1/2 x 1/4}") == parse_fraction_text("(1/2 x 1/4)")
+
+
+def test_unbalanced_brace_refuses():
+    assert parse_fraction_text("{1/2 x [(1/3 x 1/9)]") is None
+
+
+def test_royalty_from_leasehold_formula_trailing_factor():
+    assert royalty_from_leasehold_formula(_WALLACE_ROYALTY) == Fraction(1, 5)
+    # Golden: Est. of Mary June Croxton's leasehold royalty resolves to 0.20.
+    assert royalty_from_leasehold_formula(
+        "{1/2 x [(1/3 x 1/9 x 1/4) plus (1/3 x 1/9 x 1/4)]} x 1/5") == Fraction(1, 5)
+
+
+def test_royalty_formula_without_multiplied_trailing_factor_refuses():
+    # "(1/4) .25" has no trailing royalty factor — must not return the checksum.
+    assert royalty_from_leasehold_formula("(1/4) .25") is None
+
+
+def test_agreeing_formula_returns_value_without_a_note():
+    value, note = reconcile_mineral_fraction(_EST_CROXTON)
+    assert value == Fraction(1, 108)
+    assert note is None
+
+
+def test_wallace_typo_resolved_by_royalty_cross_validation():
+    # The MINERALS product contradicts the printed decimal; the royalty formula
+    # corroborates the decimal, so the decimal-consistent value wins, itemized.
+    assert parse_fraction_text(_WALLACE_MINERALS) is None  # refuses on its own
+    value, note = reconcile_mineral_fraction(_WALLACE_MINERALS, _WALLACE_ROYALTY)
+    assert value == Fraction(1, 216)
+    assert note and "probable source typo" in note
+
+
+def test_cross_validation_refuses_when_royalty_absent_or_disagrees():
+    # No corroboration -> value stays empty, never guessed.
+    assert reconcile_mineral_fraction(_WALLACE_MINERALS, None) == (None, None)
+    # A royalty formula that implies a different mineral fraction proves nothing.
+    assert reconcile_mineral_fraction(
+        _WALLACE_MINERALS, "(1/2 x 1/3 x 1/7 x 1/4 x 1/5) .00119048") == (None, None)
+
+
+def test_cross_validation_refuses_internally_inconsistent_royalty_formula():
+    # Royalty formula whose own product disagrees with its printed decimal.
+    assert reconcile_mineral_fraction(
+        _WALLACE_MINERALS, "(1/2 x 1/3 x 1/9 x 1/4 x 1/5) .99999999") == (None, None)
 
 
 def test_represented_wi_parsed_from_decimal_string_exactly():
