@@ -17,6 +17,12 @@ logger = get_logger(__name__)
 TEXT_EXTRACTED = "TEXT_EXTRACTED"
 LOW_CONFIDENCE_TEXT = "LOW_CONFIDENCE_TEXT"
 OCR_REQUIRED = "OCR_REQUIRED"
+
+# Schema version for the OCR text cache. Bump whenever a change to this module
+# alters the text it produces, so stale entries from the older reader are
+# ignored instead of silently served.
+#   ocr_v2 — every frame of a multi-page TIF is OCR'd (v1 read page 1 only).
+OCR_CACHE_VERSION = "ocr_v2"
 EXTRACTION_ERROR = "EXTRACTION_ERROR"
 
 LOW_CONFIDENCE_THRESHOLD = 0.55
@@ -606,11 +612,18 @@ def _ocr_cache_key(path: Path) -> str:
     # folder has its own "LEASE.pdf"/"LEASE.TIF"), and a stem-only key made
     # them all collide onto one cache entry — returning the first file's OCR
     # text for every other file. The stem stays in the name for readability.
+    #
+    # The key is also VERSIONED. The cache is keyed on the input, so it happily
+    # serves text produced by an older, buggier reader: when multi-page TIF
+    # support landed, every cached entry still held the first-page-only text and
+    # the fix was inert until the cache was cleared by hand. Bump the version
+    # whenever a change alters the text this module produces — old entries are
+    # then ignored rather than silently trusted.
     import hashlib
 
     stem = re.sub(r"[^A-Za-z0-9._-]+", "_", path.stem)[:60]
     digest = hashlib.md5(str(path.resolve()).encode("utf-8", "replace")).hexdigest()[:12]
-    return f"{stem}_{digest}_ocr.txt"
+    return f"{stem}_{digest}_{OCR_CACHE_VERSION}_ocr.txt"
 
 
 def _load_ocr_cache(path: Path, cache_dir: str | Path) -> str | None:

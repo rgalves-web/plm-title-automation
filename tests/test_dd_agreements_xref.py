@@ -120,3 +120,42 @@ def test_rows_for_other_units_leases_are_ignored():
     rows = [{"lease_no": "9999999-999", "contract_no": "K9999999",
              "contract_name": "SOMETHING ELSE", "record_type": "ASSIGNMENT"}]
     assert build_unit_contracts(rows, _UNIT, _LEASES) == []
+
+
+# --- real client XREF shape: duplicate headers + rows split across sheets ---
+
+def test_contract_record_type_is_the_one_after_the_contract_number():
+    # The XREF repeats column names: RECORD TYPE at 5 is the LEASE's type
+    # ("FEE- FREEHOLD"), at 17 the CONTRACT's ("ASSIGNMENT"). Taking the first
+    # match classifies every contract by its lease type.
+    from src.dd.agreements_xref import resolve_columns
+    header = ["INCLUDE FLAG", "LEASE NO", "LESSOR", "LESSEE", "ACTIVE FLAG",
+              "RECORD TYPE", "RIGHTS HELD", "PROPERTY STATUS", "LEASE DATE",
+              "EFF DATE", "EXP DATE", "EXT EXP DATE", "STATE", "COUNTY",
+              "WELL OR CONTRACT NB", "WELL OR CONTRACT NAME", "ACTIVE FLAG",
+              "RECORD TYPE", "RIGHTS HELD"]
+    index = resolve_columns(header)
+    assert index["record_type"] == 17, "must take the contract's record type, not the lease's"
+    assert index["contract_no"] == 14 and index["lease_no"] == 1
+
+
+def test_older_xref_disambiguated_header_still_resolves():
+    from src.dd.agreements_xref import resolve_columns
+    header = ["LEASE NO", "RECORD TYPE", "WELL OR CONTRACT NB",
+              "WELL OR CONTRACT NAME", "RECORD TYPE3"]
+    assert resolve_columns(header)["record_type"] == 4
+
+
+def test_missing_columns_raise_rather_than_guess():
+    from src.dd.agreements_xref import resolve_columns
+    with pytest.raises(ValueError):
+        resolve_columns(["LEASE NO", "SOMETHING ELSE"])
+
+
+def test_leases_for_unit_contract_collects_across_sheets():
+    from src.dd.agreements_xref import leases_for_unit_contract
+    rows = [{"lease_no": "0190122-001", "contract_no": "K1400813", "_sheet": "Sheet1"},
+            {"lease_no": "0222854-000", "contract_no": "K1400813", "_sheet": "Sheet2"},
+            {"lease_no": "9999999-999", "contract_no": "K1400235", "_sheet": "Sheet1"}]
+    # Maxwell's State of Texas lease lives only on Sheet2 — reading one sheet drops it.
+    assert leases_for_unit_contract(rows, "K1400813") == ["0190122-001", "0222854-000"]

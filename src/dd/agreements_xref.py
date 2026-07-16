@@ -141,41 +141,84 @@ def contracts_for(contracts: list[UnitContract], category: str) -> list[UnitCont
 # XREF workbook reader (column names as printed in the client's XREF)
 # ---------------------------------------------------------------------------
 
+_CONTRACT_NB = "WELL OR CONTRACT NB"
 _COLUMN_ALIASES = {
     "lease_no": ("LEASE NO",),
-    "contract_no": ("WELL OR CONTRACT NB",),
+    "contract_no": (_CONTRACT_NB,),
     "contract_name": ("WELL OR CONTRACT NAME",),
-    "record_type": ("RECORD TYPE3", "RECORD TYPE2", "RECORD TYPE"),
 }
+# Sheets that are summaries, not lease/contract data.
+_NON_DATA_SHEET = re.compile(r"pivot|summary|chart", re.IGNORECASE)
 
 
-def read_xref_rows(path, sheet_name: str | None = None) -> list[dict[str, Any]]:
-    """Read the XREF into lease/contract dicts. Contract rows only (a well row
-    carries a well number, not a contract number)."""
-    import openpyxl
+def resolve_columns(header: list[str]) -> dict[str, int]:
+    """Map field -> column index, position-aware.
 
-    workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    worksheet = workbook[sheet_name] if sheet_name else workbook[workbook.sheetnames[0]]
-    rows = worksheet.iter_rows(values_only=True)
-    header = [str(h).strip() if h is not None else "" for h in next(rows)]
-
+    The XREF repeats column NAMES for its two halves: the lease's own attributes
+    come first, then the well/contract's. "RECORD TYPE" therefore appears twice —
+    at index 5 it is the lease's type ("FEE- FREEHOLD"), at index 17 it is the
+    contract's ("ASSIGNMENT", "UNIT AGREEMENT"). Taking the first match silently
+    classifies every contract by its LEASE type. The contract's record type is
+    the first "RECORD TYPE" appearing AFTER the contract-number column.
+    """
     index: dict[str, int] = {}
     for key, aliases in _COLUMN_ALIASES.items():
         for alias in aliases:
             if alias in header:
                 index[key] = header.index(alias)
                 break
-    missing = [k for k in _COLUMN_ALIASES if k not in index]
+    if "contract_no" in index:
+        after = index["contract_no"]
+        record_types = [i for i, h in enumerate(header) if h.upper().startswith("RECORD TYPE")]
+        contract_types = [i for i in record_types if i > after]
+        if contract_types:
+            index["record_type"] = contract_types[0]
+        elif record_types:  # older XREF exports disambiguated the name instead
+            index["record_type"] = record_types[-1]
+    missing = [k for k in (*_COLUMN_ALIASES, "record_type") if k not in index]
     if missing:
         raise ValueError(f"XREF is missing expected column(s) for {missing}; header={header}")
+    return index
 
-    out: list[dict[str, Any]] = []
-    for row in rows:
-        if not row:
-            continue
-        record = {key: row[pos] for key, pos in index.items()}
-        record = {k: (str(v).strip() if v is not None else None) for k, v in record.items()}
-        if record.get("lease_no") and record.get("contract_no"):
-            out.append(record)
-    workbook.close()
-    return out
+
+def read_xref_rows(path, sheet_name: str | None = None) -> list[dict[str, Any]]:
+    """Read the XREF into lease/contract dicts. Contract rows only (a well row
+    carries a well number, not a contract number).
+
+    Reads EVERY data sheet unless one is named. The client's export splits its
+    rows across Sheet1/Sheet2 with an identical header, and a unit's leases can
+    straddle the split — Maxwell's State of Texas lease 0222854-000 lives only on
+    Sheet2, so reading the first sheet alone silently drops it from the unit.
+    """
+    import openpyxl
+
+    workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        sheet_names = [sheet_name] if sheet_name else [
+            s for s in workbook.sheetnames if not _NON_DATA_SHEET.search(s)]
+        out: list[dict[str, Any]] = []
+        for name in sheet_names:
+            rows = workbook[name].iter_rows(values_only=True)
+            try:
+                header = [str(h).strip() if h is not None else "" for h in next(rows)]
+            except StopIteration:
+                continue
+            index = resolve_columns(header)
+            for row in rows:
+                if not row:
+                    continue
+                record = {key: (str(row[pos]).strip() if row[pos] is not None else None)
+                          for key, pos in index.items()}
+                if record.get("lease_no") and record.get("contract_no"):
+                    record["_sheet"] = name
+                    out.append(record)
+        return out
+    finally:
+        workbook.close()
+
+
+def leases_for_unit_contract(xref_rows: Iterable[dict[str, Any]], contract_no: str) -> list[str]:
+    """Every lease the XREF links to a contract — for a unit's own DPU, this is
+    the unit's authoritative active lease list."""
+    return sorted({str(r["lease_no"]) for r in xref_rows
+                   if str(r.get("contract_no") or "").strip() == contract_no and r.get("lease_no")})
