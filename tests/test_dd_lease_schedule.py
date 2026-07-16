@@ -47,9 +47,9 @@ def test_pooled_lease_mi_from_lease_block_interest_covered():
     )
     controlling = {"T-O_KRAMER": TitleOpinionExtraction(file_number="T-O_KRAMER", tracts=[tract])}
     d = build_lease_details([LeaseRef(lease_no="0190122-001", lessor="JOAN B SCOTT MAXWELL")],
-                            controlling)[0]
+                            controlling, tract_wi_fn=lambda t: Fraction(1))[0]
     assert d.mi_value == Fraction(1, 4)      # from interest_covered, not the owner
-    assert d.wi_value == Fraction(1)
+    assert d.wi_value == Fraction(1)         # the Kramer opinion states 1.00000000
     assert d.royalty == "1/5"
     assert "lease-analysis" in d.source
 

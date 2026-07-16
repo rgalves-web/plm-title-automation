@@ -24,7 +24,7 @@ from typing import Any
 
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
-from openpyxl.styles import Alignment, PatternFill
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.worksheet.worksheet import Worksheet
 
 from src.dd.manifest import UnitManifest
@@ -134,6 +134,7 @@ def fill_ddr_template(
     to_summaries: list[dict[str, Any]],
     review_flags: "DDReviewFlags | None" = None,
     runsheet_clean_note: str | None = None,
+    pending_registry: Any | None = None,
 ) -> DDRWriteResult:
     template_path = Path(template_path)
     output_dir = Path(output_dir)
@@ -167,15 +168,18 @@ def fill_ddr_template(
     _apply_title_case(wb, ctx)
     _scrub_placeholders(wb, ctx)
     _write_audit_trail_sheet(wb, ctx)
+    _write_pending_items_sheet(wb, pending_registry)
 
     wb.save(output_path)
 
     saved_workbook = _load(output_path)
-    # DD_Audit_Trail is added BY DESIGN (hidden provenance sheet) — drop it
-    # from the comparison copy so sheet_names_preserved checks the template's
-    # own tabs only. The saved file on disk keeps the audit sheet.
-    if "DD_Audit_Trail" in saved_workbook.sheetnames:
-        del saved_workbook["DD_Audit_Trail"]
+    # DD_Audit_Trail (hidden provenance) and Pending Items (the blanks work list)
+    # are added BY DESIGN — drop them from the comparison copy so
+    # sheet_names_preserved checks the template's own tabs only. The saved file
+    # on disk keeps both.
+    for added_sheet in ("DD_Audit_Trail", "Pending Items"):
+        if added_sheet in saved_workbook.sheetnames:
+            del saved_workbook[added_sheet]
     integrity_report = _build_template_integrity_report(
         template_path=template_path,
         output_path=output_path,
@@ -462,6 +466,12 @@ def _fill_ownership_report(
         ws.cell(row_number, 5).value = row.get("lessor")
         ws.cell(row_number, 6).value = row.get("lessee")
         ws.cell(row_number, 7).value = float(row["royalty"]) if row.get("royalty") is not None else None
+        # Record Book / Page — the recording reference the unit's Declaration of
+        # Pooled Unit (and its Amendment) prints for this lease in Exhibit "A".
+        # Written as TEXT, matching the approved baseline: a volume/page is a
+        # reference, not a quantity, and the baseline stores it as text.
+        ws.cell(row_number, 11).value = row.get("record_book")
+        ws.cell(row_number, 12).value = row.get("record_page")
         ws.cell(row_number, 14).value = manifest.county
         ws.cell(row_number, 15).value = row.get("legal_description")
         ws.cell(row_number, 18).value = float(row["tract_gross_acres"]) if row.get("tract_gross_acres") is not None else None
@@ -479,6 +489,13 @@ def _fill_ownership_report(
             source or "Lease to Well XREF",
             confidence=row.get("confidence"),
         )
+        if row.get("record_book_source"):
+            ctx.record("Ownership Report", f"K{row_number}:L{row_number}", "dpu_exhibit_a",
+                       row["record_book_source"], confidence=1.0,
+                       extracted_text=f"Vol {row.get('record_book')}, Pg {row.get('record_page')}")
+        if row.get("wi_source"):
+            ctx.record("Ownership Report", f"T{row_number}", "to_pdf", row["wi_source"],
+                       confidence=1.0)
 
     for row_number in range(data_start + n, data_start + template_row_count):
         for col in range(1, ws.max_column + 1):
@@ -1046,3 +1063,33 @@ def _write_audit_trail_sheet(wb, ctx: DDRWriteContext) -> None:
     for row in ctx.audit_rows:
         ws.append([row.sheet, row.location, row.source_type, row.source_reference, row.confidence, row.extracted_text])
     ws.sheet_state = "hidden"
+
+
+def _write_pending_items_sheet(wb, registry) -> None:
+    """The "Pending Items" report: every blank the pipeline left, with the reason
+    it is blank and where to look to resolve it.
+
+    A blank cell cannot say why it is blank, and the reason must never be written
+    into a client cell. This sheet is where the reader finds out — visible (not
+    hidden like the audit trail), because it IS the work list.
+    """
+    if registry is None:
+        return
+    if "Pending Items" in wb.sheetnames:
+        del wb["Pending Items"]
+    ws = wb.create_sheet("Pending Items")
+    rows = registry.report_rows()
+    for row in rows:
+        ws.append(row)
+    header = ws[1]
+    for cell in header:
+        cell.font = Font(bold=True)
+    for column, width in zip("ABCDEF", (22, 26, 22, 26, 18, 78)):
+        ws.column_dimensions[column].width = width
+    ws.freeze_panes = "A2"
+    for row in ws.iter_rows(min_row=2):
+        row[-1].alignment = Alignment(wrap_text=True, vertical="top")
+    if len(rows) == 1:  # header only
+        ws.append(["", "", "", "None", "",
+                   "No pipeline-owned blanks — every client-facing cell is either "
+                   "populated or explained."])

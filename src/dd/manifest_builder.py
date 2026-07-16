@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import glob
 import json
+import re
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -151,6 +152,43 @@ def _load_project_log(manifest: UnitManifest, project_log_path: str | Path) -> N
         manifest.seller_name = str(manifest.operator).strip()
 
 
+_AA_UNIT_LEVEL_NAME = 26  # column AA, present only in older XREF exports
+_UNIT_AGREEMENT_TYPE = "UNIT AGREEMENT"
+
+
+def _unit_leases_via_dpu(wb, unit_name: str, sheets: list[str]) -> set[str]:
+    """The unit's leases, derived from its own Declaration of Pooled Unit.
+
+    Newer XREF exports dropped the "UNIT LEVEL NAME" column (AA) that used to
+    say which unit a row belonged to. The durable signal is the unit's own DPU:
+    it is the UNIT AGREEMENT whose contract NAME carries the unit's distinctive
+    token ("DECL OF POOLED UNIT - MAXWELL UNIT A"), and the leases linked to it
+    are exactly the unit's leases. Verified against the approved Maxwell
+    baseline: this yields its 30 leases exactly.
+    """
+    from src.dd.agreements_xref import unit_identity_tokens
+
+    identity = unit_identity_tokens(unit_name)
+    if not identity:
+        return set()
+    contracts: set[str] = set()
+    for sheet_name in sheets:
+        for row in wb[sheet_name].iter_rows(min_row=2, values_only=True):
+            if not row or len(row) <= 17 or not row[14]:
+                continue
+            if str(row[17] or "").strip().upper() != _UNIT_AGREEMENT_TYPE:
+                continue
+            name_tokens = {t for t in re.split(r"[^A-Z0-9]+", str(row[15] or "").upper()) if t}
+            if identity & name_tokens:
+                contracts.add(str(row[14]).strip())
+    leases: set[str] = set()
+    for sheet_name in sheets:
+        for row in wb[sheet_name].iter_rows(min_row=2, values_only=True):
+            if row and len(row) > 14 and row[1] and str(row[14] or "").strip() in contracts:
+                leases.add(str(row[1]).strip())
+    return leases
+
+
 def _load_xref(
     manifest: UnitManifest,
     xref_path: str | Path,
@@ -166,15 +204,35 @@ def _load_xref(
     if XREF_SHEET2 in wb.sheetnames:
         sheets_to_read.append(XREF_SHEET2)
 
+    # Does this export still carry the unit-level name column?
+    header = next(wb[XREF_SHEET].iter_rows(min_row=1, max_row=1, values_only=True))
+    has_unit_column = len(header) > _AA_UNIT_LEVEL_NAME and bool(header[_AA_UNIT_LEVEL_NAME])
+    dpu_leases: set[str] = set()
+    if not has_unit_column:
+        dpu_leases = _unit_leases_via_dpu(wb, manifest.unit_name, sheets_to_read)
+        build_log.setdefault("notes", []).append(
+            f"XREF export has no 'UNIT LEVEL NAME' column; unit membership derived from the "
+            f"unit's own Declaration of Pooled Unit ({len(dpu_leases)} lease(s)).")
+
     for sheet_name in sheets_to_read:
         ws = wb[sheet_name]
         for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-            aa_raw = row[26]  # column AA
-            if not _matches_unit(aa_raw, manifest.unit_name):
-                continue
-
-            exact = _is_exact_single_match(aa_raw, manifest.unit_name)
-            tokens = _aa_tokens(aa_raw)
+            if has_unit_column:
+                aa_raw = row[_AA_UNIT_LEVEL_NAME]
+                if not _matches_unit(aa_raw, manifest.unit_name):
+                    continue
+                exact = _is_exact_single_match(aa_raw, manifest.unit_name)
+                tokens = _aa_tokens(aa_raw)
+            else:
+                if not row or len(row) <= 14 or not row[1]:
+                    continue
+                if str(row[1]).strip() not in dpu_leases:
+                    continue
+                # Membership came from the unit's own DPU — an exact statement,
+                # not a fuzzy name match on a free-text column.
+                aa_raw = manifest.unit_name
+                exact = True
+                tokens = _aa_tokens(manifest.unit_name)
             record_type3 = str(row[17] or "").strip().upper()
             lease_no = row[1]
             well_or_contract_nb = row[14]
@@ -185,7 +243,7 @@ def _load_xref(
                     {
                         "lessor": row[2],
                         "lease_no": lease_no,
-                        "match_method": row[28],
+                        "match_method": row[28] if len(row) > 28 else "dpu_linked",
                         "tokens": set(),
                         "exact_match_seen": False,
                         "source_rows": [],
@@ -362,17 +420,59 @@ def set_title_opinions_from_uploads(
         manifest.title_opinions = refs
 
 
+def _resolve_wells_sheet(wb, preferred: str):
+    """The sheet holding the well rows, by CONTENT not by name.
+
+    Well List exports rename their tabs between versions (the current one has no
+    "Wells" sheet — the rows moved to "Sheet1"). Matching on the header keeps the
+    loader working across exports instead of dying on a renamed tab. "Wells
+    Removed" is deliberately never chosen: those wells are out of scope.
+    """
+    if preferred in wb.sheetnames:
+        return wb[preferred]
+    for name in wb.sheetnames:
+        if "removed" in name.casefold():
+            continue
+        try:
+            header = next(wb[name].iter_rows(min_row=1, max_row=1, values_only=True))
+        except StopIteration:
+            continue
+        cells = {str(h).strip().upper() for h in header if h}
+        if {"WELL NAME", "CURRENT WI"} <= cells:
+            logger.info("Well List: using sheet %r (no %r sheet in this export).", name, preferred)
+            return wb[name]
+    raise ManifestBuildError(
+        f"Well List has no sheet with WELL NAME / CURRENT WI columns; sheets={wb.sheetnames}")
+
+
 def _load_well_list(
     manifest: UnitManifest,
     well_list_path: str | Path,
     sheet_name: str = WELLS_SHEET,
 ) -> None:
     wb = openpyxl.load_workbook(well_list_path, read_only=True, data_only=True)
-    ws = wb[sheet_name]
+    ws = _resolve_wells_sheet(wb, sheet_name)
+
+    # Resolve columns by HEADER, not position: exports move them. "UNIT NAME"
+    # sat at column AC (28) in the previous export and at 23 in the current one,
+    # so a positional read silently matched no wells at all — which left the
+    # unit with no represented interest and a zero gross-acre denominator.
+    header = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
+    index = {str(h).strip().upper(): i for i, h in enumerate(header) if h}
+    # Fall back to the legacy layout for any column this export doesn't name, so
+    # older exports (which titled these columns generically) keep working.
+    for name, legacy in (("OPERATOR", 0), ("WELL NAME", 2), ("CURRENT WI", 5),
+                         ("CURRENT NRI", 6), ("UNIT NAME", 28), ("WELL STATUS", 29)):
+        index.setdefault(name, legacy)
+    unit_col = index["UNIT NAME"]
+
+    def cell(row, name):
+        pos = index.get(name)
+        return row[pos] if pos is not None and pos < len(row) else None
 
     matches = []
     for row in ws.iter_rows(min_row=2, values_only=True):
-        unit_cell = row[28]  # column AC
+        unit_cell = row[unit_col] if unit_col < len(row) else None
         if unit_cell and str(unit_cell).strip().casefold() == manifest.unit_name.casefold():
             matches.append(row)
     wb.close()
@@ -386,13 +486,13 @@ def _load_well_list(
     for row in matches:
         manifest.wells.append(
             WellRef(
-                well_name=str(row[2]),  # column C
-                well_operator=row[0],  # column A
+                well_name=str(cell(row, "WELL NAME")),
+                well_operator=cell(row, "OPERATOR"),
                 well_api=None,  # not carried by Well List; cross-ref XREF if ever needed
-                well_prod_status=row[29],  # column AD (WELL STATUS)
-                current_wi=str(row[5]),  # column F
-                current_nri=str(row[6]),  # column G
-                unit_name_raw=row[28],
+                well_prod_status=cell(row, "WELL STATUS"),
+                current_wi=str(cell(row, "CURRENT WI")),
+                current_nri=str(cell(row, "CURRENT NRI")),
+                unit_name_raw=cell(row, "UNIT NAME"),
             )
         )
 

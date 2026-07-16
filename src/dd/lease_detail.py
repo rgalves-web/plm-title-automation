@@ -33,12 +33,14 @@ def _leading_fraction(text: str | None) -> Fraction | None:
     m = _LEADING_FRACTION_RE.search(str(text))
     return parse_fraction_text(m.group(1)) if m else None
 
-# EOG holds the full working interest under a standard leasehold; the mineral
-# fraction (MI) does the allocation in the template's R×S×T net-acres formula.
-# Where a lease is not a straight 100% WI leasehold, the seller-WI gate catches
-# the resulting aggregate mismatch rather than this module guessing.
-_DEFAULT_LEASE_WI = Fraction(1)
-_MATCH_THRESHOLD = 82  # rapidfuzz token_sort_ratio on canonical party keys
+# A lease's Working Interest is the SELLER's stated working interest for the
+# tract that lease sits in, read from the controlling (most recent) opinion —
+# never a default. There used to be a `_DEFAULT_LEASE_WI = Fraction(1)` here, on
+# the theory that EOG holds the full leasehold and MI does the allocation. The
+# opinions contradict it: Brumbaugh SUPP states EOG's WI as "(62.5% x 75%)
+# .62500000" and Cox SUPP as ".84953704". Defaulting to 1 silently overstated
+# every lease in those tracts. Where the controlling opinion states no WI for a
+# tract, the value stays EMPTY with a reason — never guessed back to 1.
 
 
 @dataclass
@@ -56,6 +58,8 @@ class LeaseDetail:
     # one of the reason slugs in dd_pending.PendingReason. Recorded in the audit
     # layer — never written into a client-facing cell.
     mi_reason: str | None = None
+    wi_reason: str | None = None       # why WI is empty, when it is
+    wi_source: str | None = None       # the opinion + table the WI came from
     royalty: str | None = None
     royalty_source: str | None = None   # e.g. "leasehold_royalty_formula"
     tract_gross_acres: Fraction | None = None
@@ -77,6 +81,23 @@ def _tract_gross(tract: Any, tract_gross_fn) -> Fraction | None:
     return tract_gross_fn(tract) if tract_gross_fn else None
 
 
+def _apply_tract_wi(detail: LeaseDetail, tract: Any, file_number: str, tract_wi_fn) -> None:
+    """Set the lease's WI from the controlling opinion's stated tract WI.
+
+    Never falls back to a default: an unstated WI is left EMPTY with a reason, so
+    a missing figure reads as missing instead of as "EOG owns all of it".
+    """
+    wi = tract_wi_fn(tract) if tract_wi_fn else None
+    if wi is not None:
+        detail.wi_value = wi
+        detail.wi_source = f"{file_number} · leasehold estate table (Seller WI {wi})"
+        return
+    detail.wi_reason = "unresolved_fraction"
+    detail.notes.append(
+        f"{file_number} states no Seller working interest for this tract — WI left "
+        "empty; read the opinion's LEASEHOLD ESTATE table.")
+
+
 def _tract_key(file_number: str, tract: Any) -> str:
     """Stable per-tract identifier so the ≤1/1 MI-sum gate can group the leases
     that draw their mineral interest from the same tract."""
@@ -90,6 +111,7 @@ def build_lease_details(
     controlling: dict[str, Any],
     royalty_by_lease: dict[str, str] | None = None,
     tract_gross_fn=None,
+    tract_wi_fn=None,
 ) -> list[LeaseDetail]:
     """Assemble a LeaseDetail per unit lease.
 
@@ -98,6 +120,10 @@ def build_lease_details(
     royalty_by_lease: lease_no -> royalty text already resolved (e.g. from the
         Lease Review extraction) to carry into the Ownership Report.
     tract_gross_fn: callable(tract) -> Fraction | None for tract gross acres.
+    tract_wi_fn: callable(tract) -> Fraction | None for the SELLER's stated
+        working interest in that tract, per the controlling opinion. Because
+        `controlling` already holds the newest opinion per chain, this reads the
+        supplement's figure whenever one exists and the original is superseded.
     """
     royalty_by_lease = royalty_by_lease or {}
     owners = list(_iter_tract_owners(controlling))
@@ -134,7 +160,6 @@ def build_lease_details(
                 owner.fraction_text, _owner_royalty_formula(tract, owner))
             if mi is not None:
                 detail.mi_value = mi
-                detail.wi_value = _DEFAULT_LEASE_WI
                 detail.mi_source = "mineral_owner"  # authoritative per-owner MI
                 if typo_note:
                     detail.notes.append(typo_note)
@@ -142,6 +167,7 @@ def build_lease_details(
                 detail.mi_reason = "unresolved_fraction"
                 detail.notes.append(
                     f"mineral fraction {owner.fraction_text!r} did not parse — MI left empty")
+            _apply_tract_wi(detail, tract, file_number, tract_wi_fn)
             detail.tract_gross_acres = _tract_gross(tract, tract_gross_fn)
             legal = getattr(tract, "tract_legal_description", None)
             detail.legal_description = getattr(legal, "value", None) if legal else None
@@ -171,8 +197,8 @@ def build_lease_details(
                 mi = _leading_fraction(getattr(block.interest_covered, "value", None))
                 if mi is not None:
                     detail.mi_value = mi
-                    detail.wi_value = _DEFAULT_LEASE_WI
                     detail.mi_source = "lease_block"  # fallback only — never overwrites an owner match
+                _apply_tract_wi(detail, tract, file_number, tract_wi_fn)
                 if detail.tract_gross_acres is None:
                     detail.tract_gross_acres = _tract_gross(tract, tract_gross_fn)
                 if not detail.legal_description:

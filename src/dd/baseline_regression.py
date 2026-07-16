@@ -140,7 +140,22 @@ def _values_equal(baseline: Any, candidate: Any) -> bool:
         return _formula_value(c) is not None and _numbers_equal(b, _formula_value(c))
     if isinstance(c, float) and isinstance(b, str) and b.startswith("="):
         return _formula_value(b) is not None and _numbers_equal(c, _formula_value(b))
+    # A number and its numeric text are the same value to a reader. The baseline
+    # itself is inconsistent here — it stores some Record Book/Page cells as the
+    # number 476 and others as the text "476" — and reporting that as a changed
+    # value is noise that buries real differences.
+    if isinstance(b, float) and isinstance(c, str):
+        return _numeric_text(c) is not None and _numbers_equal(b, _numeric_text(c))
+    if isinstance(c, float) and isinstance(b, str):
+        return _numeric_text(b) is not None and _numbers_equal(c, _numeric_text(b))
     return b == c
+
+
+def _numeric_text(text: str) -> float | None:
+    try:
+        return float(text.strip())
+    except ValueError:
+        return None
 
 
 def _formula_value(text: str) -> float | None:

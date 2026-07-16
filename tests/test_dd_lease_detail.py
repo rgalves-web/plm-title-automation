@@ -30,11 +30,32 @@ def _controlling():
 def test_lessor_matched_to_mineral_owner_gives_mi_and_wi():
     leases = [LeaseRef(lease_no="0220344-013", lessor="LYNN W COX"),
               LeaseRef(lease_no="0220344-014", lessor="RICHARD COX")]
-    details = {d.lease_no: d for d in build_lease_details(leases, _controlling())}
+    # WI is the controlling opinion's STATED tract figure (Cox SUPP .84953704),
+    # never a default.
+    details = {d.lease_no: d for d in build_lease_details(
+        leases, _controlling(), tract_wi_fn=lambda t: Fraction("0.84953704"))}
     assert details["0220344-013"].mi_value == Fraction(1, 2)
-    assert details["0220344-013"].wi_value == Fraction(1)  # EOG full leasehold WI
+    assert details["0220344-013"].wi_value == Fraction("0.84953704")
     assert "MINERALS section" in details["0220344-013"].source
     assert details["0220344-014"].mi_value == Fraction(1, 4)
+
+
+def test_unstated_tract_wi_leaves_wi_empty_with_a_reason_never_one():
+    # The old code defaulted WI to 1, silently overstating every lease in a
+    # tract whose opinion states a lower figure (Brumbaugh .625, Cox .84953704).
+    leases = [LeaseRef(lease_no="0220344-013", lessor="LYNN W COX")]
+    d = build_lease_details(leases, _controlling(), tract_wi_fn=lambda t: None)[0]
+    assert d.wi_value is None
+    assert d.wi_reason == "unresolved_fraction"
+    assert any("no Seller working interest" in n for n in d.notes)
+
+
+def test_stated_tract_wi_is_recorded_with_its_source():
+    leases = [LeaseRef(lease_no="0220344-013", lessor="LYNN W COX")]
+    d = build_lease_details(leases, _controlling(),
+                            tract_wi_fn=lambda t: Fraction(5, 8))[0]
+    assert d.wi_value == Fraction(5, 8)          # Brumbaugh SUPP "(62.5% x 75%)"
+    assert "leasehold estate table" in d.wi_source
 
 
 def test_royalty_carry_over_takes_precedence():

@@ -280,7 +280,13 @@ def enrich_lease_rows_with_details(
     details = {
         d.lease_no: d
         for d in build_lease_details(
-            manifest.leases, controlling, royalty_by_lease, tract_gross_fn=_tract_gross_acres
+            manifest.leases, controlling, royalty_by_lease,
+            tract_gross_fn=_tract_gross_acres,
+            # The Seller's WI as the CONTROLLING opinion states it. `controlling`
+            # already holds the newest opinion per chain, so a supplement's
+            # figure supersedes the original's (Cox SUPP .84953704, not ORIG
+            # .82175926; Brumbaugh SUPP .625).
+            tract_wi_fn=lambda t: resolve_seller_wi(t)[0],
         )
     }
     for row in lease_review_rows:
@@ -294,10 +300,16 @@ def enrich_lease_rows_with_details(
         if d.mi_value is not None:
             if d.mi_source == "mineral_owner" or row.get("mi_value") is None:
                 row["mi_value"] = d.mi_value
-                if d.wi_value is not None:
-                    row["wi_value"] = d.wi_value
-        elif row.get("wi_value") is None and d.wi_value is not None:
+        # WI is the controlling opinion's stated tract figure and always wins:
+        # it is sourced, not inferred, so nothing earlier in the pipeline should
+        # override it. An unstated WI carries its reason instead of a value.
+        if d.wi_value is not None:
             row["wi_value"] = d.wi_value
+            row["wi_source"] = d.wi_source
+        elif d.wi_reason:
+            row["wi_reason"] = d.wi_reason
+        if d.mi_reason and d.mi_value is None:
+            row["mi_reason"] = d.mi_reason
         if row.get("tract_gross_acres") is None and d.tract_gross_acres is not None:
             row["tract_gross_acres"] = d.tract_gross_acres
         if not row.get("legal_description") and d.legal_description:
@@ -331,6 +343,34 @@ def enrich_lease_rows_with_details(
         workbook_headline_wi(lease_review_rows, unit_gross, manifest.expected_seller_wi),
     ]
     return gate_results, conflicts
+
+
+def _register_pending_reasons(rows: list[dict[str, Any]], registry) -> None:
+    """Turn each row's per-field reason into a Pending Items entry.
+
+    The reason never goes into the client cell — it goes here, so a blank in the
+    workbook can always be traced to why it is blank and what to do about it.
+    """
+    from src.dd.dd_pending import PendingReason
+
+    fields = (
+        ("mi_value", "mi_reason", "MI Value (col S)",
+         "the controlling opinion's MINERALS section for this lessor"),
+        ("wi_value", "wi_reason", "WI Value (col T)",
+         "the controlling opinion's LEASEHOLD ESTATE table for this tract"),
+        ("tract_gross_acres", None, "Tract Gross Acres (col R)",
+         "the controlling opinion's tract description"),
+    )
+    for row in rows:
+        lease_no = str(row.get("lease_no") or "?")
+        for value_key, reason_key, label, where in fields:
+            if row.get(value_key) is not None:
+                continue
+            reason = row.get(reason_key) if reason_key else None
+            if reason is None:
+                reason = PendingReason.NOT_FOUND
+            registry.add("Ownership Report", f"row {lease_no}", label, reason, where,
+                         identifier=f"lease {lease_no}")
 
 
 def _merge_lease_document_details(
@@ -892,6 +932,9 @@ def run_dd_pipeline_for_unit(
     supplemental_search_complete: bool = False,
     lease_document_dir: str | Path | None = None,
     lease_document_cache_dir: str | Path | None = None,
+    unit_folder: str | Path | None = None,
+    dpu_work_dir: str | Path | None = None,
+    dpu_contract_no: str = "K1400813",
 ) -> DDPipelineResult:
     """Run the full DD pipeline for one unit: build manifest, parse available
     title opinions, resolve the controlling certification date, filter and QA
@@ -1102,6 +1145,31 @@ def run_dd_pipeline_for_unit(
         lease_review_rows, manifest, controlling, reconciliation, lease_document_details,
     )
 
+    # Record Book/Page from the unit's recorded Declaration of Pooled Unit and
+    # its Amendment (Exhibit "A" is the authoritative recording reference).
+    from src.dd.dd_pending import PendingRegistry
+    pending_registry = PendingRegistry()
+    dpu_notes: list[str] = []
+    if unit_folder is not None:
+        from src.dd.dpu_source import apply_recording_to_rows, load_unit_dpu, reconcile_lease_set
+        dpu = load_unit_dpu(
+            unit_folder,
+            work_dir=Path(dpu_work_dir) if dpu_work_dir else (output_dir / "dpu_work"),
+            contract_no=dpu_contract_no,
+        )
+        applied = apply_recording_to_rows(lease_review_rows, dpu, pending_registry)
+        dpu_notes = list(dpu.notes)
+        # The declaration is historical; the XREF is the active list. Record the
+        # difference so the exclusions are auditable, not silent.
+        dpu_notes.extend(reconcile_lease_set(
+            dpu, [str(r.get("lease_no")) for r in lease_review_rows]))
+        if dpu.dpu_source:
+            _emit(progress_callback, "ok",
+                  f"Unit {unit_name} — Record Book/Page for {len(applied)}/{len(lease_review_rows)} "
+                  f"lease(s) from {dpu.dpu_source}"
+                  + (f" + {', '.join(dpu.amendment_sources)}" if dpu.amendment_sources else ""))
+    _register_pending_reasons(lease_review_rows, pending_registry)
+
     if aggregation is None or reconciliation is None:
         from src.dd.unit_aggregation import AggregationResult, ReconciliationResult
         from fractions import Fraction
@@ -1136,6 +1204,9 @@ def run_dd_pipeline_for_unit(
     # Surface any TO-vs-lease-document conflicts (never silently resolved).
     for conflict in lease_conflicts:
         review_flags.potential_defects.append(f"Source conflict — {conflict}")
+    # Leases the DPU's Amendment added to the unit ("inadvertently excluded").
+    for note in dpu_notes:
+        review_flags.section_notes.append(f"DPU Amendment — {note}")
     # Fold QA-gate failures into the review narrative and QA exceptions so a
     # failing gate blocks a clean "done" and is itemized with its location.
     for gate in gate_results:
@@ -1164,6 +1235,7 @@ def run_dd_pipeline_for_unit(
         to_summaries=to_summaries,
         review_flags=review_flags,
         runsheet_clean_note=runsheet_clean_note,
+        pending_registry=pending_registry,
     )
 
     summary = {
