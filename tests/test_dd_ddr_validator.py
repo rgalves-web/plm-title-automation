@@ -433,3 +433,56 @@ def test_stated_nowhere_in_instrument_is_a_resolved_reason():
                    "the recorded assignment has no tax-partnership article")
     assert not item.is_outstanding          # the blank IS the finished answer
     assert reg.outstanding == []
+
+
+# --- source truth is part of READY: form alone is not enough ---
+
+def _truth(mismatches=0):
+    from src.dd.source_truth_check import TruthFinding, TruthReport, MISMATCH, CONFIRMED
+    r = TruthReport()
+    r.add(TruthFinding("Ownership Report", "K8/L8", "Record Book/Page", "Vol 402, Pg 50",
+                       "Vol 402, Pg 50", CONFIRMED, source_file="DPU Exhibit A"))
+    for i in range(mismatches):
+        r.add(TruthFinding("Ownership Report", f"K{16+i}/L{16+i}", "Record Book/Page",
+                           "Vol 475, Pg 39", "Vol 405, Pg 343", MISMATCH,
+                           source_file="DPU Exhibit A"))
+    return r
+
+
+def test_structurally_clean_but_contradicting_its_source_is_not_ready():
+    # The whole point: a cell can be perfectly formed and still false.
+    wb = _ddr([_own_row()], _audited())
+    report = validate_ddr(wb, _allow())
+    assert report.ready                      # form alone: fine
+    report.truth = _truth(mismatches=1)
+    assert not report.ready                  # truth: contradicted -> blocked
+    assert len(report.source_mismatches) == 1
+    assert "source truth" in report.summary()
+
+
+def test_ready_needs_zero_structural_fail_and_zero_mismatch():
+    wb = _ddr([_own_row()], _audited())
+    report = validate_ddr(wb, _allow())
+    report.truth = _truth(mismatches=0)
+    assert report.ready
+    assert "READY" in report.summary()
+
+
+def test_unverifiable_cells_do_not_block_ready():
+    from src.dd.source_truth_check import TruthFinding, UNVERIFIABLE
+    wb = _ddr([_own_row()], _audited())
+    report = validate_ddr(wb, _allow())
+    t = _truth(mismatches=0)
+    t.add(TruthFinding("Lease Review", "E9", "lease date", "1/14/2010", None,
+                       UNVERIFIABLE, detail="no lease PDF on disk"))
+    report.truth = t
+    assert report.ready                      # a known gap is not a defect
+    assert len(report.truth.unverifiable) == 1
+
+
+def test_console_summary_includes_the_truth_table():
+    wb = _ddr([_own_row()], _audited())
+    report = validate_ddr(wb, _allow())
+    report.truth = _truth(mismatches=1)
+    text = console_summary(report)
+    assert "SOURCE TRUTH" in text and "MISMATCH" in text

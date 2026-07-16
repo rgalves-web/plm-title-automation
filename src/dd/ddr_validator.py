@@ -102,6 +102,9 @@ class SheetCoverage:
 class ValidationReport:
     coverage: list[SheetCoverage] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
+    # Source-truth result (src/dd/source_truth_check). Structural rules verify
+    # FORM; this verifies the values are what their sources actually say.
+    truth: Any | None = None
 
     @property
     def failures(self) -> list[Finding]:
@@ -125,12 +128,20 @@ class ValidationReport:
         return all(c.reconciled for c in self.coverage)
 
     @property
+    def source_mismatches(self) -> list[Any]:
+        return list(self.truth.mismatches) if self.truth else []
+
+    @property
     def ready(self) -> bool:
-        return self.reconciled and not self.failures
+        """Ready needs BOTH: nothing structurally wrong, and nothing that
+        contradicts its own source. A cell can be perfectly formed and false."""
+        return self.reconciled and not self.failures and not self.source_mismatches
 
     def summary(self) -> str:
         head = (f"{self.checked_cells} of {self.total_cells} cells checked "
                 f"({len(self.failures)} FAIL, {len(self.pending)} pending)")
+        if self.truth is not None:
+            head += f"; source truth: {self.truth.summary()}"
         if not self.reconciled:
             short = [f"{c.sheet}: {c.visited}/{c.populated}" for c in self.coverage
                      if not c.reconciled]
@@ -685,6 +696,10 @@ def write_validation_sidecar(report: ValidationReport, ddr_path) -> "Path":
 
 def console_summary(report: ValidationReport) -> str:
     lines = [report.summary(), ""]
+    if report.truth is not None:
+        from src.dd.source_truth_check import truth_table
+        lines.append(truth_table(report.truth))
+        lines.append("")
     lines.append(f"{'sheet':<32}{'populated':>10}{'checked':>9}{'ok':>5}")
     for c in report.coverage:
         lines.append(f"{c.sheet:<32}{c.populated:>10}{c.visited:>9}{'yes' if c.reconciled else 'NO':>5}")
