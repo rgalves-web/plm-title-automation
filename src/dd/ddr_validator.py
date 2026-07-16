@@ -344,6 +344,54 @@ def _as_fraction(value: Any) -> Fraction | None:
         return None
 
 
+_DOC_ID_RE = re.compile(r"\bK\d{7}(?:-[A-Z]{1,4})?\b|\b\d{7}-\d{3}\b")
+
+
+def documents_on_disk(unit_folder) -> set[str]:
+    """Contract / lease identifiers whose document packages exist in the unit's
+    project folder — the ground truth for whether "document not in file" is true.
+    Identifiers are read from file and folder NAMES (zips included); nothing is
+    opened."""
+    from pathlib import Path
+
+    unit_folder = Path(unit_folder)
+    found: set[str] = set()
+    if not unit_folder.exists():
+        return found
+    for path in unit_folder.rglob("*"):
+        found.update(_DOC_ID_RE.findall(path.name))
+    return found
+
+
+def check_pending_docs_on_disk(sheet_name: str, worksheet, cells,
+                               available: set[str] | None) -> list[Finding]:
+    """A PENDING marker claiming "document not in file" is a FALSE STATEMENT when
+    the document sits in the project folder — the exact defect this run fixes:
+    three Agreements blocks said "not in file" while all three packages were on
+    disk. The identifier is the block's own contract/lease number (col A above
+    the marker) or any identifier inside the marker text.
+    """
+    if not available or sheet_name == _AUDIT_SHEET:
+        return []
+    findings = []
+    current_id: str | None = None
+    for coord, row, col, value in sorted(cells, key=lambda c: (c[1], c[2])):
+        text = str(value)
+        if col == 1:
+            ids = _DOC_ID_RE.findall(text)
+            if ids:
+                current_id = ids[0]
+        if _PENDING_MARKER in text.upper():
+            referenced = set(_DOC_ID_RE.findall(text)) or ({current_id} if current_id else set())
+            on_disk = sorted(referenced & available)
+            if on_disk:
+                findings.append(Finding(
+                    sheet_name, coord, value, "pending_document_on_disk",
+                    f"'document not in file' is FALSE — {', '.join(on_disk)} exists in the "
+                    "project folder; the pipeline must read it or fail loudly"))
+    return findings
+
+
 def expected_sheet_set(template_workbook,
                        sanctioned: Iterable[str] = SANCTIONED_EXTRA_SHEETS) -> set[str]:
     """The tabs a finished DDR must have: the template's, minus its scratch tab,
@@ -576,12 +624,16 @@ def _audit_index(workbook) -> tuple[set[str], dict[str, str]]:
 
 
 def validate_ddr(workbook, allowlist: UnitAllowlist | None = None,
-                 expected_sheets: set[str] | None = None) -> ValidationReport:
+                 expected_sheets: set[str] | None = None,
+                 documents_available: set[str] | None = None) -> ValidationReport:
     """Run every rule over every populated cell. Nothing is sampled.
 
     expected_sheets: the tab set the deliverable must have (see
     expected_sheet_set). When None the tab-set rule is skipped — pass it from the
     template for a real run.
+    documents_available: identifiers of document packages present in the unit's
+    project folder (see documents_on_disk). A PENDING marker referencing one of
+    them is a FALSE "not in file" claim and FAILS.
     """
     report = ValidationReport()
     audited, pending_reasons = _audit_index(workbook)
@@ -599,6 +651,7 @@ def validate_ddr(workbook, allowlist: UnitAllowlist | None = None,
             lambda: check_client_facing(sheet_name, cells),
             lambda: check_template_sample(sheet_name, cells),
             lambda: check_foreign_unit(sheet_name, cells, allowlist),
+            lambda: check_pending_docs_on_disk(sheet_name, worksheet, cells, documents_available),
         ):
             report.findings.extend(check())
         coverage.visited = len(cells)  # the universal pass visited each one

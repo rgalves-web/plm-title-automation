@@ -39,6 +39,11 @@ class PendingReason(str, Enum):
     UNRESOLVED_IDENTITY = "unresolved_identity"
     UNRESOLVED_FRACTION = "unresolved_fraction"
     NOT_FOUND = "not_found"
+    # The document IS in hand and does not address the field — an assignment
+    # with no tax-partnership article. The blank is the finished answer, and it
+    # is never written as PENDING: pending_document is only valid when the
+    # document genuinely is not on disk.
+    STATED_NOWHERE_IN_INSTRUMENT = "stated_nowhere_in_instrument"
 
     def __str__(self) -> str:  # audit/report rendering
         return self.value
@@ -46,7 +51,8 @@ class PendingReason(str, Enum):
 
 # A blank explained by one of these is EXPECTED and complete — it is not work
 # left undone, so it never understates the deliverable.
-_RESOLVED_REASONS = {PendingReason.CLAUSE_ABSENT, PendingReason.SOURCE_NOT_TITLE}
+_RESOLVED_REASONS = {PendingReason.CLAUSE_ABSENT, PendingReason.SOURCE_NOT_TITLE,
+                     PendingReason.STATED_NOWHERE_IN_INSTRUMENT}
 
 
 @dataclass(frozen=True)

@@ -377,3 +377,59 @@ def test_tab_set_rule_is_skipped_when_no_template_is_supplied():
     wb = _ddr([_own_row()], _audited(), extra={"Whatever": {"A1": "x"}})
     report = validate_ddr(wb, _allow())          # expected_sheets=None
     assert not [f for f in report.failures if f.rule == "sheet_set"]
+
+
+# --- PENDING claiming "not in file" while the document is ON DISK = FAIL ---
+# The real defect: three Agreements blocks said "[PENDING - document not in
+# file]" while all three contract packages sat in the unit's project folder.
+
+def test_documents_on_disk_reads_identifiers_from_filenames(tmp_path):
+    from src.dd.ddr_validator import documents_on_disk
+    (tmp_path / "K1400049 (ASMT - JOE BOB SMITH-ASSIGNMENT).zip").write_bytes(b"x")
+    sub = tmp_path / "NEW FILES"; sub.mkdir()
+    (sub / "0190122-005 (HRABOVSKY).zip").write_bytes(b"x")
+    docs = documents_on_disk(tmp_path)
+    assert {"K1400049", "0190122-005"} <= docs
+
+
+def test_pending_with_document_on_disk_fails():
+    wb = _ddr([_own_row()], _audited(),
+              extra={"Agreements": {"A21": "K1400049",
+                                    "B23": "[PENDING - document not in file; awaiting contract PDF]"}})
+    report = validate_ddr(wb, _allow(), documents_available={"K1400049"})
+    hits = [f for f in report.failures if f.rule == "pending_document_on_disk"]
+    assert hits and "K1400049" in hits[0].expected
+    assert not report.ready
+
+
+def test_pending_with_document_genuinely_absent_stays_pending():
+    wb = _ddr([_own_row()], _audited(),
+              extra={"Agreements": {"A21": "K9999999",
+                                    "B23": "[PENDING - document not in file; awaiting contract PDF]"}})
+    report = validate_ddr(wb, _allow(), documents_available={"K1400049"})
+    assert not [f for f in report.failures if f.rule == "pending_document_on_disk"]
+    assert any(f.rule == "pending_marker" for f in report.pending)
+
+
+def test_identifier_inside_the_marker_text_is_also_checked():
+    wb = _ddr([_own_row()], _audited(),
+              extra={"Agreements": {"B5": "[PENDING - K1400347 not in file]"}})
+    report = validate_ddr(wb, _allow(), documents_available={"K1400347"})
+    assert any(f.rule == "pending_document_on_disk" for f in report.failures)
+
+
+def test_rule_is_skipped_without_a_disk_inventory():
+    wb = _ddr([_own_row()], _audited(),
+              extra={"Agreements": {"A21": "K1400049", "B23": "[PENDING - not in file]"}})
+    report = validate_ddr(wb, _allow())          # documents_available=None
+    assert not [f for f in report.failures if f.rule == "pending_document_on_disk"]
+
+
+def test_stated_nowhere_in_instrument_is_a_resolved_reason():
+    from src.dd.dd_pending import PendingReason, PendingRegistry
+    reg = PendingRegistry()
+    item = reg.add("Agreements", "B27", "Tax Partnership",
+                   PendingReason.STATED_NOWHERE_IN_INSTRUMENT,
+                   "the recorded assignment has no tax-partnership article")
+    assert not item.is_outstanding          # the blank IS the finished answer
+    assert reg.outstanding == []
