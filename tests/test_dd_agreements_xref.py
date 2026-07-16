@@ -148,8 +148,11 @@ def test_older_xref_disambiguated_header_still_resolves():
 
 def test_missing_columns_raise_rather_than_guess():
     from src.dd.agreements_xref import resolve_columns
-    with pytest.raises(ValueError):
+    from src.dd.tabular_source import TabularSourceError
+    with pytest.raises(TabularSourceError) as exc:
         resolve_columns(["LEASE NO", "SOMETHING ELSE"])
+    # The error must name what is missing and what was actually seen.
+    assert "contract_no" in str(exc.value) and "SOMETHING ELSE" in str(exc.value)
 
 
 def test_leases_for_unit_contract_collects_across_sheets():

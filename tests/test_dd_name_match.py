@@ -82,15 +82,75 @@ def test_match_person_returns_single_index():
 
 
 def test_ambiguous_match_returns_empty_and_itemizes():
-    r = match_person("Lynn Cox", ["Lynn W. Cox", "Lynn Marie Cox"])
+    # Two DIFFERENT people (they do not match each other) both fit "W Brumbaugh".
+    r = match_person("W Brumbaugh", ["Winston Brumbaugh", "Wilba Brumbaugh"])
     assert not r.matched
     assert len(r.ambiguous) == 2
     assert "distinct parties" in r.reason
 
 
+def test_same_given_name_different_middle_names_is_one_party():
+    # Middle names are ignored by design, so these are one party under the rule
+    # — not an ambiguity. (They match each other, not just the query.)
+    r = match_person("Lynn Cox", ["Lynn W. Cox", "Lynn Marie Cox"])
+    assert r.matched
+
+
 def test_repeated_spelling_of_one_party_is_not_ambiguous():
     r = match_person("Richard Cox", ["Richard T. Cox", "Richard T Cox"])
     assert r.matched  # same normalized party listed twice — not an ambiguity
+
+
+# --- initial matching: restores real leases WITHOUT reopening false merges ---
+# A structural rule that refused initials entirely was too strict: it dropped
+# "W S Brumbaugh" (the DPU's own spelling) from Winston Brumbaugh and emptied
+# MI/WI/acres on real rows. An initial is accepted only when exactly ONE
+# candidate qualifies.
+
+_BRUMBAUGH_OWNERS = ["Worsham Family Limited Partnership", "Moore-Burrow Ltd.",
+                     "Winston Brumbaugh", "Lovene Brumbaugh", "Billy R. Caldwell",
+                     "Linda Pritchard", "Carolyn Belew"]
+
+
+def test_initial_matches_the_only_qualifying_candidate():
+    r = match_person("W S Brumbaugh", _BRUMBAUGH_OWNERS)
+    assert r.matched, r.reason
+    assert _BRUMBAUGH_OWNERS[r.index] == "Winston Brumbaugh"
+    assert r.matched_on == "initial"
+
+
+def test_initial_is_ambiguous_when_two_candidates_qualify():
+    # W could be Winston or Wilba — an initial cannot choose between them.
+    r = match_person("W Brumbaugh", ["Winston Brumbaugh", "Wilba Brumbaugh"])
+    assert not r.matched
+    assert len(r.ambiguous) == 2
+    assert "initial only" in r.reason
+
+
+def test_given_name_match_still_beats_an_initial_match():
+    # Lovene is named outright; the L initial must not drag in anyone else.
+    r = match_person("Lovene Brumbaugh", _BRUMBAUGH_OWNERS)
+    assert r.matched and r.matched_on == "given_name"
+    assert _BRUMBAUGH_OWNERS[r.index] == "Lovene Brumbaugh"
+
+
+def test_initial_path_does_not_reopen_the_father_son_false_merge():
+    # The suffix guard still applies on the weaker tier.
+    assert not match_person("Lynn W Cox", ["Lynn W Cox Jr"]).matched
+    assert not match_person("W Cox Jr", ["Winston Cox"]).matched
+
+
+def test_initial_path_does_not_match_a_different_given_name():
+    # "John A Cox" must never reach Richard T. Cox via the A/T initials.
+    assert not match_person("John A Cox", ["Richard T. Cox"]).matched
+
+
+def test_initial_never_matches_across_surnames():
+    assert not match_person("W S Brumbaugh", ["Winston Caldwell"]).matched
+
+
+def test_initial_never_matches_an_entity():
+    assert not match_person("K M Trust", ["Kramer Mineral Trust"]).matched
 
 
 def test_no_match_reports_a_reason():
@@ -101,3 +161,45 @@ def test_no_match_reports_a_reason():
 def test_unparseable_query_is_reported_not_matched():
     assert not match_person("", ["Lynn W. Cox"]).matched
     assert not match_person(None, ["Lynn W. Cox"]).matched
+
+
+def test_same_party_spelled_two_ways_is_not_ambiguous():
+    # The opinions list this person as both "Winston Brumbaugh" and
+    # "Winston S. Brumbaugh"; that is one party, not two.
+    r = match_person("W S Brumbaugh", ["Winston Brumbaugh", "Winston S. Brumbaugh"])
+    assert r.matched, r.reason
+    assert r.matched_on == "initial"
+
+
+def test_two_genuinely_different_people_remain_ambiguous():
+    r = match_person("W Brumbaugh", ["Winston Brumbaugh", "Wilba Brumbaugh"])
+    assert not r.matched and len(r.ambiguous) == 2
+
+
+# --- OCR-variant tier: one mis-scanned letter must not drop a real owner ---
+
+def test_single_character_ocr_variant_matches_when_unique():
+    # The Cox supplement's MINERALS table prints "Marte" for "Marie" once.
+    r = match_person("Marie Hulme", ["Marte Cantwell Hulme", "Lynn W. Cox"])
+    assert r.matched and r.matched_on == "ocr_variant"
+    assert r.index == 0
+
+
+def test_ocr_variant_never_beats_a_real_given_name_match():
+    r = match_person("Marie Hulme", ["Marte Cantwell Hulme", "Marie Cantwell Hulme"])
+    assert r.matched and r.matched_on == "given_name"
+    assert r.index == 1
+
+
+def test_ocr_variant_needs_a_long_enough_token():
+    # "Jon" vs "Ron" is one edit but far too short to be a safe inference.
+    assert not match_person("Jon Cox", ["Ron Cox"]).matched
+
+
+def test_ocr_variant_does_not_merge_two_real_people():
+    # Two edits apart — different people, never merged.
+    assert not match_person("Marie Hulme", ["Marcus Hulme"]).matched
+
+
+def test_ocr_variant_respects_the_suffix_guard():
+    assert not match_person("Marie Hulme", ["Marte Cantwell Hulme Jr"]).matched

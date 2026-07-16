@@ -33,6 +33,7 @@ from src.dd.manifest import (
     UnitManifest,
     WellRef,
 )
+from src.dd.tabular_source import ColumnSpec, resolve_header_columns, resolve_sheet
 from src.utils import get_logger, parse_date, timestamp
 
 logger = get_logger(__name__)
@@ -420,29 +421,28 @@ def set_title_opinions_from_uploads(
         manifest.title_opinions = refs
 
 
+# Well List columns, resolved by header name — never by position. "UNIT NAME"
+# moved from index 28 to 23 between exports; a positional read matched no wells
+# and silently produced a unit with no represented interest.
+_WELL_LIST_COLUMNS = [
+    ColumnSpec("unit_name", ["UNIT NAME"]),
+    ColumnSpec("well_name", ["WELL NAME"]),
+    ColumnSpec("operator", ["OPERATOR"]),
+    ColumnSpec("current_wi", ["CURRENT WI"]),
+    ColumnSpec("current_nri", ["CURRENT NRI"]),
+    ColumnSpec("well_status", ["WELL STATUS"], required=False),
+]
+
+
 def _resolve_wells_sheet(wb, preferred: str):
     """The sheet holding the well rows, by CONTENT not by name.
 
     Well List exports rename their tabs between versions (the current one has no
-    "Wells" sheet — the rows moved to "Sheet1"). Matching on the header keeps the
-    loader working across exports instead of dying on a renamed tab. "Wells
-    Removed" is deliberately never chosen: those wells are out of scope.
+    "Wells" sheet — the rows moved to "Sheet1"). "Wells Removed" is never chosen:
+    those wells are out of scope and shipping them would re-add removed wells.
     """
-    if preferred in wb.sheetnames:
-        return wb[preferred]
-    for name in wb.sheetnames:
-        if "removed" in name.casefold():
-            continue
-        try:
-            header = next(wb[name].iter_rows(min_row=1, max_row=1, values_only=True))
-        except StopIteration:
-            continue
-        cells = {str(h).strip().upper() for h in header if h}
-        if {"WELL NAME", "CURRENT WI"} <= cells:
-            logger.info("Well List: using sheet %r (no %r sheet in this export).", name, preferred)
-            return wb[name]
-    raise ManifestBuildError(
-        f"Well List has no sheet with WELL NAME / CURRENT WI columns; sheets={wb.sheetnames}")
+    return resolve_sheet(wb, _WELL_LIST_COLUMNS, preferred=preferred,
+                         exclude=("removed",), source="Well List")
 
 
 def _load_well_list(
@@ -458,16 +458,11 @@ def _load_well_list(
     # so a positional read silently matched no wells at all — which left the
     # unit with no represented interest and a zero gross-acre denominator.
     header = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
-    index = {str(h).strip().upper(): i for i, h in enumerate(header) if h}
-    # Fall back to the legacy layout for any column this export doesn't name, so
-    # older exports (which titled these columns generically) keep working.
-    for name, legacy in (("OPERATOR", 0), ("WELL NAME", 2), ("CURRENT WI", 5),
-                         ("CURRENT NRI", 6), ("UNIT NAME", 28), ("WELL STATUS", 29)):
-        index.setdefault(name, legacy)
-    unit_col = index["UNIT NAME"]
+    index = resolve_header_columns(header, _WELL_LIST_COLUMNS, source=f"Well List:{ws.title}")
+    unit_col = index["unit_name"]
 
-    def cell(row, name):
-        pos = index.get(name)
+    def cell(row, field):
+        pos = index.get(field)
         return row[pos] if pos is not None and pos < len(row) else None
 
     matches = []
@@ -486,13 +481,13 @@ def _load_well_list(
     for row in matches:
         manifest.wells.append(
             WellRef(
-                well_name=str(cell(row, "WELL NAME")),
-                well_operator=cell(row, "OPERATOR"),
+                well_name=str(cell(row, "well_name")),
+                well_operator=cell(row, "operator"),
                 well_api=None,  # not carried by Well List; cross-ref XREF if ever needed
-                well_prod_status=cell(row, "WELL STATUS"),
-                current_wi=str(cell(row, "CURRENT WI")),
-                current_nri=str(cell(row, "CURRENT NRI")),
-                unit_name_raw=cell(row, "UNIT NAME"),
+                well_prod_status=cell(row, "well_status"),
+                current_wi=str(cell(row, "current_wi")),
+                current_nri=str(cell(row, "current_nri")),
+                unit_name_raw=cell(row, "unit_name"),
             )
         )
 

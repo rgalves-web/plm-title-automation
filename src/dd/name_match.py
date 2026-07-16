@@ -28,6 +28,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from rapidfuzz.distance import Levenshtein
+
 from src.ownership import canonical_party_key
 
 # Identity-bearing suffixes: preserved and required to agree (father vs son).
@@ -47,6 +49,7 @@ _ENTITY_MARKERS = {"LLC", "LP", "LLP", "INC", "CORP", "CORPORATION", "COMPANY",
                    "FOUNDATION", "CHURCH", "UNIVERSITY", "STATE"}
 
 _MIN_PREFIX = 3  # "Pete" -> "Peter"; guards against "Jo" matching "John"
+_MIN_OCR_TOKEN = 4  # one edit in a >=4-char name; "Marte" -> "Marie"
 
 
 @dataclass(frozen=True)
@@ -69,6 +72,7 @@ class NameMatchResult:
     index: int | None = None
     ambiguous: list[str] = field(default_factory=list)
     reason: str = ""
+    matched_on: str = ""   # "given_name" | "initial" — how the match was made
 
     @property
     def matched(self) -> bool:
@@ -131,27 +135,107 @@ def names_match(a: PersonName, b: PersonName) -> bool:
     return any(_given_tokens_match(x, y) for x in a.given for y in b.given)
 
 
+def names_match_by_initial(a: PersonName, b: PersonName) -> bool:
+    """A WEAKER match: same surname and suffix, and an initial on one side is the
+    first letter of a given name on the other ("W S Brumbaugh" ~ "Winston
+    Brumbaugh").
+
+    An initial is thin evidence on its own — "R. Cox" fits Richard, Robert and
+    Reba equally — so this is only safe when exactly ONE candidate qualifies.
+    match_person enforces that; do not call this to decide a match directly.
+    """
+    if not a.parsed or not b.parsed:
+        return False
+    if a.is_entity or b.is_entity:
+        return False
+    if a.surname != b.surname or a.suffix != b.suffix:
+        return False
+    for initials, givens in ((a.initials, b.given), (b.initials, a.given)):
+        for initial in initials:
+            if any(given.startswith(initial) for given in givens):
+                return True
+    return False
+
+
+def names_match_by_ocr_variant(a: PersonName, b: PersonName) -> bool:
+    """WEAKEST tier: same surname and suffix, and a given name differs by a
+    single character — an OCR slip, not a different person.
+
+    Motivated by a real case: the Cox supplement prints "Marie Cantwell Hulme"
+    three times and "Marte Cantwell Hulme" once, in the MINERALS table — the one
+    entry the extractor reads. Refusing that match drops a real owner's interest
+    from the deliverable over a single mis-scanned letter.
+
+    Guarded hard: the surname must match exactly (so the slip is confined to the
+    given name), the token must be long enough that one edit is a small share of
+    it, and — as with initials — match_person only accepts this when exactly one
+    candidate qualifies.
+    """
+    if not a.parsed or not b.parsed or a.is_entity or b.is_entity:
+        return False
+    if a.surname != b.surname or a.suffix != b.suffix:
+        return False
+    for x in a.given:
+        for y in b.given:
+            if min(len(x), len(y)) >= _MIN_OCR_TOKEN and Levenshtein.distance(x, y) == 1:
+                return True
+    return False
+
+
 def match_person(query: str | None, candidates: list[str]) -> NameMatchResult:
     """Match *query* against *candidates*, returning the single matching index.
 
-    Returns a result with index=None and a reason when nothing matches, or when
-    two or more DISTINCT candidates match — the caller must then leave the value
-    empty and itemize. Candidates that are merely repeated spellings of the same
-    party (identical normalized name) do not count as ambiguity.
+    Three tiers, strongest first:
+      1. a matching GIVEN NAME (equal or a >=3-char prefix) — decisive;
+      2. failing that, a matching INITIAL — accepted only when exactly one
+         candidate qualifies, since an initial alone cannot identify a person;
+      3. failing that, a single-character OCR variant of a given name — same
+         one-candidate rule.
+
+    Returns index=None with a reason when nothing matches, or when two or more
+    DISTINCT candidates match — the caller must then leave the value empty and
+    itemize. Candidates that are merely repeated spellings of the same party
+    (identical normalized name) do not count as ambiguity.
     """
     parsed_query = parse_person_name(query)
     if not parsed_query.parsed:
         return NameMatchResult(reason=f"{query!r} did not parse as a party name")
 
-    hits = [i for i, cand in enumerate(candidates)
-            if names_match(parsed_query, parse_person_name(cand))]
+    parsed = [parse_person_name(c) for c in candidates]
+    hits = [i for i, p in enumerate(parsed) if names_match(parsed_query, p)]
+    matched_on = "given_name"
+    if not hits:
+        hits = [i for i, p in enumerate(parsed) if names_match_by_initial(parsed_query, p)]
+        matched_on = "initial"
+    if not hits:
+        hits = [i for i, p in enumerate(parsed) if names_match_by_ocr_variant(parsed_query, p)]
+        matched_on = "ocr_variant"
     if not hits:
         return NameMatchResult(reason=f"no candidate matches {query!r}")
-    distinct = {parse_person_name(candidates[i]).normalized for i in hits}
-    if len(distinct) > 1:
+
+    # Ambiguity means two DIFFERENT PEOPLE, decided by the same identity rule —
+    # not by string inequality. An opinion lists the same party under several
+    # spellings ("Winston Brumbaugh" in one tract, "Winston S. Brumbaugh" in
+    # another); counting those as two parties would refuse a perfectly good match.
+    clusters = _distinct_parties([parsed[i] for i in hits])
+    if len(clusters) > 1:
+        detail = " on an initial only" if matched_on == "initial" else ""
         return NameMatchResult(
             ambiguous=[candidates[i] for i in hits],
-            reason=(f"{query!r} matches {len(distinct)} distinct parties: "
+            reason=(f"{query!r} matches {len(clusters)} distinct parties{detail}: "
                     + "; ".join(sorted(candidates[i] for i in hits))
                     + " — resolve the identity before assigning a value"))
-    return NameMatchResult(index=hits[0])
+    return NameMatchResult(index=hits[0], matched_on=matched_on)
+
+
+def _distinct_parties(names: list[PersonName]) -> list[list[PersonName]]:
+    """Group names that denote the same party into one cluster each."""
+    clusters: list[list[PersonName]] = []
+    for name in names:
+        for cluster in clusters:
+            if names_match(name, cluster[0]) or name.normalized == cluster[0].normalized:
+                cluster.append(name)
+                break
+        else:
+            clusters.append([name])
+    return clusters

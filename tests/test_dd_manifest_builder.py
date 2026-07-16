@@ -34,10 +34,14 @@ XREF_HEADER = [
 ]
 
 WELL_LIST_HEADER = (
-    ["OPERATOR", "COUNTY", "WELL NAME"]
-    + [f"COL{i}" for i in range(3, 28)]
+    ["OPERATOR", "COUNTY", "WELL NAME", "PAYOUT", "WELL #",
+     "CURRENT WI", "CURRENT NRI"]
+    + [f"COL{i}" for i in range(7, 28)]
     + ["UNIT NAME", "WELL STATUS"]
 )
+# Columns resolve BY HEADER NAME (src/dd/tabular_source), so these names must be
+# the real ones the client's export prints — the loader no longer reads by
+# position, and a fixture with placeholder names would not exercise real code.
 # index: 0=OPERATOR 1=COUNTY 2=WELL NAME ... 5=CURRENT WI 6=CURRENT NRI ... 28=UNIT NAME 29=WELL STATUS
 
 
@@ -359,8 +363,9 @@ def test_represented_interest_logs_note_when_wells_disagree(tmp_path):
 # ---------------------------------------------------------------------------
 
 WELLS_PRELIM_HEADER = (
-    ["OPERATOR", "COUNTY", "WELL NAME"]
-    + [f"COL{i}" for i in range(3, 28)]
+    ["OPERATOR", "COUNTY", "WELL NAME", "PAYOUT", "WELL #",
+     "CURRENT WI", "CURRENT NRI"]
+    + [f"COL{i}" for i in range(7, 28)]
     + ["UNIT NAME", "WELL STATUS"]
 )
 

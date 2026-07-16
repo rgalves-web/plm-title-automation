@@ -25,6 +25,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
+from src.dd.tabular_source import ColumnSpec, resolve_header_columns
+
 # Record types that pool land into a unit.
 _UNIT_AGREEMENT_TYPES = {"UNIT AGREEMENT", "POOLING AGREEMENT", "UNIT DECLARATION"}
 
@@ -141,44 +143,23 @@ def contracts_for(contracts: list[UnitContract], category: str) -> list[UnitCont
 # XREF workbook reader (column names as printed in the client's XREF)
 # ---------------------------------------------------------------------------
 
-_CONTRACT_NB = "WELL OR CONTRACT NB"
-_COLUMN_ALIASES = {
-    "lease_no": ("LEASE NO",),
-    "contract_no": (_CONTRACT_NB,),
-    "contract_name": ("WELL OR CONTRACT NAME",),
-}
 # Sheets that are summaries, not lease/contract data.
 _NON_DATA_SHEET = re.compile(r"pivot|summary|chart", re.IGNORECASE)
 
+# The XREF repeats column NAMES for its two halves: the lease's own attributes
+# come first, then the well/contract's. "RECORD TYPE" therefore appears twice —
+# the contract's is the one AFTER the contract-number column.
+XREF_COLUMNS = [
+    ColumnSpec("lease_no", ["LEASE NO"]),
+    ColumnSpec("contract_no", ["WELL OR CONTRACT NB"]),
+    ColumnSpec("contract_name", ["WELL OR CONTRACT NAME"]),
+    ColumnSpec("record_type", ["RECORD TYPE3", "RECORD TYPE"], after="contract_no"),
+]
+
 
 def resolve_columns(header: list[str]) -> dict[str, int]:
-    """Map field -> column index, position-aware.
-
-    The XREF repeats column NAMES for its two halves: the lease's own attributes
-    come first, then the well/contract's. "RECORD TYPE" therefore appears twice —
-    at index 5 it is the lease's type ("FEE- FREEHOLD"), at index 17 it is the
-    contract's ("ASSIGNMENT", "UNIT AGREEMENT"). Taking the first match silently
-    classifies every contract by its LEASE type. The contract's record type is
-    the first "RECORD TYPE" appearing AFTER the contract-number column.
-    """
-    index: dict[str, int] = {}
-    for key, aliases in _COLUMN_ALIASES.items():
-        for alias in aliases:
-            if alias in header:
-                index[key] = header.index(alias)
-                break
-    if "contract_no" in index:
-        after = index["contract_no"]
-        record_types = [i for i, h in enumerate(header) if h.upper().startswith("RECORD TYPE")]
-        contract_types = [i for i in record_types if i > after]
-        if contract_types:
-            index["record_type"] = contract_types[0]
-        elif record_types:  # older XREF exports disambiguated the name instead
-            index["record_type"] = record_types[-1]
-    missing = [k for k in (*_COLUMN_ALIASES, "record_type") if k not in index]
-    if missing:
-        raise ValueError(f"XREF is missing expected column(s) for {missing}; header={header}")
-    return index
+    """field -> column index for the XREF, by header name (never by position)."""
+    return resolve_header_columns(header, XREF_COLUMNS, source="XREF")
 
 
 def read_xref_rows(path, sheet_name: str | None = None) -> list[dict[str, Any]]:
