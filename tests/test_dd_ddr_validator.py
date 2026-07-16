@@ -637,3 +637,34 @@ def test_short_shared_labels_are_not_flagged():
     tpl = _sheet_wb({"Lease Review": {"A2": "L1", "D2": "Fee"}})
     ddr = _sheet_wb({"Lease Review": {"A2": "0190122-001", "D2": "Fee"}})
     assert check_template_value_not_replaced(ddr, tpl) == []
+
+
+def test_col_O_pooling_clause_is_covered_specifically():
+    # The defect that started this: every Lease Review row carried the
+    # template's example pooling clause in col O.
+    from src.dd.ddr_validator import check_template_value_not_replaced
+    clause = "Yes (Pooling units for oil up to 40 acres (with 10% tolerance) and gas up to 640 acres)"
+    tpl = _sheet_wb({"Lease Review": {"A2": "L1", "O2": clause, "A3": "L2", "O3": clause}})
+    ddr = _sheet_wb({"Lease Review": {"A2": "0190122-001", "O2": clause,
+                                       "A3": "0190122-005", "O3": clause}})
+    hits = check_template_value_not_replaced(ddr, tpl)
+    assert {f.cell for f in hits} == {"O2", "O3"}, "col O must be caught on every filled row"
+
+
+def test_col_O_filled_from_the_lease_passes():
+    from src.dd.ddr_validator import check_template_value_not_replaced
+    clause = "Yes (Pooling units for oil up to 40 acres (with 10% tolerance) and gas up to 640 acres)"
+    tpl = _sheet_wb({"Lease Review": {"A2": "L1", "O2": clause}})
+    ddr = _sheet_wb({"Lease Review": {"A2": "0190122-001",
+        "O2": "Lessee has right but not obligation to pool. Unit for oil well not to exceed 40 acres "
+              "plus 10% tolerance (see LEASE.TIF p.1 for full clause)"}})
+    assert check_template_value_not_replaced(ddr, tpl) == []
+
+
+def test_col_O_blanked_pending_document_passes():
+    # A blank with a recorded reason beats a false clause from another deal.
+    from src.dd.ddr_validator import check_template_value_not_replaced
+    clause = "Yes (Pooling units for oil up to 40 acres (with 10% tolerance) and gas up to 640 acres)"
+    tpl = _sheet_wb({"Lease Review": {"A2": "L1", "O2": clause}})
+    ddr = _sheet_wb({"Lease Review": {"A2": "0220335-001", "O2": None}})
+    assert check_template_value_not_replaced(ddr, tpl) == []
