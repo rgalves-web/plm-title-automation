@@ -85,12 +85,19 @@ class TruthFinding:
 class SheetTruth:
     sheet: str
     confirmed: int = 0
+    anchored: int = 0
+    semantic: int = 0
     mismatched: int = 0
     unverifiable: int = 0
 
     @property
+    def verified(self) -> int:
+        """Every rung that stands on evidence from the source."""
+        return self.confirmed + self.anchored + self.semantic
+
+    @property
     def checked(self) -> int:
-        return self.confirmed + self.mismatched + self.unverifiable
+        return self.verified + self.mismatched + self.unverifiable
 
 
 @dataclass
@@ -103,6 +110,10 @@ class TruthReport:
         sheet = self.per_sheet.setdefault(finding.sheet, SheetTruth(finding.sheet))
         if finding.outcome == CONFIRMED:
             sheet.confirmed += 1
+        elif finding.outcome == ANCHORED_VERIFIED:
+            sheet.anchored += 1
+        elif finding.outcome == SEMANTICALLY_CHECKED:
+            sheet.semantic += 1
         elif finding.outcome == MISMATCH:
             sheet.mismatched += 1
         else:
@@ -121,12 +132,25 @@ class TruthReport:
         return [f for f in self.findings if f.outcome == CONFIRMED]
 
     @property
+    def anchored(self) -> list[TruthFinding]:
+        return [f for f in self.findings if f.outcome == ANCHORED_VERIFIED]
+
+    @property
+    def semantic(self) -> list[TruthFinding]:
+        return [f for f in self.findings if f.outcome == SEMANTICALLY_CHECKED]
+
+    @property
+    def verified(self) -> list[TruthFinding]:
+        return self.confirmed + self.anchored + self.semantic
+
+    @property
     def truthful(self) -> bool:
         """A DDR may ship only with zero contradicted values."""
         return not self.mismatches
 
     def summary(self) -> str:
-        return (f"{len(self.confirmed)} confirmed, {len(self.mismatches)} MISMATCH, "
+        return (f"{len(self.confirmed)} confirmed, {len(self.anchored)} anchored-verified, "
+                f"{len(self.semantic)} semantically-checked, {len(self.mismatches)} MISMATCH, "
                 f"{len(self.unverifiable)} unverifiable")
 
 
@@ -202,6 +226,151 @@ def states_value(source_text: str, value: Any) -> bool:
     """Is *value* stated in the source text? Punctuation/space-insensitive."""
     needle = normalize_for_match(value)
     return bool(needle) and needle in normalize_for_match(source_text)
+
+
+# ---------------------------------------------------------------------------
+# Normalization layer + the four-way status model
+# ---------------------------------------------------------------------------
+
+# A summary fully supported by an independently-located passage.
+ANCHORED_VERIFIED = "ANCHORED-VERIFIED"
+# The value's key facts are in the source, but no single passage anchors it.
+SEMANTICALLY_CHECKED = "SEMANTICALLY-CHECKED"
+
+_ACRONYMS = ("EOG", "XTO", "COG", "BHP", "JDMI", "REO", "LLC", "LP", "INC", "CORP")
+
+
+def _entity_key(text: Any) -> str:
+    """Case/punctuation-insensitive company identity: 'EOG RESOURCES INC' ==
+    'EOG Resources, Inc.'. Corporate suffixes are noise for identity."""
+    key = re.sub(r"[^A-Z0-9 ]+", " ", str(text).upper())
+    words = [w for w in key.split() if w not in {"INC", "LLC", "LP", "LTD", "CORP", "CO", "THE"}]
+    return "".join(words)
+
+
+def value_variants(value: Any) -> list[str]:
+    """Every form a source might legitimately state *value* in.
+
+    The matcher was literal, so a royalty written 1/5 in the workbook and
+    ".20000000" in the opinion read as "not found" — a format difference
+    reported as an absence. These are the same number and must match.
+    """
+    raw = str(value).strip()
+    body = raw.lstrip("=").strip()
+    out = [raw, body]
+
+    # fraction <-> decimal <-> percent
+    fraction = parse_fraction_text(body)
+    if fraction is not None:
+        out.append(f"{fraction.numerator}/{fraction.denominator}")
+        as_float = float(fraction)
+        out.append(f"{as_float:.8f}")
+        out.append(f"{as_float:.8f}".lstrip("0"))       # opinions print ".84953704"
+        out.append(f"{as_float:g}")
+        if as_float <= 1:
+            pct = as_float * 100
+            out.append(f"{pct:g}%")
+            out.append(f"{pct:.6f}%".rstrip("0").rstrip("."))
+
+    # dates: "August 28, 2007" <-> "28 day of August, 2007" <-> "8/28/2007"
+    parsed = parse_loose_date(body)
+    if parsed:
+        # Build date strings by hand: strftime's no-pad flag is %-d on Linux and
+        # %#d on Windows, and neither is portable.
+        out.append(f"{parsed.month}/{parsed.day}/{parsed.year}")
+        out.append(f"{parsed.day:02d}/{parsed.month:02d}/{parsed.year}")
+        month = parsed.strftime("%B")
+        out.append(f"{parsed.day} day of {month}, {parsed.year}")
+        for suffix in ("st", "nd", "rd", "th"):
+            out.append(f"{parsed.day}{suffix} day of {month}, {parsed.year}")
+        out.append(f"{month} {parsed.day}, {parsed.year}")
+
+    # Vol/Page: "Volume 405, Page 343" <-> "Vol. 405, Pg. 343" <-> "405/343"
+    vol = re.search(r"\b(?:vol(?:ume)?|book)\.?\s*(\d+)\D{0,12}?(?:p(?:a)?g(?:e)?)\.?\s*(\d+)",
+                    body, re.IGNORECASE)
+    if vol:
+        book, page = vol.group(1), vol.group(2)
+        # An instrument's recording is printed every which way, and "Book" and
+        # "Volume" are the same thing in this county's records.
+        out += [f"Volume {book}, Page {page}", f"Vol. {book}, Pg. {page}",
+                f"Vol {book} Pg {page}", f"{book}/{page}",
+                f"Book {book}, Page {page}", f"Book {book} at Page {page}",
+                f"Volume {book} at Page {page}", f"Bk {book} Pg {page}"]
+
+    return [v for v in dict.fromkeys(out) if v and str(v).strip()]
+
+
+def states_value_normalized(source_text: str, value: Any) -> tuple[bool, str | None]:
+    """Is *value* stated in the source in ANY legitimate form?
+
+    Returns (found, the form it was found as) so the report can show a reader
+    exactly how the source phrased it.
+    """
+    haystack = normalize_for_match(source_text)
+    if not haystack:
+        return False, None
+    for variant in value_variants(value):
+        needle = normalize_for_match(variant)
+        if needle and needle in haystack:
+            return True, variant
+    # Entities: "EOG Resources, Inc." vs "EOG RESOURCES INC"
+    key = _entity_key(value)
+    if len(key) >= 6 and key in _entity_key(source_text):
+        return True, str(value)
+    return False, None
+
+
+def verify_value(source_text: str, value: Any, field_name: str = "",
+                 interpretive: bool | None = None) -> tuple[str, str, str]:
+    """Adjudicate one value against its source text.
+
+    Returns (outcome, evidence, detail) where outcome is one of
+    CONFIRMED / ANCHORED_VERIFIED / SEMANTICALLY_CHECKED / UNVERIFIABLE.
+
+    The ladder, strongest rung first:
+      1. the source states the value in some legitimate form  -> CONFIRMED
+      2. an independently-located passage supports it, and every fact the value
+         asserts appears in that passage                      -> ANCHORED-VERIFIED
+      3. the value's facts are all in the source, but no one
+         passage anchors it                                   -> SEMANTICALLY-CHECKED
+      4. nothing found                                        -> UNVERIFIABLE (NO_ANCHOR)
+
+    Rung 2 is the one that earns its keep on summaries. The anchor is found by
+    SEARCHING the text — the summarizer never nominates its own proof — and a
+    summary asserting a fact its anchor lacks does not pass here at all; the
+    caller raises that as a fidelity FAIL.
+    """
+    from src.dd.provenance import check_fidelity, locate_anchor
+
+    found, form = states_value_normalized(source_text, value)
+    if found:
+        return CONFIRMED, form or str(value), ""
+
+    anchor = locate_anchor(source_text, value)
+    if anchor is not None:
+        invented = check_fidelity(value, anchor.quote)
+        if not invented:
+            return (ANCHORED_VERIFIED, anchor.quote,
+                    f"summary supported by an independently-located passage on p.{anchor.page} "
+                    f"(similarity {anchor.ratio:.2f})")
+        # Facts not in the anchor: the caller decides FAIL. Say so plainly.
+        return (UNVERIFIABLE, anchor.quote,
+                f"FIDELITY: the summary asserts {sorted(invented)} which its own anchor on "
+                f"p.{anchor.page} does not contain")
+
+    # No single passage anchors it — are the value's facts in the document at all?
+    from src.dd.provenance import facts_in
+
+    value_facts = facts_in(value)
+    if value_facts:
+        source_facts = facts_in(source_text)
+        if value_facts <= source_facts:
+            return (SEMANTICALLY_CHECKED, ", ".join(sorted(value_facts)),
+                    "every figure the value asserts appears in the source, but no single "
+                    "passage anchors the wording")
+    return (UNVERIFIABLE, "",
+            "NO_ANCHOR: no passage in the cited source supports this value (OCR is lossy and "
+            "instruments paraphrase, so this is reported, not called a contradiction)")
 
 
 # ---------------------------------------------------------------------------
@@ -413,14 +582,10 @@ def check_ownership_report(workbook, index: SourceIndex, cites: list[AuditCite],
             if fraction is not None:
                 candidates.append(f"{fraction.numerator}/{fraction.denominator}")
                 candidates.append(f"{float(fraction):.8f}".lstrip("0"))
-            if any(states_value(text, c) for c in candidates):
-                report.add(TruthFinding(_OWN, cell, label, value, value, CONFIRMED,
-                                        source_file=src_name))
-            else:
-                report.add(TruthFinding(
-                    _OWN, cell, label, value, None, UNVERIFIABLE, source_file=src_name,
-                    detail=("value not located in the opinion text; interests are stated as prose "
-                            "formulas, so absence of the literal string is not a contradiction")))
+            outcome, evidence, detail = verify_value(text, value, field_name=label)
+            report.add(TruthFinding(_OWN, cell, label, value,
+                                    evidence if outcome != UNVERIFIABLE else None,
+                                    outcome, source_file=src_name, detail=detail))
 
 
 def check_cell_level_cites(workbook, index: SourceIndex, cites: list[AuditCite],
@@ -444,25 +609,24 @@ def check_cell_level_cites(workbook, index: SourceIndex, cites: list[AuditCite],
                 detail=("cited source is not a document on disk: "
                         + cite.source_reference.split(" + ")[0][:36])))
             continue
-        text = index.page_text(src_path, cite.page)
-        if states_value(text, value):
-            report.add(TruthFinding(cite.sheet, cite.cell, field_name, value, value,
-                                    CONFIRMED, source_file=src_path.name,
-                                    source_page=f"p.{cite.page}" if cite.page else ""))
-            continue
-        whole = index.text(src_path)
-        if cite.page and states_value(whole, value):
-            report.add(TruthFinding(
-                cite.sheet, cite.cell, field_name, value, value, CONFIRMED,
-                source_file=src_path.name, source_page="(other page)",
-                detail=f"stated in the instrument, but not on the cited p.{cite.page}"))
-        else:
-            report.add(TruthFinding(
-                cite.sheet, cite.cell, field_name, value, None, UNVERIFIABLE,
-                source_file=src_path.name,
-                source_page=f"p.{cite.page}" if cite.page else "",
-                detail=("value not located in the source text (OCR is lossy and instruments "
-                        "paraphrase; not a contradiction)")))
+        # The CITED page first: a cite that names the wrong page is itself a
+        # defect worth surfacing, and checking the whole document first would
+        # hide it. Only if the cited page does not carry the value do we widen
+        # to the instrument and say so.
+        outcome, evidence, detail = verify_value(
+            index.page_text(src_path, cite.page), value, field_name=field_name)
+        if outcome == UNVERIFIABLE and cite.page:
+            wide_outcome, wide_evidence, wide_detail = verify_value(
+                index.text(src_path), value, field_name=field_name)
+            if wide_outcome != UNVERIFIABLE:
+                outcome, evidence = wide_outcome, wide_evidence
+                detail = (f"stated in the instrument, but NOT on the cited p.{cite.page} — "
+                          f"the citation names the wrong page. {wide_detail}").strip()
+        report.add(TruthFinding(
+            cite.sheet, cite.cell, field_name, value,
+            evidence if outcome != UNVERIFIABLE else None, outcome,
+            source_file=src_path.name,
+            source_page=f"p.{cite.page}" if cite.page else "", detail=detail))
 
 
 def check_unaudited_sheets(workbook, cites: list[AuditCite], report: TruthReport,
@@ -500,18 +664,20 @@ def run_source_truth(workbook, search_roots, dpu_by_lease=None,
 
 def truth_table(report: TruthReport) -> str:
     lines = [f"SOURCE TRUTH - {report.summary()}", ""]
-    header = "sheet".ljust(32) + "confirmed".rjust(10) + "MISMATCH".rjust(10) + "unverif.".rjust(10)
-    lines.append(header)
+    lines.append("sheet".ljust(30) + "confirmed".rjust(10) + "anchored".rjust(9)
+                 + "semantic".rjust(9) + "MISMATCH".rjust(9) + "unverif.".rjust(9))
     total = SheetTruth("TOTAL")
     for sheet in sorted(report.per_sheet):
         s = report.per_sheet[sheet]
-        lines.append(sheet.ljust(32) + str(s.confirmed).rjust(10)
-                     + str(s.mismatched).rjust(10) + str(s.unverifiable).rjust(10))
-        total.confirmed += s.confirmed
-        total.mismatched += s.mismatched
+        lines.append(sheet.ljust(30) + str(s.confirmed).rjust(10) + str(s.anchored).rjust(9)
+                     + str(s.semantic).rjust(9) + str(s.mismatched).rjust(9)
+                     + str(s.unverifiable).rjust(9))
+        total.confirmed += s.confirmed; total.anchored += s.anchored
+        total.semantic += s.semantic; total.mismatched += s.mismatched
         total.unverifiable += s.unverifiable
-    lines.append("TOTAL".ljust(32) + str(total.confirmed).rjust(10)
-                 + str(total.mismatched).rjust(10) + str(total.unverifiable).rjust(10))
+    lines.append("TOTAL".ljust(30) + str(total.confirmed).rjust(10) + str(total.anchored).rjust(9)
+                 + str(total.semantic).rjust(9) + str(total.mismatched).rjust(9)
+                 + str(total.unverifiable).rjust(9))
     lines.append("")
     if report.mismatches:
         lines.append(f"MISMATCHES ({len(report.mismatches)}) - the workbook contradicts its source:")

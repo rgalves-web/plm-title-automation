@@ -159,7 +159,8 @@ def test_a_value_on_a_different_page_is_confirmed_but_noted(tmp_path):
              [["Agreements", "B4", "contract_instrument", "ASMT.TIF", 1, "grantor @ p.2"]])
     report = run_source_truth(wb, [tmp_path])
     hit = next(f for f in report.findings if f.cell == "B4")
-    assert hit.outcome == CONFIRMED and "not on the cited p.2" in hit.detail
+    assert hit.outcome == CONFIRMED and "NOT on the cited p.2" in hit.detail
+    assert "names the wrong page" in hit.detail   # a bad cite is itself a defect
 
 
 def test_a_value_absent_from_the_source_is_unverifiable_not_a_mismatch(tmp_path):
@@ -172,7 +173,7 @@ def test_a_value_absent_from_the_source_is_unverifiable_not_a_mismatch(tmp_path)
     hit = next(f for f in report.findings if f.cell == "B4")
     assert hit.outcome == UNVERIFIABLE
     assert report.truthful          # zero mismatches -> still shippable
-    assert "not a contradiction" in hit.detail
+    assert "not called a contradiction" in hit.detail
 
 
 def test_a_cell_whose_source_is_not_a_document_is_unverifiable(tmp_path):
