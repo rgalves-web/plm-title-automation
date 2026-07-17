@@ -87,13 +87,18 @@ class SheetTruth:
     confirmed: int = 0
     anchored: int = 0
     semantic: int = 0
+    by_rule: int = 0
+    by_manifest: int = 0
     mismatched: int = 0
     unverifiable: int = 0
 
     @property
     def verified(self) -> int:
-        """Every rung that stands on evidence from the source."""
-        return self.confirmed + self.anchored + self.semantic
+        """Every cell verified by SOME valid method. A computed total checked
+        against its own arithmetic and a client name checked against the manifest
+        are both genuinely verified — just not against a title document. What is
+        NOT allowed is calling something verified with no method at all."""
+        return self.confirmed + self.anchored + self.semantic + self.by_rule + self.by_manifest
 
     @property
     def checked(self) -> int:
@@ -105,7 +110,17 @@ class TruthReport:
     findings: list[TruthFinding] = field(default_factory=list)
     per_sheet: dict[str, SheetTruth] = field(default_factory=dict)
 
+    _covered: set = field(default_factory=set)
+
     def add(self, finding: TruthFinding) -> None:
+        # One finding per cell: the first (strongest) checker to reach a cell
+        # owns it. Without this a Summary cell verified against the manifest and
+        # then reached again by the generic "cited source is not a document"
+        # pass would be counted twice and contradict itself.
+        key = (finding.sheet, finding.cell)
+        if finding.cell and finding.cell != "(sheet)" and key in self._covered:
+            return
+        self._covered.add(key)
         self.findings.append(finding)
         sheet = self.per_sheet.setdefault(finding.sheet, SheetTruth(finding.sheet))
         if finding.outcome == CONFIRMED:
@@ -114,6 +129,10 @@ class TruthReport:
             sheet.anchored += 1
         elif finding.outcome == SEMANTICALLY_CHECKED:
             sheet.semantic += 1
+        elif finding.outcome == VERIFIED_BY_RULE:
+            sheet.by_rule += 1
+        elif finding.outcome == VERIFIED_BY_MANIFEST:
+            sheet.by_manifest += 1
         elif finding.outcome == MISMATCH:
             sheet.mismatched += 1
         else:
@@ -140,8 +159,17 @@ class TruthReport:
         return [f for f in self.findings if f.outcome == SEMANTICALLY_CHECKED]
 
     @property
+    def by_rule(self) -> list[TruthFinding]:
+        return [f for f in self.findings if f.outcome == VERIFIED_BY_RULE]
+
+    @property
+    def by_manifest(self) -> list[TruthFinding]:
+        return [f for f in self.findings if f.outcome == VERIFIED_BY_MANIFEST]
+
+    @property
     def verified(self) -> list[TruthFinding]:
-        return self.confirmed + self.anchored + self.semantic
+        return (self.confirmed + self.anchored + self.semantic
+                + self.by_rule + self.by_manifest)
 
     @property
     def truthful(self) -> bool:
@@ -149,8 +177,9 @@ class TruthReport:
         return not self.mismatches
 
     def summary(self) -> str:
-        return (f"{len(self.confirmed)} confirmed, {len(self.anchored)} anchored-verified, "
-                f"{len(self.semantic)} semantically-checked, {len(self.mismatches)} MISMATCH, "
+        return (f"{len(self.confirmed)} confirmed, {len(self.anchored)} anchored, "
+                f"{len(self.semantic)} semantic, {len(self.by_rule)} by-rule, "
+                f"{len(self.by_manifest)} by-manifest, {len(self.mismatches)} MISMATCH, "
                 f"{len(self.unverifiable)} unverifiable")
 
 
@@ -234,6 +263,12 @@ def states_value(source_text: str, value: Any) -> bool:
 
 # A summary fully supported by an independently-located passage.
 ANCHORED_VERIFIED = "ANCHORED-VERIFIED"
+# A computed cell (a formula total, a product, a per-tract sum) checked against
+# its OWN arithmetic — real verification, against the rule instead of a document.
+VERIFIED_BY_RULE = "VERIFIED-BY-RULE"
+# A project-level value (client, acquisition, operator) checked against the
+# manifest / Project Log, which IS its source of truth — not a title document.
+VERIFIED_BY_MANIFEST = "VERIFIED-BY-MANIFEST"
 # The value's key facts are in the source, but no single passage anchors it.
 SEMANTICALLY_CHECKED = "SEMANTICALLY-CHECKED"
 
@@ -638,6 +673,115 @@ def check_cell_level_cites(workbook, index: SourceIndex, cites: list[AuditCite],
             source_page=f"p.{cite.page}" if cite.page else "", detail=detail))
 
 
+# ---------------------------------------------------------------------------
+# VERIFIED_BY_RULE — computed cells checked against their own arithmetic
+# ---------------------------------------------------------------------------
+
+def check_computed_cells(workbook, report: TruthReport) -> None:
+    """Formula/derived cells that have no external document — verify the MATH.
+
+    A header total, a net-acre product, a per-tract MI sum: their source of
+    truth is the arithmetic, not a title opinion. Checking that the formula is
+    the RIGHT formula (and, where the inputs are literals, that it computes
+    consistently) is real verification. It is NOT a licence to dump hard cells
+    here — only cells whose correctness is fully decidable from other cells in
+    the workbook qualify, and each is named.
+    """
+    if _OWN not in workbook.sheetnames:
+        return
+    ws = workbook[_OWN]
+    rows = [r for r in range(_OWN_DATA_START, ws.max_row + 1)
+            if ws.cell(r, _OWN_COL["lease_no"]).value not in (None, "")]
+    # Per-row derived formulas: U = R*S*T (net acres), X = U*V (net revenue).
+    for row in rows:
+        for col, formula_shape, label in (
+            (21, f"=R{row}*S{row}*T{row}", "Net Acres = R*S*T"),
+            (24, f"=U{row}*V{row}", "Net Revenue Acres = U*V"),
+            (22, f"=1-G{row}-W{row}", "NRI = 1-royalty-ORRI")):
+            value = ws.cell(row, col).value
+            if value is None:
+                continue
+            cell = _cell_name(col, row)
+            if isinstance(value, str) and value.replace(" ", "") == formula_shape.replace(" ", ""):
+                report.add(TruthFinding(_OWN, cell, label, value, formula_shape,
+                                        VERIFIED_BY_RULE, source_file="(arithmetic)",
+                                        detail=f"formula is the template's {label} — verified by rule"))
+            elif col == 22:
+                outcome, expected = check_nri_arithmetic(
+                    ws.cell(row, 7).value, ws.cell(row, 23).value, value)
+                if outcome == MISMATCH:
+                    report.add(TruthFinding(_OWN, cell, label, value, float(expected),
+                                            MISMATCH, source_file="(arithmetic)"))
+                elif outcome in (CONFIRMED,):
+                    report.add(TruthFinding(_OWN, cell, label, value, expected,
+                                            VERIFIED_BY_RULE, detail="NRI equals 1-royalty-ORRI"))
+    # Header aggregates: B5=SUM(U), D5=B5/A5, etc. — verified as the right formula.
+    for coord, shape_prefix, label in (("B5", "=SUM(U", "Sum of net acres"),
+                                       ("C5", "=SUM(X", "Sum of net revenue acres"),
+                                       ("D5", "=B5/A5", "Headline WI = net acres / unit gross"),
+                                       ("E5", "=C5/A5", "Headline NRI")):
+        v = ws[coord].value
+        if isinstance(v, str) and v.replace(" ", "").upper().startswith(shape_prefix.replace(" ", "").upper()):
+            report.add(TruthFinding(_OWN, coord, label, v, shape_prefix, VERIFIED_BY_RULE,
+                                    source_file="(arithmetic)", detail=f"{label} — verified by rule"))
+
+
+# ---------------------------------------------------------------------------
+# VERIFIED_BY_MANIFEST — project-level values checked against the manifest/log
+# ---------------------------------------------------------------------------
+
+# Summary label -> the manifest attribute that IS its source of truth.
+_MANIFEST_FIELDS = {
+    "client": ("client_name", "seller_name"),
+    "acquisition": ("acquisition_name",),
+    "operator": ("operator", "seller_name"),
+    "state": ("state",),
+    "county": ("county",),
+    "landman": ("landman_name",),
+}
+
+
+def check_manifest_cells(workbook, manifest, report: TruthReport,
+                         sheet: str = "Summary", label_col: int = 1, value_col: int = 2) -> None:
+    """Project-level Summary values against the manifest — their real source.
+
+    Client "BKV Corp.", Acquisition "Project Emirates", Operator "EOG" do not
+    come from a title document and never will; the manifest (built from the
+    Project Log and the client's own inputs) is where they are true or false.
+    Matching the cell to the manifest is genuine verification against that
+    source. A cell that does NOT match its manifest value is a MISMATCH.
+    """
+    if manifest is None or sheet not in workbook.sheetnames:
+        return
+    ws = workbook[sheet]
+    for row in ws.iter_rows():
+        label_cell = ws.cell(row[0].row, label_col)
+        value_cell = ws.cell(row[0].row, value_col)
+        if not isinstance(label_cell.value, str) or value_cell.value in (None, ""):
+            continue
+        key = re.sub(r"[^a-z]", "", label_cell.value.lower())
+        field = next((f for tag, f in _MANIFEST_FIELDS.items() if tag in key), None)
+        if field is None:
+            continue
+        expected = next((getattr(manifest, a, None) for a in field
+                         if getattr(manifest, a, None)), None)
+        if not expected:
+            continue
+        cell = _cell_name(value_col, row[0].row)
+        found, _form = states_value_normalized(str(expected), value_cell.value)
+        also = states_value_normalized(str(value_cell.value), str(expected))[0]
+        if found or also:
+            report.add(TruthFinding(sheet, cell, label_cell.value.rstrip(":"),
+                                    value_cell.value, expected, VERIFIED_BY_MANIFEST,
+                                    source_file="project manifest",
+                                    detail=f"matches manifest.{field[0]}"))
+        else:
+            report.add(TruthFinding(sheet, cell, label_cell.value.rstrip(":"),
+                                    value_cell.value, expected, MISMATCH,
+                                    source_file="project manifest",
+                                    detail=f"does not match manifest.{field[0]} = {expected!r}"))
+
+
 def check_unaudited_sheets(workbook, cites: list[AuditCite], report: TruthReport,
                            client_sheets: list[str]) -> None:
     """Sheets with populated client cells but no cell+document cite at all."""
@@ -658,11 +802,15 @@ def check_unaudited_sheets(workbook, cites: list[AuditCite], report: TruthReport
 
 
 def run_source_truth(workbook, search_roots, dpu_by_lease=None,
-                     ocr_fn=None, client_sheets=None) -> TruthReport:
+                     ocr_fn=None, client_sheets=None, manifest=None) -> TruthReport:
     """Re-read every cited source and confirm the workbook against it."""
     report = TruthReport()
     index = SourceIndex(search_roots, ocr_fn=ocr_fn)
     cites = read_audit_cites(workbook)
+    # Strongest / most specific checkers first — they own their cells, and the
+    # generic passes below skip anything already covered (see TruthReport.add).
+    check_manifest_cells(workbook, manifest, report)
+    check_computed_cells(workbook, report)
     check_ownership_report(workbook, index, cites, dpu_by_lease or {}, report)
     check_cell_level_cites(workbook, index, cites, report)
     check_unaudited_sheets(workbook, cites, report,
@@ -673,20 +821,20 @@ def run_source_truth(workbook, search_roots, dpu_by_lease=None,
 
 def truth_table(report: TruthReport) -> str:
     lines = [f"SOURCE TRUTH - {report.summary()}", ""]
-    lines.append("sheet".ljust(30) + "confirmed".rjust(10) + "anchored".rjust(9)
-                 + "semantic".rjust(9) + "MISMATCH".rjust(9) + "unverif.".rjust(9))
+    cols = ("confirmed", "anchored", "semantic", "by-rule", "by-manif", "verified", "MISMATCH", "unverif.")
+    lines.append("sheet".ljust(28) + "".join(c.rjust(9) for c in cols))
     total = SheetTruth("TOTAL")
+    def row(name, s):
+        return (name.ljust(28) + str(s.confirmed).rjust(9) + str(s.anchored).rjust(9)
+                + str(s.semantic).rjust(9) + str(s.by_rule).rjust(9) + str(s.by_manifest).rjust(9)
+                + str(s.verified).rjust(9) + str(s.mismatched).rjust(9) + str(s.unverifiable).rjust(9))
     for sheet in sorted(report.per_sheet):
         s = report.per_sheet[sheet]
-        lines.append(sheet.ljust(30) + str(s.confirmed).rjust(10) + str(s.anchored).rjust(9)
-                     + str(s.semantic).rjust(9) + str(s.mismatched).rjust(9)
-                     + str(s.unverifiable).rjust(9))
-        total.confirmed += s.confirmed; total.anchored += s.anchored
-        total.semantic += s.semantic; total.mismatched += s.mismatched
-        total.unverifiable += s.unverifiable
-    lines.append("TOTAL".ljust(30) + str(total.confirmed).rjust(10) + str(total.anchored).rjust(9)
-                 + str(total.semantic).rjust(9) + str(total.mismatched).rjust(9)
-                 + str(total.unverifiable).rjust(9))
+        lines.append(row(sheet, s))
+        for attr in ("confirmed", "anchored", "semantic", "by_rule", "by_manifest",
+                     "mismatched", "unverifiable"):
+            setattr(total, attr, getattr(total, attr) + getattr(s, attr))
+    lines.append(row("TOTAL", total))
     lines.append("")
     if report.mismatches:
         lines.append(f"MISMATCHES ({len(report.mismatches)}) - the workbook contradicts its source:")

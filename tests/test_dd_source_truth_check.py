@@ -218,3 +218,93 @@ def test_audit_cites_parse_cell_row_and_page():
     cites = read_audit_cites(wb)
     assert cites[0].row == 17 and cites[0].cell is None and cites[0].page == 5
     assert cites[1].cell == "B23" and cites[1].row is None and cites[1].page == 1
+
+
+# --- VERIFIED_BY_RULE: computed cells checked against their own arithmetic ----
+
+from types import SimpleNamespace  # noqa: E402
+from src.dd.source_truth_check import (  # noqa: E402
+    VERIFIED_BY_RULE, VERIFIED_BY_MANIFEST, check_computed_cells, check_manifest_cells, TruthReport,
+)
+
+
+def _own_wb(cells):
+    wb = openpyxl.Workbook(); wb.remove(wb.active)
+    ws = wb.create_sheet("Ownership Report")
+    for coord, v in cells.items():
+        ws[coord] = v
+    return wb
+
+
+def test_net_acre_formula_is_verified_by_rule():
+    wb = _own_wb({"B8": "0190122-001", "U8": "=R8*S8*T8"})
+    report = TruthReport(); check_computed_cells(wb, report)
+    hit = next(f for f in report.findings if f.cell == "U8")
+    assert hit.outcome == VERIFIED_BY_RULE and "R*S*T" in hit.field_name
+
+
+def test_headline_wi_formula_is_verified_by_rule():
+    wb = _own_wb({"B8": "0190122-001", "D5": "=B5/A5"})
+    report = TruthReport(); check_computed_cells(wb, report)
+    assert any(f.cell == "D5" and f.outcome == VERIFIED_BY_RULE for f in report.findings)
+
+
+def test_nri_consistent_with_its_inputs_is_by_rule():
+    wb = _own_wb({"B8": "0190122-001", "G8": 0.2, "W8": 0, "V8": 0.8})
+    report = TruthReport(); check_computed_cells(wb, report)
+    assert any(f.cell == "V8" and f.outcome == VERIFIED_BY_RULE for f in report.findings)
+
+
+def test_nri_inconsistent_with_its_inputs_is_a_mismatch_not_by_rule():
+    wb = _own_wb({"B8": "0190122-001", "G8": 0.25, "W8": 0, "V8": 0.9})   # should be .75
+    report = TruthReport(); check_computed_cells(wb, report)
+    assert any(f.cell == "V8" and f.outcome == MISMATCH for f in report.findings)
+
+
+def test_by_rule_is_not_a_dumping_ground():
+    # A non-formula, non-computable cell gets NOTHING from the rule checker.
+    wb = _own_wb({"B8": "0190122-001", "O8": "some legal prose"})
+    report = TruthReport(); check_computed_cells(wb, report)
+    assert not any(f.cell == "O8" for f in report.findings)
+
+
+# --- VERIFIED_BY_MANIFEST: project values against the manifest ---------------
+
+def _summary_wb(pairs):
+    wb = openpyxl.Workbook(); wb.remove(wb.active)
+    ws = wb.create_sheet("Summary")
+    for i, (label, value) in enumerate(pairs, start=2):
+        ws.cell(i, 1).value = label
+        ws.cell(i, 2).value = value
+    return wb
+
+
+_MANIFEST = SimpleNamespace(client_name="BKV Corp.", acquisition_name="Project Emirates",
+                            operator="EOG Resources, Inc.", seller_name="EOG Resources, Inc.",
+                            state="Texas", county="Montague", landman_name="Renato Alves")
+
+
+def test_client_matching_the_manifest_is_verified_by_manifest():
+    wb = _summary_wb([("Client:", "BKV Corp."), ("Operator(s):", "EOG Resources, Inc.")])
+    report = TruthReport(); check_manifest_cells(wb, _MANIFEST, report)
+    assert all(f.outcome == VERIFIED_BY_MANIFEST for f in report.findings)
+    assert {f.cell for f in report.findings} == {"B2", "B3"}
+
+
+def test_client_differing_from_the_manifest_is_a_mismatch():
+    wb = _summary_wb([("Client:", "ACME LLC")])
+    report = TruthReport(); check_manifest_cells(wb, _MANIFEST, report)
+    hit = next(f for f in report.findings if f.cell == "B2")
+    assert hit.outcome == MISMATCH and "BKV Corp." in str(hit.source_value)
+
+
+def test_operator_casing_still_matches_the_manifest():
+    wb = _summary_wb([("Operator(s):", "EOG RESOURCES INC")])
+    report = TruthReport(); check_manifest_cells(wb, _MANIFEST, report)
+    assert report.findings[0].outcome == VERIFIED_BY_MANIFEST
+
+
+def test_a_non_manifest_label_is_left_alone():
+    wb = _summary_wb([("Potential Defect(s):", "None identified")])
+    report = TruthReport(); check_manifest_cells(wb, _MANIFEST, report)
+    assert report.findings == []
