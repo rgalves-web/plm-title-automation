@@ -668,3 +668,158 @@ def test_col_O_blanked_pending_document_passes():
     tpl = _sheet_wb({"Lease Review": {"A2": "L1", "O2": clause}})
     ddr = _sheet_wb({"Lease Review": {"A2": "0220335-001", "O2": None}})
     assert check_template_value_not_replaced(ddr, tpl) == []
+
+
+# --- Vol/Page vs the DPU Exhibit A: the Flynt "Volume 37 vs 371" defect ---
+# This shipped and was caught ONLY because an amber flag happened to sit on the
+# cell. A dropped digit is invisible on a page of volume numbers; luck is not a
+# control. Exhibit A decides it mechanically, so it FAILS.
+
+_DPU_EXHIBIT_A = {
+    "0190122-001": ("402", "50"),
+    "0190122-006": ("371", "293"),      # Jon Robert Flynt
+    "0220344-006": ("405", "343"),      # Marie Hulme
+    "0220344-009": ("475", "39"),       # John A. Cox
+    "0220344-024": (None, None),        # the DPU itself prints "Volume__, Page__"
+}
+
+
+def _own_recording(rows: list[tuple[str, object, object]]):
+    """(lease, book, page) -> an Ownership Report with cols B/K/L."""
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    ws = wb.create_sheet("Ownership Report")
+    for i, (lease, book, page) in enumerate(rows):
+        r = 8 + i
+        ws.cell(r, 2).value = lease
+        ws.cell(r, 11).value = book
+        ws.cell(r, 12).value = page
+    return wb
+
+
+def test_flynt_volume_37_instead_of_371_fails():
+    from src.dd.ddr_validator import check_recording_matches_dpu
+    wb = _own_recording([("0190122-006", "37", "293")])   # digit dropped
+    hits = check_recording_matches_dpu(wb, _DPU_EXHIBIT_A)
+    assert len(hits) == 1
+    assert hits[0].rule == "recording_matches_dpu"
+    assert "Vol 371, Pg 293" in hits[0].expected      # what Exhibit A says
+    assert "Vol 37, Pg 293" in hits[0].expected       # what the workbook says
+
+
+def test_correct_flynt_recording_passes():
+    from src.dd.ddr_validator import check_recording_matches_dpu
+    wb = _own_recording([("0190122-006", "371", "293")])
+    assert check_recording_matches_dpu(wb, _DPU_EXHIBIT_A) == []
+
+
+def test_a_neighbouring_leases_recording_copied_in_fails():
+    # Hulme's row carrying John A Cox's 475/39 — the same class of defect.
+    from src.dd.ddr_validator import check_recording_matches_dpu
+    wb = _own_recording([("0220344-006", "475", "39")])
+    hits = check_recording_matches_dpu(wb, _DPU_EXHIBIT_A)
+    assert hits and "Vol 405, Pg 343" in hits[0].expected
+
+
+def test_transposed_page_fails():
+    from src.dd.ddr_validator import check_recording_matches_dpu
+    wb = _own_recording([("0190122-001", "402", "05")])   # 50 -> 05
+    assert len(check_recording_matches_dpu(wb, _DPU_EXHIBIT_A)) == 1
+
+
+def test_recording_blank_in_the_dpu_itself_is_not_a_failure():
+    # The DPU prints "Volume__, Page__" for -024; nothing to contradict.
+    from src.dd.ddr_validator import check_recording_matches_dpu
+    wb = _own_recording([("0220344-024", "999", "1")])
+    assert check_recording_matches_dpu(wb, _DPU_EXHIBIT_A) == []
+
+
+def test_blank_recording_in_the_workbook_is_not_this_rules_business():
+    # A blank carries its own pending reason; this rule judges wrong values.
+    from src.dd.ddr_validator import check_recording_matches_dpu
+    wb = _own_recording([("0190122-006", None, None)])
+    assert check_recording_matches_dpu(wb, _DPU_EXHIBIT_A) == []
+
+
+def test_lease_absent_from_exhibit_a_is_left_to_source_truth():
+    from src.dd.ddr_validator import check_recording_matches_dpu
+    wb = _own_recording([("9999999-999", "1", "2")])
+    assert check_recording_matches_dpu(wb, _DPU_EXHIBIT_A) == []
+
+
+def test_rule_is_skipped_without_a_dpu_map():
+    from src.dd.ddr_validator import check_recording_matches_dpu
+    wb = _own_recording([("0190122-006", "37", "293")])
+    assert check_recording_matches_dpu(wb, None) == []
+
+
+def test_a_wrong_recording_blocks_ready_end_to_end():
+    wb = _ddr([_own_row()], _audited())
+    ws = wb["Ownership Report"]
+    ws.cell(8, 2).value = "0190122-006"
+    ws.cell(8, 11).value = "37"
+    ws.cell(8, 12).value = "293"
+    report = validate_ddr(wb, _allow(), dpu_by_lease=_DPU_EXHIBIT_A)
+    assert any(f.rule == "recording_matches_dpu" for f in report.failures)
+    assert not report.ready
+
+
+# --- no amber review fills survive into a deliverable ---
+
+def test_amber_review_fill_fails():
+    from openpyxl.styles import PatternFill
+    from src.dd.ddr_validator import check_no_review_fills
+    wb = _ddr([_own_row()], _audited())
+    wb["Ownership Report"]["S8"].fill = PatternFill(
+        fill_type="solid", start_color="FFEB9C", end_color="FFEB9C")
+    hits = check_no_review_fills(wb)
+    assert hits and hits[0].rule == "review_fill_present"
+    assert "nobody has confirmed" in hits[0].expected
+
+
+def test_a_workbook_with_no_flags_passes():
+    from src.dd.ddr_validator import check_no_review_fills
+    assert check_no_review_fills(_ddr([_own_row()], _audited())) == []
+
+
+def test_other_fills_are_not_review_flags():
+    from openpyxl.styles import PatternFill
+    from src.dd.ddr_validator import check_no_review_fills
+    wb = _ddr([_own_row()], _audited())
+    wb["Ownership Report"]["S8"].fill = PatternFill(
+        fill_type="solid", start_color="D9D9D9", end_color="D9D9D9")   # header grey
+    assert check_no_review_fills(wb) == []
+
+
+def test_a_review_fill_blocks_ready():
+    from openpyxl.styles import PatternFill
+    wb = _ddr([_own_row()], _audited())
+    wb["Ownership Report"]["S8"].fill = PatternFill(
+        fill_type="solid", start_color="FFEB9C", end_color="FFEB9C")
+    assert not validate_ddr(wb, _allow()).ready
+
+
+def test_an_unbuilt_allowlist_does_not_accuse_every_lease():
+    # An empty allowlist means it never got built (missing XREF, unit not found)
+    # — not that nothing belongs. Against the real Maxwell workbook this produced
+    # 88 false failures across every sheet. It must stand down instead.
+    from src.dd.ddr_validator import UnitAllowlist, check_foreign_unit
+    empty = UnitAllowlist(unit_name="MAXWELL A UNIT", identity_tokens={"MAXWELL"})
+    cells = [("B8", 8, 2, "0190122-001"), ("B9", 9, 2, "K1400813"), ("B10", 10, 2, "T0141486")]
+    assert check_foreign_unit("Ownership Report", cells, empty) == []
+
+
+def test_an_unbuilt_allowlist_still_catches_another_units_name():
+    # Unit-name phrases need only our identity tokens, so they keep working.
+    from src.dd.ddr_validator import UnitAllowlist, check_foreign_unit
+    empty = UnitAllowlist(unit_name="MAXWELL A UNIT", identity_tokens={"MAXWELL"})
+    cells = [("A9", 9, 1, "Wiese Unit opinion, 50.73 acres")]
+    hits = check_foreign_unit("PLM Title Review", cells, empty)
+    assert hits and "WIESE" in hits[0].expected.upper()
+
+
+def test_a_populated_allowlist_still_catches_a_foreign_lease():
+    from src.dd.ddr_validator import check_foreign_unit
+    cells = [("B8", 8, 2, "9999999-999")]
+    hits = check_foreign_unit("Ownership Report", cells, _allow())
+    assert hits and "9999999-999" in hits[0].expected

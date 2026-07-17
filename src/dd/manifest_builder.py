@@ -123,13 +123,37 @@ def build_manifest(
     return manifest, build_log
 
 
+# Project Log columns, resolved by header — never by position. The positional
+# reads this replaces were ALREADY WRONG and nobody noticed: row[6] was assigned
+# to aov_percent but column 6 is "Scope of Review", and row[7] to scope_of_review
+# but column 7 is "Lease to Well XREF" — so the manifest carried the scope text
+# in the AOV field and a column TITLE in the scope field. Silent, plausible, and
+# wrong: exactly the failure header resolution exists to prevent.
+_PROJECT_LOG_COLUMNS = [
+    ColumnSpec("unit_name", ["UNIT NAME"]),
+    ColumnSpec("operator", ["OPERATOR"]),
+    ColumnSpec("county", ["COUNTY"]),
+    ColumnSpec("scope_of_review", ["SCOPE OF REVIEW"]),
+    ColumnSpec("aov_percent", ["AOV%", "AOV %", "AOV PERCENT"], required=False),
+    ColumnSpec("landman", ["LANDMAN"], required=False),
+]
+
+
 def _load_project_log(manifest: UnitManifest, project_log_path: str | Path) -> None:
     wb = openpyxl.load_workbook(project_log_path, read_only=True, data_only=True)
     ws = wb[PROJECT_LOG_SHEET]
 
+    header = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
+    index = resolve_header_columns(header, _PROJECT_LOG_COLUMNS, source="Project Log")
+    unit_col = index["unit_name"]
+
+    def cell(row, field):
+        pos = index.get(field)
+        return row[pos] if pos is not None and pos < len(row) else None
+
     matches = []
     for row in ws.iter_rows(min_row=2, values_only=True):
-        unit_cell = row[4]  # column E
+        unit_cell = row[unit_col] if unit_col < len(row) else None
         if unit_cell and str(unit_cell).strip().casefold() == manifest.unit_name.casefold():
             matches.append(row)
     wb.close()
@@ -145,10 +169,10 @@ def _load_project_log(manifest: UnitManifest, project_log_path: str | Path) -> N
         )
 
     row = matches[0]
-    manifest.operator = row[1]  # column B
-    manifest.county = row[2]  # column C
-    manifest.aov_percent = row[6]  # column G
-    manifest.scope_of_review = row[7]  # column H
+    manifest.operator = cell(row, "operator")
+    manifest.county = cell(row, "county")
+    manifest.aov_percent = cell(row, "aov_percent")
+    manifest.scope_of_review = cell(row, "scope_of_review")
     if manifest.operator:
         manifest.seller_name = str(manifest.operator).strip()
 

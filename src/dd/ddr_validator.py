@@ -630,6 +630,82 @@ def check_template_value_not_replaced(workbook, template_workbook,
     return findings
 
 
+def check_recording_matches_dpu(workbook, dpu_by_lease: dict[str, tuple] | None,
+                                sheet: str = "Ownership Report",
+                                lease_col: int = 2, book_col: int = 11,
+                                page_col: int = 12) -> list[Finding]:
+    """Ownership Record Book/Page must equal the DPU Exhibit A, exactly.
+
+    The Declaration's Exhibit A is the authority for every unit lease's recording
+    reference. A wrong one sends the reader to the wrong instrument, and it is
+    invisible on inspection: "Volume 37" and "Volume 371" look equally plausible
+    on a page of volume numbers. That exact defect (lease 0190122-006, Flynt —
+    the DPU says Volume 371, Page 293) shipped and was caught only because an
+    amber review-flag happened to be sitting on the cell. Luck is not a control.
+
+    A digit dropped, a neighbouring lease's reference copied (Hulme carrying
+    Cox's 475/39), a transposition — all are the same failure, and all are
+    mechanically decidable against Exhibit A. So they FAIL rather than warn.
+    """
+    if not dpu_by_lease or sheet not in workbook.sheetnames:
+        return []
+    ws = workbook[sheet]
+    findings: list[Finding] = []
+    for row in range(1, ws.max_row + 1):
+        lease = ws.cell(row, lease_col).value
+        if not is_populated(lease):
+            continue
+        entry = dpu_by_lease.get(str(lease).strip())
+        if not entry:
+            continue                      # not in Exhibit A: source-truth reports it
+        src_book, src_page = (str(x).strip() if x is not None else None for x in entry)
+        book, page = ws.cell(row, book_col).value, ws.cell(row, page_col).value
+        if not is_populated(book) and not is_populated(page):
+            continue                      # blank carries its own pending reason
+        got = (str(book).strip() if book is not None else None,
+               str(page).strip() if page is not None else None)
+        if src_book is None or src_page is None:
+            continue                      # the DPU itself prints a blank
+        if got != (src_book, src_page):
+            findings.append(Finding(
+                sheet, f"K{row}/L{row}", f"Vol {got[0]}, Pg {got[1]}",
+                "recording_matches_dpu",
+                f"lease {lease} is recorded at Vol {src_book}, Pg {src_page} per the DPU's "
+                f"Exhibit A — the workbook says Vol {got[0]}, Pg {got[1]}"))
+    return findings
+
+
+# The writer's amber review fill (ddr_writer.REVIEW_FILL) marks a value a human
+# must look at. It is a working state, not a delivery state.
+_REVIEW_FILL_RGB = "FFEB9C"
+
+
+def check_no_review_fills(workbook) -> list[Finding]:
+    """No amber review-flag cells may survive into a deliverable.
+
+    The fill means "a human has not confirmed this yet". Shipping it either sends
+    the client a value nobody stood behind, or — worse — the colour is stripped by
+    a copy/paste and the doubt disappears while the value stays. Either way the
+    flag has to be resolved before delivery, not carried into it.
+    """
+    findings: list[Finding] = []
+    for sheet_name in workbook.sheetnames:
+        if sheet_name == _AUDIT_SHEET:
+            continue
+        for row in workbook[sheet_name].iter_rows():
+            for cell in row:
+                fill = cell.fill
+                if not fill or fill.fill_type != "solid":
+                    continue
+                rgb = str(getattr(fill.start_color, "rgb", "") or "")
+                if rgb.upper().endswith(_REVIEW_FILL_RGB):
+                    findings.append(Finding(
+                        sheet_name, cell.coordinate, cell.value, "review_fill_present",
+                        "an amber review flag means nobody has confirmed this value — "
+                        "resolve it before delivery; a deliverable carries no open flags"))
+    return findings
+
+
 def check_orphan_cells(sheet_name: str, cells, spec: SheetSpec) -> list[Finding]:
     """Populated cells outside the sheet's declared block."""
     end = declared_block_end(cells, spec)
@@ -687,10 +763,26 @@ def check_template_sample(sheet_name: str, cells) -> list[Finding]:
 
 
 def check_foreign_unit(sheet_name: str, cells, allow: UnitAllowlist) -> list[Finding]:
-    """Identifiers and unit names that do not belong to THIS unit."""
+    """Identifiers and unit names that do not belong to THIS unit.
+
+    The ID checks need a populated allowlist to mean anything. An EMPTY one does
+    not mean "nothing belongs here" — it means the allowlist never got built (a
+    missing XREF, a unit not found), and treating that as evidence turns every
+    legitimate lease number into a confident accusation. Verified: an empty
+    allowlist against the real Maxwell workbook produced 88 false failures across
+    every sheet. Absence of knowledge is not knowledge of absence; the ID rules
+    stand down and the run says so instead.
+    """
     if sheet_name == _AUDIT_SHEET or allow is None:
         return []
     findings = []
+    if not (allow.leases or allow.contracts or allow.title_opinions):
+        # Unit-name phrases still work: they need only our identity tokens.
+        for coord, _row, _col, value in cells:
+            for unit in allow.foreign_units_in(str(value)):
+                findings.append(Finding(sheet_name, coord, value, "foreign_unit_leakage",
+                                        f"names another unit ({unit}) — not {allow.unit_name}"))
+        return findings
     for coord, _row, _col, value in cells:
         text = str(value)
         for lease in allow.unknown_leases(text):
@@ -830,6 +922,7 @@ def _audit_index(workbook) -> tuple[set[str], dict[str, str]]:
 def validate_ddr(workbook, allowlist: UnitAllowlist | None = None,
                  expected_sheets: set[str] | None = None,
                  documents_available: set[str] | None = None,
+                 dpu_by_lease: dict | None = None,
                  client_name: str | None = None,
                  template_workbook=None,
                  today=None) -> ValidationReport:
@@ -849,6 +942,8 @@ def validate_ddr(workbook, allowlist: UnitAllowlist | None = None,
     report.findings.extend(check_submission_date(workbook, today=today))
     report.findings.extend(check_disclaimer_names_the_client(workbook, client_name))
     report.findings.extend(check_headers_have_no_placeholder(workbook, template_workbook))
+    report.findings.extend(check_recording_matches_dpu(workbook, dpu_by_lease))
+    report.findings.extend(check_no_review_fills(workbook))
     if template_workbook is not None:
         report.findings.extend(check_template_value_not_replaced(workbook, template_workbook))
 
@@ -915,3 +1010,57 @@ def console_summary(report: ValidationReport) -> str:
         lines.append(f"\nPENDING — blanks with a recorded reason ({len(report.pending)}), not failures:")
         lines.extend("  " + f.describe() for f in report.pending)
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# The mandatory gate
+# ---------------------------------------------------------------------------
+
+class DDRNotReadyError(RuntimeError):
+    """A DDR failed validation. It exists on disk; it is NOT ready to send."""
+
+
+def run_final_validation(
+    output_path,
+    *,
+    template_path=None,
+    allowlist=None,
+    dpu_by_lease=None,
+    documents_available=None,
+    client_name=None,
+    source_roots=(),
+    run_source_truth_check: bool = True,
+) -> "ValidationReport":
+    """Validate a written DDR and drop its sidecar. The pipeline's last act.
+
+    Called for EVERY unit, always: a gate that runs when someone remembers is a
+    suggestion. It never edits the workbook — the report is a sidecar file, so
+    the gate cannot contaminate what it is judging.
+
+    Returns the report; the caller decides whether a red run raises. `ready`
+    means both structurally clean AND nothing contradicting its own source.
+    """
+    import openpyxl
+
+    from pathlib import Path
+
+    output_path = Path(output_path)
+    workbook = openpyxl.load_workbook(output_path)
+    template_workbook = (openpyxl.load_workbook(template_path)
+                         if template_path and Path(template_path).exists() else None)
+    expected = expected_sheet_set(template_workbook) if template_workbook else None
+
+    report = validate_ddr(
+        workbook, allowlist,
+        expected_sheets=expected,
+        documents_available=documents_available,
+        dpu_by_lease=dpu_by_lease,
+        client_name=client_name,
+        template_workbook=template_workbook,
+    )
+    if run_source_truth_check and source_roots:
+        from src.dd.source_truth_check import run_source_truth
+        report.truth = run_source_truth(workbook, list(source_roots),
+                                        dpu_by_lease=dpu_by_lease)
+    write_validation_sidecar(report, output_path)
+    return report

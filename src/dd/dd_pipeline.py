@@ -345,6 +345,36 @@ def enrich_lease_rows_with_details(
     return gate_results, conflicts
 
 
+def _documents_on_disk(unit_folder) -> set[str]:
+    """Contract/lease identifiers whose packages exist in the unit folder."""
+    if unit_folder is None:
+        return set()
+    from src.dd.ddr_validator import documents_on_disk
+    return documents_on_disk(unit_folder)
+
+
+def _validation_allowlist(manifest: UnitManifest, lease_review_rows: list[dict[str, Any]]):
+    """What legitimately belongs to THIS unit, for the leakage rules."""
+    from src.dd.agreements_xref import unit_identity_tokens
+    from src.dd.ddr_validator import UnitAllowlist
+
+    return UnitAllowlist(
+        unit_name=manifest.unit_name,
+        leases={str(r.get("lease_no")) for r in lease_review_rows if r.get("lease_no")}
+               | {str(x.lease_no) for x in manifest.leases if getattr(x, "lease_no", None)},
+        contracts={str(c.file_number) for c in manifest.reference_contracts
+                   if getattr(c, "file_number", None)},
+        title_opinions={str(t.file_number) for t in manifest.title_opinions
+                        if getattr(t, "file_number", None)},
+        identity_tokens=set(unit_identity_tokens(manifest.unit_name)),
+    )
+
+
+def _validation_source_roots(unit_folder, to_files_dir, lease_document_dir) -> list[Path]:
+    """Where source-truth looks for the documents the audit trail cites."""
+    return [Path(p) for p in (unit_folder, to_files_dir, lease_document_dir) if p]
+
+
 def _register_pending_reasons(rows: list[dict[str, Any]], registry) -> None:
     """Turn each row's per-field reason into a Pending Items entry.
 
@@ -1150,6 +1180,7 @@ def run_dd_pipeline_for_unit(
     from src.dd.dd_pending import PendingRegistry
     pending_registry = PendingRegistry()
     dpu_notes: list[str] = []
+    dpu_recording_map: dict[str, tuple] = {}
     if unit_folder is not None:
         from src.dd.dpu_source import apply_recording_to_rows, load_unit_dpu, reconcile_lease_set
         dpu = load_unit_dpu(
@@ -1163,6 +1194,10 @@ def run_dd_pipeline_for_unit(
         # difference so the exclusions are auditable, not silent.
         dpu_notes.extend(reconcile_lease_set(
             dpu, [str(r.get("lease_no")) for r in lease_review_rows]))
+        # Exhibit A is the authority for every recording reference (the
+        # "Volume 37 vs 371" class of defect is decided against it).
+        dpu_recording_map = {l.lease_no: (l.record_book, l.record_page)
+                             for l in dpu.leases}
         if dpu.dpu_source:
             _emit(progress_callback, "ok",
                   f"Unit {unit_name} — Record Book/Page for {len(applied)}/{len(lease_review_rows)} "
@@ -1237,6 +1272,30 @@ def run_dd_pipeline_for_unit(
         runsheet_clean_note=runsheet_clean_note,
         pending_registry=pending_registry,
     )
+
+    # MANDATORY final gate. Every unit, every run — a gate that runs when someone
+    # remembers is a suggestion, and Maxwell shipped ~30 correction cycles' worth
+    # of defects that these rules now catch mechanically. The DDR is written
+    # either way; `validation_ready` says whether it may be SENT.
+    from src.dd.ddr_validator import DDRNotReadyError, run_final_validation
+
+    validation = run_final_validation(
+        ddr_result.output_path,
+        template_path=ddr_template_path,
+        allowlist=_validation_allowlist(manifest, lease_review_rows),
+        dpu_by_lease=dpu_recording_map,
+        documents_available=_documents_on_disk(unit_folder),
+        client_name=manifest.client_name,
+        source_roots=_validation_source_roots(unit_folder, to_files_dir, lease_document_dir),
+    )
+    _emit(progress_callback, "ok" if validation.ready else "error",
+          f"Unit {unit_name} — validation: {validation.summary()}")
+    for finding in validation.failures[:20]:
+        _emit(progress_callback, "error", f"  {finding.describe()}")
+    if not validation.ready:
+        review_flags.potential_defects.append(
+            f"VALIDATION NOT READY — {validation.summary()}. See the sidecar report next to "
+            "the DDR; this workbook must not be sent until every FAIL is resolved.")
 
     summary = {
         "unit_name": unit_name,
