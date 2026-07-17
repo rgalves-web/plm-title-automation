@@ -262,3 +262,98 @@ def check_completeness(summary: Any, anchor_text: str) -> list[str]:
         if re.search(pattern, anchor_lower) and not re.search(pattern, summary_text):
             dropped.append(label)
     return dropped
+
+
+# ---------------------------------------------------------------------------
+# Provenance on write: find the document + page that actually backs each value
+# ---------------------------------------------------------------------------
+
+# Which sheet/column carries which kind of value, and where its backing document
+# lives. This is the map from a written cell to the documents worth searching.
+_OWN_FIELDS = {19: "MI Value", 20: "WI Value"}          # S, T -> controlling opinions
+_OWN_RECORDING = (11, 12)                                # K, L -> the DPU Exhibit A
+
+
+def populate_provenance(rows, source_index, *, controlling_docs=None,
+                        dpu_recording_map=None, xref_name="Lease to Well XREF"):
+    """Build a ProvenanceStore for the written rows, locating each page
+    INDEPENDENTLY by searching the source — never trusting the extractor's cite.
+
+    Returns (store, notes). A value found in a document is recorded with that
+    document + page (and if that document differs from the one the pipeline
+    thought, the note flags a miscitation — this is how the superseded-opinion
+    "cited ORIG but the value is in SUPP" defect surfaces). A value that comes
+    from the XREF is recorded as a StructuredSource — a real, re-readable
+    citation, not a document and not "no source". A value found nowhere is left
+    out; the truth checker reports it UNVERIFIABLE.
+    """
+    from src.dd.source_truth_check import _norm_key, normalize_for_match, value_variants
+
+    store = ProvenanceStore()
+    notes: list[str] = []
+    controlling_docs = list(controlling_docs or [])
+
+    def locate_in_docs(value, owner, field, claimed_doc=None):
+        """(document_name, page) for the doc+page where the OWNER and the VALUE
+        co-occur — searched independently.
+
+        Owner-anchoring is not optional. A bare fraction like 1/36 or a decimal
+        recurs across opinions, so searching for the value alone cites whichever
+        document happens to contain that number — my first cut cited Kramer for a
+        Cox owner exactly this way. Requiring the owner's name on the same page
+        as the value makes the citation distinctive and correct, and it is the
+        page a human would actually turn to.
+        """
+        owner_key = _norm_key(owner) if owner else ""
+        best = None
+        for name, text in controlling_docs:
+            variants = [v for v in value_variants(value) if normalize_for_match(v)]
+            for page_no, page in enumerate(split_pages(text), start=1):
+                page_norm = normalize_for_match(page)
+                if not any(normalize_for_match(v) in page_norm for v in variants):
+                    continue
+                # Owner must appear on the SAME page as the value.
+                if owner_key and owner_key[:14] not in _norm_key(page):
+                    continue
+                match = next(v for v in variants if normalize_for_match(v) in page_norm)
+                candidate = (name, page_no, match)
+                if best is None:
+                    best = candidate
+                if claimed_doc and _norm_key(claimed_doc) in _norm_key(name):
+                    return candidate           # claimed doc confirmed on this page
+        return best
+
+    for r in rows:
+        row_no = r.get("_excel_row")
+        if not row_no:
+            continue
+        # MI / WI -> the controlling opinion where THIS OWNER's value is stated.
+        owner = r.get("lessor")
+        for col, field in _OWN_FIELDS.items():
+            value = r.get("mi_value" if col == 19 else "wi_value")
+            if value is None:
+                continue
+            claimed = r.get("wi_source") or r.get("source_to_file_number") or r.get("source_lease_detail")
+            located = locate_in_docs(value, owner, field, claimed)
+            cell = f"{'S' if col == 19 else 'T'}{row_no}"
+            if located:
+                name, page, quote = located
+                store.put("Ownership Report", cell,
+                          CellSource(name, page, quote, "search", field))
+                if claimed and _norm_key(str(claimed)) not in _norm_key(name):
+                    notes.append(f"Ownership {cell}: {owner} value found in {name} p.{page}, "
+                                 f"but the pipeline cited {claimed!r} — MISCITATION corrected.")
+        # Record Book/Page -> the DPU, page located independently.
+        if r.get("record_book") and dpu_recording_map is not None:
+            store.put("Ownership Report", f"K{row_no}",
+                      CellSource("DPU Exhibit A", None,
+                                 f"Vol {r.get('record_book')}, Pg {r.get('record_page')}",
+                                 "structured", "Record Book/Page"))
+        # Lease no / lessor / lessee genuinely come from the XREF — a real,
+        # re-readable citation, recorded as such rather than dressed up as a doc.
+        for col, key, field in ((2, "lease_no", "Lease No."), (5, "lessor", "Lessor"),
+                                (6, "lessee", "Lessee")):
+            if r.get(key):
+                store.put("Ownership Report", f"{chr(64+col)}{row_no}",
+                          CellSource(xref_name, None, str(r.get(key)), "structured", field))
+    return store, notes

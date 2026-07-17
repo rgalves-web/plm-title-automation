@@ -135,6 +135,7 @@ def fill_ddr_template(
     review_flags: "DDReviewFlags | None" = None,
     runsheet_clean_note: str | None = None,
     pending_registry: Any | None = None,
+    provenance_store: Any | None = None,
 ) -> DDRWriteResult:
     template_path = Path(template_path)
     output_dir = Path(output_dir)
@@ -171,6 +172,12 @@ def fill_ddr_template(
     # deliverable's tab set must equal the template's plus DD_Audit_Trail.
     # Recorded BEFORE the sheet is written, or they never reach it.
     _record_pending_reasons(ctx, pending_registry)
+    # Cell-level document+page provenance (src/dd/provenance). Located
+    # INDEPENDENTLY of the extraction, so a cite names the document that
+    # actually contains the value. Rides in the audit trail; never a tab.
+    if provenance_store is not None:
+        for prov in provenance_store.audit_rows():
+            ctx.record(*prov)
     _write_audit_trail_sheet(wb, ctx)
 
     wb.save(output_path)

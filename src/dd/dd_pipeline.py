@@ -370,6 +370,42 @@ def _validation_allowlist(manifest: UnitManifest, lease_review_rows: list[dict[s
     )
 
 
+def _build_provenance_store(lease_review_rows, controlling, to_files_dir,
+                            unit_folder, lease_document_dir, dpu_recording_map):
+    """Locate document+page for each derived value, INDEPENDENTLY of the
+    extraction. Returns a ProvenanceStore (internal; rides in the sidecar and
+    audit trail, never a tab)."""
+    from src.dd.provenance import populate_provenance
+    from src.dd.source_truth_check import SourceIndex
+
+    roots = [Path(p) for p in (unit_folder, to_files_dir, lease_document_dir,
+                               Path("data/working/maxwell_a_unit_tos")) if p]
+    try:
+        index = SourceIndex(roots)
+    except Exception as exc:  # provenance is best-effort; never blocks a write
+        logger.warning("Provenance index unavailable: %s", exc)
+        return None
+    # Controlling opinion OCR: the documents MI/WI values must be found in.
+    controlling_docs = []
+    for file_number in controlling:
+        path = index.resolve(file_number)
+        if path is not None:
+            try:
+                controlling_docs.append((path.name, index.text(path)))
+            except Exception:  # noqa: BLE001 — a single unreadable doc must not stop the rest
+                continue
+    # The writer lays rows out from Excel row 8 in list order; mirror that so the
+    # provenance cells line up with the cells the writer actually wrote.
+    for i, row in enumerate(lease_review_rows):
+        row["_excel_row"] = 8 + i
+    store, notes = populate_provenance(
+        lease_review_rows, index, controlling_docs=controlling_docs,
+        dpu_recording_map=dpu_recording_map)
+    for note in notes:
+        logger.info("Provenance: %s", note)
+    return store
+
+
 def _validation_source_roots(unit_folder, to_files_dir, lease_document_dir) -> list[Path]:
     """Where source-truth looks for the documents the audit trail cites."""
     return [Path(p) for p in (unit_folder, to_files_dir, lease_document_dir) if p]
@@ -1254,6 +1290,14 @@ def run_dd_pipeline_for_unit(
                             message=gate.detail, field=gate.name)
             )
 
+    # Cell-level document+page provenance, located INDEPENDENTLY of the
+    # extraction (src/dd/provenance): for each MI/WI the opinion where THIS
+    # owner's value actually appears, for recording the DPU. A cite names the
+    # document that contains the value, not the one the extractor guessed.
+    provenance_store = _build_provenance_store(
+        lease_review_rows, controlling, to_files_dir, unit_folder,
+        lease_document_dir, dpu_recording_map)
+
     ddr_result = fill_ddr_template(
         template_path=ddr_template_path,
         manifest=manifest,
@@ -1261,6 +1305,7 @@ def run_dd_pipeline_for_unit(
         aggregation=aggregation,
         reconciliation=reconciliation,
         lease_review_rows=lease_review_rows,
+        provenance_store=provenance_store,
         runsheet_records=records,
         runsheet_note=(
             f"Supplemental title from {controlling_date.isoformat()} (controlling title "

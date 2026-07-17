@@ -534,6 +534,12 @@ def check_ownership_report(workbook, index: SourceIndex, cites: list[AuditCite],
         return
     ws = workbook[_OWN]
     source_by_row = {c.row: c for c in cites if c.sheet == _OWN and c.row is not None}
+    # Cell-level provenance cites (S16 -> T-O SUPP p.5), located independently by
+    # populate_provenance. When one exists for an MI/WI cell it is authoritative:
+    # it names the document that actually contains the value AND its page, which
+    # is more precise than the row's opinion and fixes the superseded-opinion
+    # miscitation (a Cox owner cited against ORIG when the value is in SUPP).
+    cell_cite = {c.cell: c for c in cites if c.sheet == _OWN and c.cell}
 
     for row in range(_OWN_DATA_START, ws.max_row + 1):
         lease_no = ws.cell(row, _OWN_COL["lease_no"]).value
@@ -570,22 +576,25 @@ def check_ownership_report(workbook, index: SourceIndex, cites: list[AuditCite],
             if value is None:
                 continue
             cell = _cell_name(_OWN_COL[key], row)
-            if src_path is None:
+            # A cell-level provenance cite, if present, overrides the row's
+            # opinion: it points at the document + page where this value was
+            # independently located.
+            prov = cell_cite.get(cell)
+            prov_path = index.resolve(prov.source_reference) if prov else None
+            check_path, check_name = (prov_path, prov_path.name) if prov_path else (src_path, src_name)
+            if check_path is None:
                 report.add(TruthFinding(
                     _OWN, cell, label, value, None, UNVERIFIABLE, source_file=src_name,
                     detail=(f"cited source {src_name!r} is not a document on disk"
                             if cite else "no audit cite for this row")))
                 continue
-            fraction = parse_fraction_text(str(value).lstrip("="))
-            text = index.text(src_path)
-            candidates = [str(value).lstrip("=")]
-            if fraction is not None:
-                candidates.append(f"{fraction.numerator}/{fraction.denominator}")
-                candidates.append(f"{float(fraction):.8f}".lstrip("0"))
+            text = (index.page_text(check_path, prov.page) if prov and prov.page
+                    else index.text(check_path))
             outcome, evidence, detail = verify_value(text, value, field_name=label)
+            page = f"p.{prov.page}" if prov and prov.page else ""
             report.add(TruthFinding(_OWN, cell, label, value,
                                     evidence if outcome != UNVERIFIABLE else None,
-                                    outcome, source_file=src_name, detail=detail))
+                                    outcome, source_file=check_name, source_page=page, detail=detail))
 
 
 def check_cell_level_cites(workbook, index: SourceIndex, cites: list[AuditCite],
