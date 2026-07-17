@@ -308,3 +308,66 @@ def test_a_non_manifest_label_is_left_alone():
     wb = _summary_wb([("Potential Defect(s):", "None identified")])
     report = TruthReport(); check_manifest_cells(wb, _MANIFEST, report)
     assert report.findings == []
+
+
+# --- CONFIRMED_TRACT_LEVEL: WI against the opinion's EOG tract WI -------------
+
+from src.dd.source_truth_check import (  # noqa: E402
+    CONFIRMED_TRACT_LEVEL, check_wi_tract_level, check_lease_review_terms,
+)
+
+
+def test_wi_matching_the_opinions_tract_wi_is_confirmed_tract_level():
+    opinion = ("OIL, GAS AND MINERAL LEASEHOLD ESTATE (all tracts):\fWorking Net Revenue\n"
+               "EOG Resources, Inc. [(49.768518% x 4/5)] .84953704 .66203704")
+    wb = _own_wb({"B8": "0220344-013", "T8": 0.84953704})
+    report = TruthReport()
+    check_wi_tract_level(wb, [("T-O SUPP COX.PDF", opinion)], report)
+    hit = next(f for f in report.findings if f.cell == "T8")
+    assert hit.outcome == CONFIRMED_TRACT_LEVEL
+    assert "SUPP" in hit.source_file
+
+
+def test_wi_with_no_stated_tract_wi_stays_unverifiable_named():
+    wb = _own_wb({"B8": "0220344-013", "T8": 0.84953704})
+    report = TruthReport()
+    check_wi_tract_level(wb, [("T-O SUPP COX.PDF", "no leasehold table here")], report)
+    hit = next(f for f in report.findings if f.cell == "T8")
+    assert hit.outcome == UNVERIFIABLE and "no tract-level EOG" in hit.detail
+
+
+def test_wi_value_present_but_not_in_a_leasehold_context_is_not_confirmed():
+    # The decimal appears, but not near EOG/leasehold/working — not the WI table.
+    opinion = "some unrelated table lists .84953704 as a survey bearing"
+    wb = _own_wb({"B8": "0220344-013", "T8": 0.84953704})
+    report = TruthReport()
+    check_wi_tract_level(wb, [("doc.PDF", opinion)], report)
+    assert report.findings[0].outcome == UNVERIFIABLE
+
+
+# --- Lease Review term cells: per-lease document, lessor+value ----------------
+
+def test_lease_review_term_confirmed_against_the_lease_document(tmp_path):
+    (tmp_path / "LEASE.txt").write_text(
+        "Oil and Gas Lease dated October 6, 2006 from Robert W. Hrabovsky to EnCana. "
+        "Royalty of 1/5. Primary term two (2) years.", encoding="utf-8")
+    wb = openpyxl.Workbook(); wb.remove(wb.active)
+    ws = wb.create_sheet("Lease Review")
+    ws.cell(2, 1).value = "0190122-005"; ws.cell(2, 3).value = "Robert W. Hrabovsky"
+    ws.cell(2, 10).value = 0.2                   # royalty 1/5
+    index = SourceIndex([tmp_path])
+    report = TruthReport()
+    check_lease_review_terms(wb, index, report, lease_doc_finder=lambda ln: tmp_path / "LEASE.txt")
+    hit = next(f for f in report.findings if f.cell == "J2")
+    assert hit.outcome == CONFIRMED          # 0.2 == 1/5 via normalization
+
+
+def test_lease_review_memorandum_lease_with_no_document_is_named(tmp_path):
+    wb = openpyxl.Workbook(); wb.remove(wb.active)
+    ws = wb.create_sheet("Lease Review")
+    ws.cell(2, 1).value = "0220344-021"; ws.cell(2, 3).value = "Marilyn J. Parker"
+    ws.cell(2, 10).value = 0.2
+    report = TruthReport()
+    check_lease_review_terms(wb, SourceIndex([tmp_path]), report, lease_doc_finder=lambda ln: None)
+    hit = next(f for f in report.findings if f.cell == "J2")
+    assert hit.outcome == UNVERIFIABLE and "no recorded document on disk" in hit.detail

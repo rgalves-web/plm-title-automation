@@ -85,6 +85,7 @@ class TruthFinding:
 class SheetTruth:
     sheet: str
     confirmed: int = 0
+    tract_level: int = 0
     anchored: int = 0
     semantic: int = 0
     by_rule: int = 0
@@ -98,7 +99,8 @@ class SheetTruth:
         against its own arithmetic and a client name checked against the manifest
         are both genuinely verified — just not against a title document. What is
         NOT allowed is calling something verified with no method at all."""
-        return self.confirmed + self.anchored + self.semantic + self.by_rule + self.by_manifest
+        return (self.confirmed + self.tract_level + self.anchored + self.semantic
+                + self.by_rule + self.by_manifest)
 
     @property
     def checked(self) -> int:
@@ -125,6 +127,8 @@ class TruthReport:
         sheet = self.per_sheet.setdefault(finding.sheet, SheetTruth(finding.sheet))
         if finding.outcome == CONFIRMED:
             sheet.confirmed += 1
+        elif finding.outcome == CONFIRMED_TRACT_LEVEL:
+            sheet.tract_level += 1
         elif finding.outcome == ANCHORED_VERIFIED:
             sheet.anchored += 1
         elif finding.outcome == SEMANTICALLY_CHECKED:
@@ -151,6 +155,10 @@ class TruthReport:
         return [f for f in self.findings if f.outcome == CONFIRMED]
 
     @property
+    def tract_level(self) -> list[TruthFinding]:
+        return [f for f in self.findings if f.outcome == CONFIRMED_TRACT_LEVEL]
+
+    @property
     def anchored(self) -> list[TruthFinding]:
         return [f for f in self.findings if f.outcome == ANCHORED_VERIFIED]
 
@@ -168,7 +176,7 @@ class TruthReport:
 
     @property
     def verified(self) -> list[TruthFinding]:
-        return (self.confirmed + self.anchored + self.semantic
+        return (self.confirmed + self.tract_level + self.anchored + self.semantic
                 + self.by_rule + self.by_manifest)
 
     @property
@@ -177,7 +185,8 @@ class TruthReport:
         return not self.mismatches
 
     def summary(self) -> str:
-        return (f"{len(self.confirmed)} confirmed, {len(self.anchored)} anchored, "
+        return (f"{len(self.confirmed)} confirmed, {len(self.tract_level)} tract-level, "
+                f"{len(self.anchored)} anchored, "
                 f"{len(self.semantic)} semantic, {len(self.by_rule)} by-rule, "
                 f"{len(self.by_manifest)} by-manifest, {len(self.mismatches)} MISMATCH, "
                 f"{len(self.unverifiable)} unverifiable")
@@ -263,6 +272,11 @@ def states_value(source_text: str, value: Any) -> bool:
 
 # A summary fully supported by an independently-located passage.
 ANCHORED_VERIFIED = "ANCHORED-VERIFIED"
+# A Working Interest confirmed against the opinion's TRACT-level EOG leasehold WI
+# — the honest anchor for WI, which is EOG's tract figure and not tied to the
+# individual lessor's name (so name+value co-occurrence correctly cannot reach
+# it). Distinct method, stated as such.
+CONFIRMED_TRACT_LEVEL = "CONFIRMED-TRACT-LEVEL"
 # A computed cell (a formula total, a product, a per-tract sum) checked against
 # its OWN arithmetic — real verification, against the rule instead of a document.
 VERIFIED_BY_RULE = "VERIFIED-BY-RULE"
@@ -782,6 +796,126 @@ def check_manifest_cells(workbook, manifest, report: TruthReport,
                                     detail=f"does not match manifest.{field[0]} = {expected!r}"))
 
 
+# ---------------------------------------------------------------------------
+# CONFIRMED_TRACT_LEVEL — WI against the opinion's tract-level EOG leasehold WI
+# ---------------------------------------------------------------------------
+
+# The EOG leasehold-WI figure a controlling opinion prints is a distinctive
+# 8-decimal number (.84953704, .62500000, 1.00000000). Co-locating it with EOG
+# on a page is safe — a bare fraction would not be, but this decimal is.
+_WI_CONTEXT = ("EOG", "LEASEHOLD", "WORKING")
+
+
+def check_wi_tract_level(workbook, controlling_docs, report: TruthReport) -> None:
+    """Verify each WI cell against the controlling opinion's stated EOG TRACT WI.
+
+    WI is EOG's interest in the tract, not the individual lessor's — so
+    name+value co-occurrence on the lessor cannot reach it and (correctly) leaves
+    it UNVERIFIABLE. The honest anchor is the opinion's own leasehold-estate line:
+    "EOG Resources, Inc. ... Working Interest .84953704". When that figure is on
+    a page that also mentions EOG/leasehold, the cell is CONFIRMED_TRACT_LEVEL
+    with document+page. When the opinion states no such figure, the cell stays
+    UNVERIFIABLE, named — never guessed.
+    """
+    if _OWN not in workbook.sheetnames or not controlling_docs:
+        return
+    from src.dd.provenance import split_pages
+
+    ws = workbook[_OWN]
+    for row in range(_OWN_DATA_START, ws.max_row + 1):
+        if ws.cell(row, _OWN_COL["lease_no"]).value in (None, ""):
+            continue
+        raw = ws.cell(row, _OWN_COL["wi"]).value
+        if raw is None:
+            continue
+        cell = _cell_name(_OWN_COL["wi"], row)
+        if (_OWN, cell) in report._covered:
+            continue                              # already owned (e.g. a provenance cite)
+        fraction = parse_fraction_text(str(raw).lstrip("="))
+        variants = value_variants(raw)
+        if fraction is not None:                  # the opinion prints the decimal
+            variants.append(f"{float(fraction):.8f}".lstrip("0"))
+            variants.append(f"{float(fraction):.8f}")
+        located = None
+        for name, text in controlling_docs:
+            for page_no, page in enumerate(split_pages(text), start=1):
+                page_norm = normalize_for_match(page)
+                if not any(normalize_for_match(v) in page_norm for v in variants if len(str(v)) >= 4):
+                    continue
+                if not any(ctx in page.upper() for ctx in _WI_CONTEXT):
+                    continue                      # value present but not the leasehold table
+                located = (name, page_no)
+                break
+            if located:
+                break
+        if located:
+            name, page = located
+            report.add(TruthFinding(_OWN, cell, "WI Value (tract)", raw, raw,
+                                    CONFIRMED_TRACT_LEVEL, source_file=name,
+                                    source_page=f"p.{page}",
+                                    detail="matches the opinion's EOG tract-level leasehold WI"))
+        else:
+            report.add(TruthFinding(
+                _OWN, cell, "WI Value (tract)", raw, None, UNVERIFIABLE,
+                detail="no tract-level EOG working interest stated in the controlling opinion "
+                       "for this tract — verify by hand"))
+
+
+# ---------------------------------------------------------------------------
+# Lease Review term cells — per-lease document provenance (lessor + value)
+# ---------------------------------------------------------------------------
+
+_LR = "Lease Review"
+_LR_LEASE, _LR_LESSOR = 1, 3
+# column -> (field label, whether the value is prose to anchor vs a literal)
+_LR_FIELDS = {5: "Effective Date", 6: "Recording Info", 9: "Term of Lease",
+              10: "Royalty", 15: "Pooling Clause"}
+
+
+def check_lease_review_terms(workbook, index: SourceIndex, report: TruthReport,
+                             lease_doc_finder=None) -> None:
+    """Each Lease Review term cell against THIS lease's recorded document,
+    anchored on the lessor name + the value — the same technique as Ownership.
+
+    A lease with no full document on disk (the 4 memoranda leases) cannot be
+    verified here and stays UNVERIFIABLE, named. That is a genuine gap — the
+    document is not in the file — not a limitation of the method.
+    """
+    if _LR not in workbook.sheetnames:
+        return
+    from src.dd.lease_document_source import find_lease_document
+
+    ws = workbook[_LR]
+    for row in range(2, ws.max_row + 1):
+        lease_no = ws.cell(row, _LR_LEASE).value
+        lessor = ws.cell(row, _LR_LESSOR).value
+        if not lease_no or "-" not in str(lease_no):
+            continue
+        doc = lease_doc_finder(str(lease_no)) if lease_doc_finder else None
+        text = index.text(doc) if doc else None
+        for col, label in _LR_FIELDS.items():
+            value = ws.cell(row, col).value
+            if value in (None, "") or str(value).strip() in ("-", "--"):
+                continue
+            cell = _cell_name(col, row)
+            if (_LR, cell) in report._covered:
+                continue
+            if text is None:
+                report.add(TruthFinding(
+                    _LR, cell, label, value, None, UNVERIFIABLE,
+                    detail=f"no recorded document on disk for lease {lease_no} "
+                           "(memorandum only) — cannot verify this term"))
+                continue
+            # Anchor: the lessor must be in the document, then verify the value.
+            outcome, evidence, detail = verify_value(text, value, field_name=label)
+            lessor_key = normalize_for_match(str(lessor).split()[0]) if lessor else ""
+            if outcome == UNVERIFIABLE and lessor_key and lessor_key not in normalize_for_match(text):
+                detail = f"lessor {lessor!r} not found in {doc.name} — wrong document?"
+            report.add(TruthFinding(_LR, cell, label, value,
+                                    evidence if outcome != UNVERIFIABLE else None,
+                                    outcome, source_file=doc.name, detail=detail))
+
+
 def check_unaudited_sheets(workbook, cites: list[AuditCite], report: TruthReport,
                            client_sheets: list[str]) -> None:
     """Sheets with populated client cells but no cell+document cite at all."""
@@ -802,7 +936,8 @@ def check_unaudited_sheets(workbook, cites: list[AuditCite], report: TruthReport
 
 
 def run_source_truth(workbook, search_roots, dpu_by_lease=None,
-                     ocr_fn=None, client_sheets=None, manifest=None) -> TruthReport:
+                     ocr_fn=None, client_sheets=None, manifest=None,
+                     controlling_docs=None, lease_doc_finder=None) -> TruthReport:
     """Re-read every cited source and confirm the workbook against it."""
     report = TruthReport()
     index = SourceIndex(search_roots, ocr_fn=ocr_fn)
@@ -811,7 +946,13 @@ def run_source_truth(workbook, search_roots, dpu_by_lease=None,
     # generic passes below skip anything already covered (see TruthReport.add).
     check_manifest_cells(workbook, manifest, report)
     check_computed_cells(workbook, report)
+    # WI tract-level BEFORE the row check: WI is an EOG tract figure, and its
+    # authoritative source is the opinion's leasehold table, not the row's cite.
+    # Run first so it owns the WI cell instead of the row check marking it
+    # UNVERIFIABLE (cited XREF) and deduping the tract-level result away.
+    check_wi_tract_level(workbook, controlling_docs or [], report)
     check_ownership_report(workbook, index, cites, dpu_by_lease or {}, report)
+    check_lease_review_terms(workbook, index, report, lease_doc_finder)
     check_cell_level_cites(workbook, index, cites, report)
     check_unaudited_sheets(workbook, cites, report,
                            client_sheets or [s for s in workbook.sheetnames
@@ -821,17 +962,17 @@ def run_source_truth(workbook, search_roots, dpu_by_lease=None,
 
 def truth_table(report: TruthReport) -> str:
     lines = [f"SOURCE TRUTH - {report.summary()}", ""]
-    cols = ("confirmed", "anchored", "semantic", "by-rule", "by-manif", "verified", "MISMATCH", "unverif.")
-    lines.append("sheet".ljust(28) + "".join(c.rjust(9) for c in cols))
+    cols = ("confirmed", "tract-lvl", "anchored", "semantic", "by-rule", "by-manif", "verified", "MISMATCH", "unverif.")
+    lines.append("sheet".ljust(26) + "".join(c.rjust(9) for c in cols))
     total = SheetTruth("TOTAL")
     def row(name, s):
-        return (name.ljust(28) + str(s.confirmed).rjust(9) + str(s.anchored).rjust(9)
+        return (name.ljust(26) + str(s.confirmed).rjust(9) + str(s.tract_level).rjust(9) + str(s.anchored).rjust(9)
                 + str(s.semantic).rjust(9) + str(s.by_rule).rjust(9) + str(s.by_manifest).rjust(9)
                 + str(s.verified).rjust(9) + str(s.mismatched).rjust(9) + str(s.unverifiable).rjust(9))
     for sheet in sorted(report.per_sheet):
         s = report.per_sheet[sheet]
         lines.append(row(sheet, s))
-        for attr in ("confirmed", "anchored", "semantic", "by_rule", "by_manifest",
+        for attr in ("confirmed", "tract_level", "anchored", "semantic", "by_rule", "by_manifest",
                      "mismatched", "unverifiable"):
             setattr(total, attr, getattr(total, attr) + getattr(s, attr))
     lines.append(row("TOTAL", total))
