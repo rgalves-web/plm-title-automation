@@ -762,41 +762,75 @@ def check_template_sample(sheet_name: str, cells) -> list[Finding]:
     return findings
 
 
+# A neighbouring unit's name is legitimate when the cell CITES that unit's title
+# opinion as a SOURCE — a reviewer may rely on a shared-tract TO from an adjacent
+# unit. What is leakage is another unit's DATA (a lease, an acreage) sitting in a
+# client value cell as if it were ours. The distinguisher is source-citation
+# language near the name: "T-O", "opinion", "per", "source", "covers", a T0#.
+_SOURCE_CITATION_RE = re.compile(
+    r"\bT-?O\b|\bTITLE OPINION\b|\bOPINION\b|\bPER\b|\bSOURCE\b|\bCOVERS?\b|"
+    r"\bSHARED\b|\bT0\d{6}\b|\bCITED?\b|\bDO T-O\b|\bLEASE ANALYSIS\b",
+    re.IGNORECASE)
+
+
+def _cites_our_lease_as_subject(text: str, allow: "UnitAllowlist") -> bool:
+    """True when the cell cites a foreign TO IN SERVICE OF one of OUR leases.
+
+    Source-citation language alone is too weak: 'Wiese Unit opinion, 50.73 acres'
+    contains 'opinion' yet is the Wiese unit's OWN data masquerading as a Maxwell
+    title-opinion summary — the r110 leak. A genuine citation reads 'Wiese Unit
+    T-O is the source for lease 0190122-005 MI', where OUR lease is the subject
+    and the foreign TO is merely where we confirmed it. So the exemption requires
+    BOTH source language AND one of our own lease numbers present.
+    """
+    if not _SOURCE_CITATION_RE.search(text):
+        return False
+    return any(lease in text for lease in allow.leases)
+
+
 def check_foreign_unit(sheet_name: str, cells, allow: UnitAllowlist) -> list[Finding]:
-    """Identifiers and unit names that do not belong to THIS unit.
+    """Another unit's DATA in a client cell = leakage (FAIL). Another unit's TO
+    CITED AS A SOURCE in a note = legitimate (pass).
 
     The ID checks need a populated allowlist to mean anything. An EMPTY one does
     not mean "nothing belongs here" — it means the allowlist never got built (a
     missing XREF, a unit not found), and treating that as evidence turns every
     legitimate lease number into a confident accusation. Verified: an empty
     allowlist against the real Maxwell workbook produced 88 false failures across
-    every sheet. Absence of knowledge is not knowledge of absence; the ID rules
-    stand down and the run says so instead.
+    every sheet. Absence of knowledge is not knowledge of absence.
+
+    A neighbouring unit's name is fine when the cell CITES its opinion as a
+    source (reviewer guidance: a shared-tract TO from an adjacent unit is a valid
+    source). So a foreign-unit-NAME hit stands down when the cell reads as a
+    source citation; a foreign LEASE/CONTRACT identifier — actual data — never
+    does.
     """
     if sheet_name == _AUDIT_SHEET or allow is None:
         return []
     findings = []
-    if not (allow.leases or allow.contracts or allow.title_opinions):
-        # Unit-name phrases still work: they need only our identity tokens.
-        for coord, _row, _col, value in cells:
-            for unit in allow.foreign_units_in(str(value)):
-                findings.append(Finding(sheet_name, coord, value, "foreign_unit_leakage",
-                                        f"names another unit ({unit}) — not {allow.unit_name}"))
-        return findings
+    populated = allow.leases or allow.contracts or allow.title_opinions
     for coord, _row, _col, value in cells:
         text = str(value)
-        for lease in allow.unknown_leases(text):
-            findings.append(Finding(sheet_name, coord, value, "foreign_unit_leakage",
-                                    f"lease {lease} is not in {allow.unit_name}'s lease set"))
-        for contract in allow.unknown_contracts(text):
-            findings.append(Finding(sheet_name, coord, value, "foreign_unit_leakage",
-                                    f"contract {contract} is not linked to {allow.unit_name}"))
-        for opinion in allow.unknown_title_opinions(text):
-            findings.append(Finding(sheet_name, coord, value, "foreign_unit_leakage",
-                                    f"title opinion {opinion} does not cover {allow.unit_name}"))
-        for unit in allow.foreign_units_in(text):
-            findings.append(Finding(sheet_name, coord, value, "foreign_unit_leakage",
-                                    f"names another unit ({unit}) — not {allow.unit_name}"))
+        cites = _cites_our_lease_as_subject(text, allow)
+        if populated:
+            # DATA identifiers are leakage regardless of surrounding prose.
+            for lease in allow.unknown_leases(text):
+                findings.append(Finding(sheet_name, coord, value, "foreign_unit_leakage",
+                                        f"lease {lease} is not in {allow.unit_name}'s lease set"))
+            for contract in allow.unknown_contracts(text):
+                findings.append(Finding(sheet_name, coord, value, "foreign_unit_leakage",
+                                        f"contract {contract} is not linked to {allow.unit_name}"))
+            # A foreign TO identifier is leakage ONLY when it is not being cited
+            # as a source; cited, it is the reviewer relying on a shared-tract TO.
+            for opinion in allow.unknown_title_opinions(text):
+                if not cites:
+                    findings.append(Finding(sheet_name, coord, value, "foreign_unit_leakage",
+                                            f"title opinion {opinion} does not cover {allow.unit_name}"))
+        # A foreign unit NAME is leakage only when it is NOT a source citation.
+        if not cites:
+            for unit in allow.foreign_units_in(text):
+                findings.append(Finding(sheet_name, coord, value, "foreign_unit_leakage",
+                                        f"names another unit ({unit}) — not {allow.unit_name}"))
     return findings
 
 

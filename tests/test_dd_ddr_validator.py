@@ -823,3 +823,59 @@ def test_a_populated_allowlist_still_catches_a_foreign_lease():
     cells = [("B8", 8, 2, "9999999-999")]
     hits = check_foreign_unit("Ownership Report", cells, _allow())
     assert hits and "9999999-999" in hits[0].expected
+
+
+# --- foreign-unit DATA is leakage; a foreign-unit TO cited as a SOURCE is not -
+# Reviewer guidance: a neighbouring unit's TO is a valid source when it covers a
+# shared leased tract. So "Wiese Unit T-O (T0140155)" in a note is legitimate,
+# but a Wiese lease number or acreage in a client data cell is leakage.
+
+def _allow_full():
+    return UnitAllowlist(
+        unit_name="MAXWELL A UNIT", identity_tokens={"MAXWELL"},
+        leases={"0190122-005", "0190122-006"}, contracts={"K1400813"},
+        title_opinions={"T0140253"}, foreign_unit_names={"WIESE", "ALAMO"})
+
+
+def test_foreign_unit_TO_cited_as_a_source_in_a_note_passes():
+    from src.dd.ddr_validator import check_foreign_unit
+    cells = [("B13", 13, 2,
+              "Wiese Unit T-O (File No. T0140155) is the source for leases "
+              "0190122-005/-006 MI per Lease Analysis pp.61/63")]
+    findings = check_foreign_unit("Summary", cells, _allow_full())
+    assert findings == [], [f.describe() for f in findings]
+
+
+def test_foreign_unit_opinion_cited_as_source_passes():
+    from src.dd.ddr_validator import check_foreign_unit
+    cells = [("A9", 9, 1, "0190122-005 MI confirmed against the Wiese Unit title opinion, shared tract")]
+    assert check_foreign_unit("PLM Title Review", cells, _allow_full()) == []
+
+
+def test_a_foreign_lease_number_as_DATA_is_still_leakage():
+    from src.dd.ddr_validator import check_foreign_unit
+    # A lease not in our set, in a plain data cell — leakage even if prose nearby.
+    cells = [("B8", 8, 2, "9999999-999")]
+    hits = check_foreign_unit("Ownership Report", cells, _allow_full())
+    assert hits and "9999999-999" in hits[0].expected
+
+
+def test_a_foreign_lease_number_is_leakage_even_beside_source_language():
+    from src.dd.ddr_validator import check_foreign_unit
+    # Citing a source does not launder a foreign lease IDENTIFIER into the data.
+    cells = [("B8", 8, 2, "per Wiese T-O, lease 9999999-999 covers the tract")]
+    hits = check_foreign_unit("Ownership Report", cells, _allow_full())
+    assert any("9999999-999" in f.expected for f in hits)
+
+
+def test_a_bare_foreign_unit_name_without_citation_is_leakage():
+    from src.dd.ddr_validator import check_foreign_unit
+    cells = [("A9", 9, 1, "Wiese Unit, 50.73 acres")]   # data, no citation language
+    hits = check_foreign_unit("PLM Title Review", cells, _allow_full())
+    assert any("WIESE" in f.expected.upper() for f in hits)
+
+
+def test_a_foreign_TO_identifier_cited_as_source_is_allowed():
+    from src.dd.ddr_validator import check_foreign_unit
+    cells = [("B13", 13, 2, "source: T0140155 (Wiese Unit T-O) for 0190122-006, shared A-122 tract")]
+    assert check_foreign_unit("Summary", cells, _allow_full()) == []
