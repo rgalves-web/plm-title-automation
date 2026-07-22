@@ -189,15 +189,31 @@ def _dpu_is_own_unit(name: str, unit_name: str, unit_dpu_contract: str | None) -
         bool(core) and all(_norm(t) in nn for t in core))
 
 
+# Filing cruft that rides along inside a recorded-document archive but is never
+# part of the substantive package (checklist approval forms, transmittals, notes).
+_FILING_CRUFT_RE = re.compile(
+    r"\bCAF\b|LEGAL APPROVAL|TRANSMITTAL|\bNOTES?\b|PROPOSAL", re.IGNORECASE)
+
+
+def _is_document_member(member_name: str) -> bool:
+    """A recognised document type that is not filing cruft — the common gate for
+    expanding any recorded-instrument archive."""
+    return (Path(member_name).suffix.lower() in _DOC_MEMBER_EXTS
+            and not _FILING_CRUFT_RE.search(member_name))
+
+
 # Which members of a DPU archive belong in Unit Designation: the declaration and
-# its amendments, NOT the filing cruft (CAF, legal approval, transmittals).
+# its amendments, NOT the filing cruft.
 def _dpu_member_filter(member_name: str) -> bool:
-    if Path(member_name).suffix.lower() not in _DOC_MEMBER_EXTS:
-        return False
-    up = member_name.upper()
-    if re.search(r"\bCAF\b|LEGAL APPROVAL|TRANSMITTAL|\bNOTES?\b|PROPOSAL", up):
-        return False
-    return bool(re.search(r"UNIT DEC|DECLARATION|DESIGNAT|POOLED", up))
+    return (_is_document_member(member_name)
+            and bool(re.search(r"UNIT DEC|DECLARATION|DESIGNAT|POOLED",
+                               member_name, re.IGNORECASE)))
+
+
+# Which members of a title-opinion archive belong in Title Opinions: the opinion
+# documents themselves, minus the same filing cruft.
+def _to_member_filter(member_name: str) -> bool:
+    return _is_document_member(member_name)
 
 
 def build_submission_plan(
@@ -596,16 +612,24 @@ def build_plan_from_unit_folder(
     an explicit list. Lease archives are expanded into their member documents so
     the Leases folder holds individual leases, not zips."""
     b = classify_unit_files(files_dir, recurse=recurse)
+    file_index = b["file_index"]
+    workdir = Path(archive_workdir) if archive_workdir else Path(tempfile.mkdtemp(prefix="plm_pkg_"))
 
+    # Title Opinions: vet candidates against the DDR text at the ARCHIVE level
+    # (the archive name carries the opinion number the DDR cites), THEN expand a
+    # used archive into its member opinion document(s) so a zipped opinion ships
+    # as the PDF, not the zip. Members are registered in the file index so the
+    # plan's resolve/dedup logic operates on the real documents.
     to_decisions: list[str] = []
     if consumed_title_opinions is not None:
         consumed = list(consumed_title_opinions)
     else:
         used, unused = select_used_title_opinions(b["title_opinions"], ddr_texts or [])
-        consumed = [p.name for p in used]
+        to_members = expand_archives(used, workdir / "title_opinions", member_filter=_to_member_filter)
+        for m in to_members:
+            file_index.setdefault(_norm(m.stem), m)
+        consumed = [m.name for m in to_members]
         to_decisions = [f"Title Opinions: excluded {p.name!r} — {why}" for p, why in unused]
-
-    workdir = Path(archive_workdir) if archive_workdir else Path(tempfile.mkdtemp(prefix="plm_pkg_"))
 
     # Unit Designation: keep only this unit's own DPU, then expand it into its
     # declaration + amendment documents (dropping CAF / legal-approval cruft).
@@ -632,7 +656,7 @@ def build_plan_from_unit_folder(
         runsheet_rows=runsheet_rows,
         sellers_files=b["sellers"],
         well_files=b["wells"],
-        file_index=b["file_index"],
+        file_index=file_index,
         unit_dpu_contract=unit_dpu_contract,
         filter_dpu=False,          # ownership already vetted above
     )

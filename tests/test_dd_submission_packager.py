@@ -297,6 +297,40 @@ def test_opinion_cited_only_in_a_note_is_included(tmp_path):
     assert any("SOMEONE" in p.name or "ELSE" in p.name for p, _ in unused)
 
 
+def test_used_TO_archive_is_expanded_to_its_member_opinion(tmp_path):
+    import zipfile
+    # A zipped opinion the DDR cites by number, plus filing cruft to drop.
+    z = tmp_path / "T0140456 (C.B. CHRISTIE JR. A-122 160ACS-TITLE OPINIONS).zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("T0140456/T-O SUPP C.B. CHRISTIE JR ET AL A-122 BLK 3 160AC.PDF", b"op")
+        zf.writestr("T0140456/CAF.TIF", b"cruft")
+        zf.writestr("T0140456/LEGAL APPROVAL.TIF", b"cruft")
+    ddr = tmp_path / "DDR.xlsx"; ddr.write_bytes(b"x")
+    plan = build_plan_from_unit_folder(
+        unit_name="MAXWELL A UNIT", ddr_path=ddr, files_dir=tmp_path,
+        runsheet_rows=[],
+        ddr_texts=["NOTE: lease left blank per opinion T0140456."],
+        archive_workdir=tmp_path / "work")
+    placed = {p.dest_name for p in plan.for_subfolder(SUBFOLDERS[1])}
+    assert placed == {"T-O SUPP C.B. CHRISTIE JR ET AL A-122 BLK 3 160AC.PDF"}  # PDF, not zip
+    assert not any(n.lower().endswith(".zip") for n in placed)
+    assert not any("CAF" in n or "LEGAL APPROVAL" in n for n in placed)
+
+
+def test_unused_TO_archive_is_not_expanded_and_is_logged(tmp_path):
+    import zipfile
+    z = tmp_path / "T0140999 (SOMEONE UNCITED A-122-TITLE OPINIONS).zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("T0140999/T-O ORIG SOMEONE UNCITED A-122.PDF", b"op")
+    ddr = tmp_path / "DDR.xlsx"; ddr.write_bytes(b"x")
+    plan = build_plan_from_unit_folder(
+        unit_name="MAXWELL A UNIT", ddr_path=ddr, files_dir=tmp_path,
+        runsheet_rows=[], ddr_texts=["nothing relevant here"],
+        archive_workdir=tmp_path / "work")
+    assert plan.for_subfolder(SUBFOLDERS[1]) == []
+    assert any("T0140999" in d and "never references" in d for d in plan.decisions)
+
+
 def test_word_to_does_not_falsely_flag_a_seller_file_as_a_TO(tmp_path):
     # "ENCANA TO EOG" must not be read as a title-opinion marker.
     _touch(tmp_path, "K1400170 (FARMOUT AGMTASMT - ENCANA TO EOG-FARMOUT AGREEMENT).zip")
