@@ -113,6 +113,24 @@ def test_title_document_is_renamed_volume_dot_page(tmp_path):
     assert "renamed from" in placed[0].note
 
 
+def test_analyst_title_document_source_resolves_and_renames(tmp_path):
+    # A capture the analyst identified and renamed to "vol.page" (its source lived
+    # in an archive under a non-conventional name) lands in Title Documents.
+    files = tmp_path / "FILES"; files.mkdir()
+    src = tmp_path / "492.510.png"; src.write_bytes(b"img")
+    ddr = tmp_path / "DDR.xlsx"; ddr.write_bytes(b"x")
+    plan = build_plan_from_unit_folder(
+        unit_name="MAXWELL A UNIT", ddr_path=ddr, files_dir=files,
+        runsheet_rows=[{"instrument": "OGML Brashear to EOG",
+                        "source_ref": "Doc 95850, OPR Vol. 492, Pg. 510"}],
+        consumed_title_opinions=[], title_document_files=[src],
+        archive_workdir=tmp_path / "work")
+    placed = plan.for_subfolder(SUBFOLDERS[4])
+    assert len(placed) == 1
+    assert placed[0].dest_name == "492.510.png"
+    assert not any("492" in m.what for m in plan.missing)
+
+
 def test_runsheet_instrument_with_no_file_goes_to_missing():
     plan = _plan(runsheet_rows=[{"instrument": "OGML Ratliff to EOG",
                                  "source_ref": "Vol. 492, Pg. 519"}],

@@ -742,6 +742,7 @@ def build_plan_from_unit_folder(
     consumed_title_opinions: Iterable[str] | None = None,
     unit_dpu_contract: str | None = None,
     archive_workdir: Path | None = None,
+    title_document_files: Iterable[Path] = (),
     recurse: bool = True,
 ) -> SubmissionPlan:
     """Build a submission plan from a unit's FILES folder plus what only the
@@ -757,6 +758,12 @@ def build_plan_from_unit_folder(
     the Leases folder holds individual leases, not zips."""
     b = classify_unit_files(files_dir, recurse=recurse)
     file_index = b["file_index"]
+    # Analyst-supplied recorded-instrument captures (already renamed "vol.page"),
+    # for runsheet rows whose source file is buried in an archive under a
+    # non-conventional name. Registered in the index so the Title Documents step
+    # resolves the runsheet row's vol/page to them.
+    for src in title_document_files:
+        file_index.setdefault(_norm(Path(src).stem), Path(src))
     workdir = Path(archive_workdir) if archive_workdir else Path(tempfile.mkdtemp(prefix="plm_pkg_"))
 
     # Title Opinions: vet candidates against the DDR text at the ARCHIVE level
@@ -825,6 +832,21 @@ def build_plan_from_unit_folder(
 
 SUBMISSION_DIRNAME = "SUBMISSION"
 FILES_DIRNAME = "FILES"
+# Optional analyst-curated inputs that don't live in FILES under a conventional
+# name — e.g. recorded-instrument captures renamed "492.510.png" for the Title
+# Documents folder. Kept beside FILES so re-runs pick them up automatically.
+SOURCES_DIRNAME = "SUBMISSION SOURCES"
+
+
+def _title_document_sources(unit_folder: Path) -> list[Path]:
+    """Files in "<unit>/SUBMISSION SOURCES/" whose name is a bare "vol.page"
+    (e.g. 492.510.png) — analyst-identified recorded instruments for the Title
+    Documents folder. FILES is never touched; these live in their own folder."""
+    src = unit_folder / SOURCES_DIRNAME
+    if not src.exists():
+        return []
+    return [p for p in sorted(src.rglob("*")) if p.is_file()
+            and re.fullmatch(r"\d+\.\d+", p.stem)]
 
 
 def _find_latest_ddr(unit_folder: Path) -> Path | None:
@@ -873,6 +895,7 @@ def package_unit_submission(
     ddr_path: Path | None = None,
     unit_name: str | None = None,
     unit_dpu_contract: str | None = None,
+    title_document_files: Iterable[Path] | None = None,
 ) -> tuple[Path, SubmissionPlan]:
     """Build the ready-to-upload PLM submission tree INSIDE the unit's own
     project folder and return (unit_root, plan).
@@ -883,7 +906,11 @@ def package_unit_submission(
 
     Files are COPIED from <unit_folder>/FILES — that folder is never moved from
     or deleted. No temp/scratch directory is used: the package lands where the
-    user can find it. Prints the absolute path of the created tree."""
+    user can find it. Prints the absolute path of the created tree.
+
+    title_document_files: recorded-instrument captures already renamed "vol.page"
+    for the Title Documents folder; defaults to any found in the unit's
+    "SUBMISSION SOURCES" folder, so re-runs pick them up automatically."""
     unit_folder = Path(unit_folder)
     files_dir = unit_folder / FILES_DIRNAME
     if not files_dir.exists():
@@ -892,6 +919,8 @@ def package_unit_submission(
         unit_name = unit_folder.name
     if ddr_path is None:
         ddr_path = _find_latest_ddr(unit_folder)
+    if title_document_files is None:
+        title_document_files = _title_document_sources(unit_folder)
 
     ddr_texts, runsheet_rows = read_ddr_texts_and_runsheet(ddr_path) if ddr_path else ([], [])
 
@@ -900,6 +929,7 @@ def package_unit_submission(
     plan = build_plan_from_unit_folder(
         unit_name=unit_name,
         ddr_path=ddr_path,
+        title_document_files=title_document_files,
         files_dir=files_dir,
         runsheet_rows=runsheet_rows,
         ddr_texts=ddr_texts,
