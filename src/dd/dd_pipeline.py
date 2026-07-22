@@ -1343,15 +1343,13 @@ def run_dd_pipeline_for_unit(
             f"VALIDATION NOT READY — {validation.summary()}. See the sidecar report next to "
             "the DDR; this workbook must not be sent until every FAIL is resolved.")
 
-    # OPTIONAL final step: assemble the PLM submission folder for this unit.
-    # Off unless a staging directory is supplied — it copies client files into a
-    # review tree, so callers opt in explicitly.
-    if stage_submission_dir is not None:
+    # FINAL step: assemble the ready-to-upload PLM submission tree INSIDE the
+    # unit's own project folder (never a scratch dir). Runs whenever the real
+    # unit folder is known, or an explicit target is supplied.
+    if unit_folder is not None or stage_submission_dir is not None:
         _stage_submission_package(
             unit_name=unit_name,
             ddr_path=ddr_result.output_path,
-            manifest=manifest,
-            records=records,
             unit_folder=unit_folder,
             to_files_dir=to_files_dir,
             stage_submission_dir=stage_submission_dir,
@@ -1389,88 +1387,49 @@ def run_dd_pipeline_for_unit(
 def _stage_submission_package(
     unit_name: str,
     ddr_path: Path,
-    manifest: "UnitManifest",
-    records: list[SourceDocument],
     unit_folder: str | Path | None,
     to_files_dir: str | Path | None,
-    stage_submission_dir: str | Path,
+    stage_submission_dir: str | Path | None,
     dpu_contract_no: str | None,
     progress_callback: ProgressCallback | None,
 ) -> Path | None:
-    """Assemble the PLM submission folder from what the pipeline already knows.
+    """Build the ready-to-upload PLM submission tree INSIDE the unit's own
+    project folder (the parent of its FILES folder), copying from FILES and
+    leaving it untouched. Delegates to submission_packager.package_unit_submission,
+    which prints the absolute path of the created tree.
 
-    Title opinions are vetted against the finished DDR's full text (cells, notes,
-    and audit trail) so an opinion cited only as a note-basis still ships; the
-    unit's own DPU is matched by contract number and foreign designations are
-    excluded; runsheet rows come from the filtered supplemental records; and the
-    Leases / Seller's Files / Well Files buckets are inferred from the unit's
-    FILES folder. Every gap lands in SUBMISSION_MANIFEST's MISSING section.
-    """
-    from src.dd.submission_packager import build_plan_from_unit_folder, stage_submission
+    An explicit stage_submission_dir still overrides the location (used by tests)."""
+    from src.dd.submission_packager import package_unit_submission
 
-    files_dir = None
-    for candidate in (Path(unit_folder) / "FILES" if unit_folder else None,
-                      Path(to_files_dir) if to_files_dir else None,
-                      Path(unit_folder) if unit_folder else None):
-        if candidate and candidate.exists():
-            files_dir = candidate
-            break
-    if files_dir is None:
+    # Locate the real project unit folder — the parent of FILES.
+    project_folder = None
+    if unit_folder and (Path(unit_folder) / "FILES").exists():
+        project_folder = Path(unit_folder)
+    elif to_files_dir and Path(to_files_dir).name.upper() == "FILES":
+        project_folder = Path(to_files_dir).parent
+    elif unit_folder:
+        project_folder = Path(unit_folder)
+
+    if stage_submission_dir is not None:
+        # Explicit override: honour it, but still copy the finished DDR in.
+        project_folder = Path(stage_submission_dir)
+
+    if project_folder is None or not (project_folder / "FILES").exists():
         _emit(progress_callback, "warn",
               f"Unit {unit_name} — submission packager skipped: no FILES folder located.")
         return None
 
-    ddr_texts = _read_ddr_texts(ddr_path)
-    runsheet_rows = [
-        {
-            "instrument": rec.document_title or rec.document_type or rec.instrument_number or "",
-            "source_ref": (f"Vol {rec.book} Pg {rec.page}" if rec.book and rec.page
-                           else (rec.instrument_number or "")),
-        }
-        for rec in records
-    ]
-
-    stage_root = Path(stage_submission_dir)
-    plan = build_plan_from_unit_folder(
+    root, plan = package_unit_submission(
+        unit_folder=project_folder,
+        ddr_path=Path(ddr_path),
         unit_name=unit_name,
-        ddr_path=ddr_path,
-        files_dir=files_dir,
-        runsheet_rows=runsheet_rows,
-        ddr_texts=ddr_texts,
         unit_dpu_contract=dpu_contract_no,
-        archive_workdir=stage_root / "_extracted",
     )
-    root = stage_submission(plan, stage_root)
     _emit(progress_callback, "ok",
-          f"Unit {unit_name} — submission package staged at {root}: "
-          f"{len(plan.placed)} file(s) placed, {len(plan.missing)} missing. "
-          f"See {root / 'SUBMISSION_MANIFEST.txt'}")
+          f"Unit {unit_name} — submission package created at {root.resolve()}: "
+          f"{len(plan.placed)} file(s) placed, {len(plan.missing)} missing, "
+          f"{len(plan.decisions)} decision(s).")
     return root
-
-
-def _read_ddr_texts(ddr_path: Path) -> list[str]:
-    """Every string value in the finished DDR except the Runsheet (which cites
-    recorded instruments, not title opinions). Feeds title-opinion vetting so an
-    opinion referenced only in a note or the audit trail is still recognised as
-    used."""
-    import openpyxl
-
-    texts: list[str] = []
-    try:
-        wb = openpyxl.load_workbook(ddr_path, data_only=True, read_only=True)
-    except Exception:
-        return texts
-    try:
-        for name in wb.sheetnames:
-            if name == "Runsheet":
-                continue
-            for row in wb[name].iter_rows(values_only=True):
-                for cell in row:
-                    if cell is not None:
-                        texts.append(str(cell))
-    finally:
-        wb.close()
-    return texts
 
 
 def _print_dd_completion(summary: dict[str, Any]) -> None:

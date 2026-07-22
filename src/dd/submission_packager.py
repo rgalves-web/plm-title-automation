@@ -436,10 +436,19 @@ def render_manifest(plan: SubmissionPlan) -> str:
     return "\n".join(lines)
 
 
-def stage_submission(plan: SubmissionPlan, output_root: Path, copy: bool = True) -> Path:
-    """Create the folder tree under output_root and copy files in. Returns the
-    unit root. Client files are copied (never moved) into a staging tree for the
-    landman to review before uploading — nothing leaves the machine here."""
+def stage_submission(
+    plan: SubmissionPlan,
+    output_root: Path,
+    copy: bool = True,
+    manifest_dir: Path | None = None,
+) -> Path:
+    """Create the "<Unit Title>/1. Landman Submitted/<7 subfolders>" tree under
+    output_root and COPY files in. Returns the unit root. Source files are copied
+    (never moved), so the unit's FILES folder is left completely untouched.
+
+    manifest_dir chooses where SUBMISSION_MANIFEST.txt is written; None writes it
+    inside the unit root, a path writes it there (e.g. the SUBMISSION folder that
+    holds the whole tree)."""
     output_root = Path(output_root)
     root = output_root / plan.unit_title / LANDMAN_SUBMITTED
     for sub in SUBFOLDERS:
@@ -449,7 +458,9 @@ def stage_submission(plan: SubmissionPlan, output_root: Path, copy: bool = True)
             dest = root / p.subfolder / p.dest_name
             if p.source.exists():
                 shutil.copy2(p.source, dest)
-    (root / MANIFEST_NAME).write_text(render_manifest(plan), encoding="utf-8")
+    target = Path(manifest_dir) if manifest_dir else root
+    target.mkdir(parents=True, exist_ok=True)
+    (target / MANIFEST_NAME).write_text(render_manifest(plan), encoding="utf-8")
     return root
 
 
@@ -663,3 +674,99 @@ def build_plan_from_unit_folder(
     plan.decisions.extend(dpu_decisions)
     plan.decisions.extend(to_decisions)
     return plan
+
+
+# ---------------------------------------------------------------------------
+# Top-level entry point: package a real unit folder in place
+# ---------------------------------------------------------------------------
+
+SUBMISSION_DIRNAME = "SUBMISSION"
+FILES_DIRNAME = "FILES"
+
+
+def _find_latest_ddr(unit_folder: Path) -> Path | None:
+    """The unit's finished DDR workbook, top-level in the unit folder (never the
+    reference DDRs that live inside FILES). Newest "(vN)" wins, else newest mtime."""
+    candidates = [p for p in unit_folder.glob("*.xls*")
+                  if "DDR" in p.name.upper() and not p.name.startswith("~$")]
+    if not candidates:
+        return None
+
+    def version(p: Path) -> tuple[int, float]:
+        m = re.search(r"\(v(\d+)\)", p.name, re.IGNORECASE)
+        return (int(m.group(1)) if m else -1, p.stat().st_mtime)
+
+    return max(candidates, key=version)
+
+
+def read_ddr_texts_and_runsheet(ddr_path: Path) -> tuple[list[str], list[dict[str, str]]]:
+    """Read the finished DDR: every string value except the Runsheet (feeds
+    title-opinion vetting — cells, notes, audit trail), plus the Runsheet's
+    instrument rows ({instrument, source_ref}) for volume.page renaming."""
+    import openpyxl
+
+    texts: list[str] = []
+    rows: list[dict[str, str]] = []
+    wb = openpyxl.load_workbook(ddr_path, data_only=True, read_only=True)
+    try:
+        for name in wb.sheetnames:
+            if name == "Runsheet":
+                for r in wb[name].iter_rows(min_row=4, values_only=True):
+                    cells = (tuple(r) + (None, None, None))[:3]
+                    instrument, instr_no = cells[1], cells[2]
+                    if instrument or instr_no:
+                        rows.append({"instrument": str(instrument or "").strip(),
+                                     "source_ref": str(instr_no or "").strip()})
+            else:
+                for row in wb[name].iter_rows(values_only=True):
+                    texts.extend(str(c) for c in row if c is not None)
+    finally:
+        wb.close()
+    return texts, rows
+
+
+def package_unit_submission(
+    unit_folder: Path,
+    ddr_path: Path | None = None,
+    unit_name: str | None = None,
+    unit_dpu_contract: str | None = None,
+) -> tuple[Path, SubmissionPlan]:
+    """Build the ready-to-upload PLM submission tree INSIDE the unit's own
+    project folder and return (unit_root, plan).
+
+        <unit_folder>/SUBMISSION/
+            SUBMISSION_MANIFEST.txt
+            <Unit Name, Title Case>/1. Landman Submitted/<the 7 subfolders>
+
+    Files are COPIED from <unit_folder>/FILES — that folder is never moved from
+    or deleted. No temp/scratch directory is used: the package lands where the
+    user can find it. Prints the absolute path of the created tree."""
+    unit_folder = Path(unit_folder)
+    files_dir = unit_folder / FILES_DIRNAME
+    if not files_dir.exists():
+        raise FileNotFoundError(f"No {FILES_DIRNAME} folder in {unit_folder}")
+    if unit_name is None:
+        unit_name = unit_folder.name
+    if ddr_path is None:
+        ddr_path = _find_latest_ddr(unit_folder)
+
+    ddr_texts, runsheet_rows = read_ddr_texts_and_runsheet(ddr_path) if ddr_path else ([], [])
+
+    output_root = unit_folder / SUBMISSION_DIRNAME
+    extract_dir = output_root / ".extract"          # transient, removed after copy
+    plan = build_plan_from_unit_folder(
+        unit_name=unit_name,
+        ddr_path=ddr_path,
+        files_dir=files_dir,
+        runsheet_rows=runsheet_rows,
+        ddr_texts=ddr_texts,
+        unit_dpu_contract=unit_dpu_contract,
+        archive_workdir=extract_dir,
+    )
+    # Idempotent: clear a prior package so a re-run never leaves stale files.
+    shutil.rmtree(output_root / plan.unit_title, ignore_errors=True)
+    root = stage_submission(plan, output_root, manifest_dir=output_root)
+    shutil.rmtree(extract_dir, ignore_errors=True)
+
+    print(f"PLM submission package created:\n  {root.resolve()}")
+    return root, plan

@@ -8,11 +8,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from src.dd.submission_packager import (
+    MANIFEST_NAME,
     SUBFOLDERS,
     build_plan_from_unit_folder,
     build_submission_plan,
     classify_unit_files,
     expand_archives,
+    package_unit_submission,
     parse_vol_page,
     render_manifest,
     select_used_title_opinions,
@@ -186,6 +188,65 @@ def test_stage_creates_the_seven_subfolders_and_copies(tmp_path):
     assert (root / "1. PLM Report" / "DDR.xlsx").exists()
     assert (root / "2. Title Opinions" / "T-O SUPP COX.PDF").exists()
     assert (root / "SUBMISSION_MANIFEST.txt").exists()
+
+
+def _write_min_ddr(path, to_note="", runsheet=None):
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active; ws.title = "Ownership Report"
+    ws["A1"] = "Owner report"
+    if to_note:
+        ws["A2"] = to_note
+    rs = wb.create_sheet("Runsheet")
+    rs["A1"] = "Supplemental Title Runsheet"
+    rs["A2"] = "NO."; rs["B2"] = "INSTRUMENT"; rs["C2"] = "INSTRUMENT NUMBER"
+    for i, (instr, ref) in enumerate(runsheet or [], start=4):
+        rs.cell(i, 1, i - 3); rs.cell(i, 2, instr); rs.cell(i, 3, ref)
+    wb.save(path)
+
+
+def test_package_unit_submission_writes_into_the_unit_folder(tmp_path):
+    # A realistic unit folder: FILES/ alongside the DDR, both inside the folder.
+    unit = tmp_path / "MAXWELL A UNIT"
+    files = unit / "FILES"
+    files.mkdir(parents=True)
+    (files / "T-O ORIG BRUMBAUGH A-122 212.PDF").write_bytes(b"to")
+    (files / "K1400813 (DECL OF POOLED UNIT - MAXWELL UNIT A).zip").write_bytes(b"z")
+    _write_min_ddr(unit / "DDR - MAXWELL A UNIT (PLM) (v13).xlsx",
+                   to_note="Per T-O ORIG BRUMBAUGH the tract is clear.")
+
+    before = {p.name for p in files.iterdir()}
+    root, plan = package_unit_submission(unit, unit_dpu_contract="K1400813")
+
+    # Tree lives inside the unit folder's SUBMISSION dir — not a temp dir.
+    submission = unit / "SUBMISSION"
+    assert submission in root.parents
+    assert str(root).startswith(str(unit))
+    assert root.name == "1. Landman Submitted"
+    assert root.parent.name == "Maxwell A Unit"
+    for sub in SUBFOLDERS:
+        assert (root / sub).is_dir()
+    # Manifest is written in the SUBMISSION folder itself.
+    assert (submission / MANIFEST_NAME).exists()
+    assert not (root / MANIFEST_NAME).exists()
+    # FILES is left exactly as it was; no scratch dir left behind.
+    assert {p.name for p in files.iterdir()} == before
+    assert not (submission / ".extract").exists()
+    # The Brumbaugh opinion (cited in the note) shipped.
+    assert any("BRUMBAUGH" in p.name for p in (root / "2. Title Opinions").iterdir())
+
+
+def test_package_is_idempotent_no_stale_files_on_rerun(tmp_path):
+    unit = tmp_path / "MAXWELL A UNIT"
+    files = unit / "FILES"; files.mkdir(parents=True)
+    (files / "T-O ORIG BRUMBAUGH A-122 212.PDF").write_bytes(b"to")
+    _write_min_ddr(unit / "DDR (v1).xlsx", to_note="BRUMBAUGH cited")
+    root1, _ = package_unit_submission(unit)
+    # Second run must not accumulate or error.
+    root2, plan2 = package_unit_submission(unit)
+    assert root1 == root2
+    tos = list((root2 / "2. Title Opinions").iterdir())
+    assert len(tos) == 1
 
 
 def test_nothing_is_invented_every_placed_file_exists(tmp_path):
