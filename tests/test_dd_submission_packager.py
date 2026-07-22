@@ -12,8 +12,10 @@ from src.dd.submission_packager import (
     build_plan_from_unit_folder,
     build_submission_plan,
     classify_unit_files,
+    expand_archives,
     parse_vol_page,
     render_manifest,
+    select_used_title_opinions,
     stage_submission,
     title_case_unit_name,
 )
@@ -225,6 +227,113 @@ def test_classify_sorts_a_maxwell_shaped_folder(tmp_path):
     # A title-opinion PDF sitting in the folder is not auto-placed.
     for k in ("dpu", "leases", "sellers", "wells"):
         assert not any("BRUMBAUGH" in n for n in names(k))
+
+
+# --- Bug 1: Unit Designation is the unit's OWN DPU + amendments only ---------
+
+def test_foreign_unit_dpu_is_excluded(tmp_path):
+    own = tmp_path / "K1400813 (DECL OF POOLED UNIT - MAXWELL UNIT A).zip"
+    foreign = tmp_path / "K1400235 (DECL OF POOLED UNIT - WIESE UNIT).zip"
+    own.write_bytes(b"x"); foreign.write_bytes(b"y")
+    plan = _plan(dpu_files=[own, foreign], unit_dpu_contract="K1400813")
+    placed = {p.source.name for p in plan.for_subfolder(SUBFOLDERS[2])}
+    assert own.name in placed
+    assert foreign.name not in placed
+    assert any("WIESE" in d and "excluded" in d.lower() and "another" in d.lower()
+               for d in plan.decisions)
+
+
+def test_own_dpu_amendment_is_included(tmp_path):
+    dpu = tmp_path / "K1400813 (DECL OF POOLED UNIT - MAXWELL UNIT A).zip"
+    amend = tmp_path / "AMENDMENT TO DECL OF POOLED UNIT - MAXWELL UNIT A Vol 574 Pg 830.pdf"
+    dpu.write_bytes(b"x"); amend.write_bytes(b"y")
+    plan = _plan(dpu_files=[dpu, amend], unit_dpu_contract="K1400813")
+    placed = {p.source.name for p in plan.for_subfolder(SUBFOLDERS[2])}
+    assert dpu.name in placed and amend.name in placed          # amendment kept
+    amend_placed = next(p for p in plan.for_subfolder(SUBFOLDERS[2])
+                        if p.source.name == amend.name)
+    assert "amendment" in amend_placed.note.lower()
+
+
+def test_folder_dpu_expands_own_archive_and_drops_foreign_and_cruft(tmp_path):
+    import zipfile
+    own = tmp_path / "K1400813 (DECL OF POOLED UNIT - MAXWELL UNIT A).zip"
+    with zipfile.ZipFile(own, "w") as zf:
+        zf.writestr("MAXWELL/UNIT DEC.TIF", b"a")
+        zf.writestr("MAXWELL/UNIT DEC AMENDMENT.TIF", b"b")   # the Vol 574/830 amendment
+        zf.writestr("MAXWELL/CAF.TIF", b"c")                  # cruft -> dropped
+        zf.writestr("MAXWELL/LEGAL APPROVAL.TIF", b"d")       # cruft -> dropped
+    foreign = tmp_path / "K1400235 (DECL OF POOLED UNIT - WIESE UNIT).zip"
+    with zipfile.ZipFile(foreign, "w") as zf:
+        zf.writestr("WIESE/UNIT DEC.TIF", b"x")
+    ddr = tmp_path / "DDR.xlsx"; ddr.write_bytes(b"z")
+    plan = build_plan_from_unit_folder(
+        unit_name="MAXWELL A UNIT", ddr_path=ddr, files_dir=tmp_path,
+        runsheet_rows=[], consumed_title_opinions=[],
+        unit_dpu_contract="K1400813", archive_workdir=tmp_path / "work")
+    placed = {p.dest_name for p in plan.for_subfolder(SUBFOLDERS[2])}
+    assert placed == {"UNIT DEC.TIF", "UNIT DEC AMENDMENT.TIF"}   # amendment in, cruft out
+    assert any("WIESE" in d and "another unit" in d.lower() for d in plan.decisions)
+
+
+# --- Bug 2: TO used if referenced anywhere incl. notes / audit trail ---------
+
+def test_opinion_cited_only_in_a_note_is_included(tmp_path):
+    christie = tmp_path / "T0140456 (C.B. CHRISTIE JR. A-122 160ACS-TITLE OPINIONS).zip"
+    gann = tmp_path / "T0140457 (RAY GANN ET AL A-122 160 ACS-TITLE OPINIONS).zip"
+    unrelated = tmp_path / "T-O ORIG SOMEONE ELSE A-122.PDF"
+    for p in (christie, gann, unrelated):
+        p.write_bytes(b"x")
+    # The DDR body never names these; only a NOTE cell does, by opinion number.
+    ddr_texts = [
+        "Ownership figures per operator report",
+        "NOTE: Leases 0190122-007/-008 left blank per T0140456 and Ray Gann opinion.",
+    ]
+    used, unused = select_used_title_opinions([christie, gann, unrelated], ddr_texts)
+    used_names = {p.name for p in used}
+    assert christie.name in used_names            # matched by opinion number in a note
+    assert gann.name in used_names                # matched by surname in a note
+    assert unrelated.name not in used_names       # never referenced -> dropped
+    assert any("SOMEONE" in p.name or "ELSE" in p.name for p, _ in unused)
+
+
+def test_word_to_does_not_falsely_flag_a_seller_file_as_a_TO(tmp_path):
+    # "ENCANA TO EOG" must not be read as a title-opinion marker.
+    _touch(tmp_path, "K1400170 (FARMOUT AGMTASMT - ENCANA TO EOG-FARMOUT AGREEMENT).zip")
+    b = classify_unit_files(tmp_path)
+    assert not b["title_opinions"]
+    assert any("FARMOUT" in p.name for p in b["sellers"])
+
+
+# --- Bug 3: Leases folder holds member documents, not archives ---------------
+
+def test_expand_archives_yields_members_not_the_zip(tmp_path):
+    import zipfile
+    z = tmp_path / "5 Leases.zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("Lease A - Brashear.pdf", b"a")
+        zf.writestr("Lease B - Ratliff.pdf", b"b")
+        zf.writestr("Thumbs.db", b"junk")          # cruft, must be filtered
+    out = expand_archives([z], tmp_path / "work")
+    names = {p.name for p in out}
+    assert names == {"Lease A - Brashear.pdf", "Lease B - Ratliff.pdf"}
+    assert all(p.exists() for p in out)
+
+
+def test_leases_folder_gets_extracted_members(tmp_path):
+    import zipfile
+    z = tmp_path / "5 Leases.zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("Amendment 1.png", b"a")
+        zf.writestr("Amendment 2.png", b"b")
+    ddr = tmp_path / "DDR.xlsx"; ddr.write_bytes(b"x")
+    plan = build_plan_from_unit_folder(
+        unit_name="MAXWELL A UNIT", ddr_path=ddr, files_dir=tmp_path,
+        runsheet_rows=[], consumed_title_opinions=[],
+        archive_workdir=tmp_path / "work")
+    lease_names = {p.dest_name for p in plan.for_subfolder(SUBFOLDERS[3])}
+    assert lease_names == {"Amendment 1.png", "Amendment 2.png"}
+    assert "5 Leases.zip" not in lease_names       # the archive itself is not placed
 
 
 def test_build_plan_from_unit_folder_places_consumed_TO_only(tmp_path):

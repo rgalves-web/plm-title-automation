@@ -31,9 +31,11 @@ from __future__ import annotations
 
 import re
 import shutil
+import tempfile
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 # The seven subfolders, in submission order.
 SUBFOLDERS = (
@@ -168,6 +170,36 @@ def _chain_key(name: str) -> str:
 # The plan
 # ---------------------------------------------------------------------------
 
+def _unit_core_tokens(unit_name: str) -> set[str]:
+    """The distinctive words of a unit name — drops "UNIT" and the single-letter
+    designator so "MAXWELL A UNIT" -> {"MAXWELL"}. Used to tell the unit's own
+    Declaration of Pooled Unit from a foreign unit's."""
+    return {t for t in re.findall(r"[A-Z]{3,}", str(unit_name).upper())
+            if t not in {"UNIT", "THE", "AND"}}
+
+
+def _dpu_is_own_unit(name: str, unit_name: str, unit_dpu_contract: str | None) -> bool:
+    """True if this designation belongs to THIS unit — it carries the unit's own
+    DPU contract number, or names the unit (all core tokens present). The latter
+    catches an amendment filed under a different contract number."""
+    nn = _norm(name)
+    own_contract = _norm(unit_dpu_contract) if unit_dpu_contract else ""
+    core = _unit_core_tokens(unit_name)
+    return (bool(own_contract) and own_contract in nn) or (
+        bool(core) and all(_norm(t) in nn for t in core))
+
+
+# Which members of a DPU archive belong in Unit Designation: the declaration and
+# its amendments, NOT the filing cruft (CAF, legal approval, transmittals).
+def _dpu_member_filter(member_name: str) -> bool:
+    if Path(member_name).suffix.lower() not in _DOC_MEMBER_EXTS:
+        return False
+    up = member_name.upper()
+    if re.search(r"\bCAF\b|LEGAL APPROVAL|TRANSMITTAL|\bNOTES?\b|PROPOSAL", up):
+        return False
+    return bool(re.search(r"UNIT DEC|DECLARATION|DESIGNAT|POOLED", up))
+
+
 def build_submission_plan(
     unit_name: str,
     ddr_path: Path | None,
@@ -178,6 +210,8 @@ def build_submission_plan(
     sellers_files: Iterable[Path],
     well_files: Iterable[Path],
     file_index: dict[str, Path],
+    unit_dpu_contract: str | None = None,
+    filter_dpu: bool = True,
 ) -> SubmissionPlan:
     """Decide what goes where — pure, no disk writes.
 
@@ -187,6 +221,9 @@ def build_submission_plan(
         resolving a TO reference or a runsheet vol/page to a real document.
     runsheet_rows: dicts with at least {instrument, source_ref} — source_ref
         carries the "Vol X, Pg Y" the file is renamed from.
+    unit_dpu_contract: the unit's OWN DPU contract number (e.g. "K1400813").
+        Only this unit's designation and its amendments go in Unit Designation;
+        a DPU for any other unit is excluded with a logged decision.
     """
     plan = SubmissionPlan(unit_name=unit_name, unit_title=title_case_unit_name(unit_name))
 
@@ -232,9 +269,21 @@ def build_submission_plan(
             seen_chains[chain] = path
         plan.placed.append(PlacedFile(SUBFOLDERS[1], path, path.name))
 
-    # 3. Unit Designation — the DPU + amendments.
+    # 3. Unit Designation — the unit's OWN DPU + amendments, nothing else. A
+    # foreign unit's designation (e.g. a neighbouring Wiese Unit DPU that shares
+    # the FILES folder) is excluded and the exclusion logged. filter_dpu=False
+    # means the caller already vetted ownership (e.g. it expanded the own DPU
+    # archive into members that no longer carry the unit's name) — then place all.
     for path in _dedupe_paths(dpu_files):
-        plan.placed.append(PlacedFile(SUBFOLDERS[2], path, path.name))
+        if filter_dpu and not _dpu_is_own_unit(path.name, unit_name, unit_dpu_contract):
+            plan.decisions.append(
+                f"Unit Designation: excluded {path.name!r} — a designation for another "
+                f"unit, not {plan.unit_title}'s own DPU"
+                + (f" ({unit_dpu_contract})" if unit_dpu_contract else ""))
+            continue
+        is_amend = bool(re.search(r"AMEND", path.name, re.IGNORECASE))
+        note = "amendment to this unit's DPU" if is_amend else ""
+        plan.placed.append(PlacedFile(SUBFOLDERS[2], path, path.name, note=note))
     if not plan.for_subfolder(SUBFOLDERS[2]):
         plan.missing.append(MissingItem(SUBFOLDERS[2], "the Declaration of Pooled Unit",
                                         "no DPU document located for this unit"))
@@ -395,7 +444,14 @@ def stage_submission(plan: SubmissionPlan, output_root: Path, copy: bool = True)
 # Bucket a FILES-folder document by its name. These are deliberately narrow —
 # when a name matches nothing, the file is simply not placed (conservative), so
 # a wrong guess never smuggles an extraneous document into the package.
-_TO_NAME_RE = re.compile(r"\bT[-\s]?O\b|TITLE OPINION|\bT0\d{6}\b", re.IGNORECASE)
+# A title-opinion filename marker. The separator between T and O is REQUIRED so
+# the English word "to" ("ENCANA TO EOG") never matches — only "T-O" / "T O",
+# "TITLE OPINION", or an opinion number "T0140456".
+_TO_NAME_RE = re.compile(r"\bT[-\s]O\b|TITLE OPINION|\bT0\d{6}\b", re.IGNORECASE)
+_TO_NUMBER_RE = re.compile(r"\bT0\d{6}\b", re.IGNORECASE)
+# Archive members worth extracting into a document folder (skip thumbnails,
+# desktop.ini, and other packaging cruft).
+_DOC_MEMBER_EXTS = {".pdf", ".tif", ".tiff", ".png", ".jpg", ".jpeg", ".docx", ".doc"}
 _DPU_NAME_RE = re.compile(
     r"\bDPU\b|POOLED UNIT|UNIT DESIGNAT|DECL(?:ARATION)?\s+OF\s+POOLED", re.IGNORECASE)
 _WELL_NAME_RE = re.compile(
@@ -409,9 +465,10 @@ _NOISE_NAME_RE = re.compile(
 
 def classify_unit_files(files_dir: Path, recurse: bool = True) -> dict[str, Any]:
     """Scan a unit's FILES folder and sort documents into the packager's buckets
-    by filename. Returns {file_index, dpu, leases, sellers, wells}. Title
-    opinions are NOT bucketed here — those come from the DDR's consumed set, so
-    unused opinions sitting in the folder are never shipped.
+    by filename. Returns {file_index, title_opinions, dpu, leases, sellers,
+    wells}. The title_opinions bucket is the set of CANDIDATE opinions in the
+    folder; which ones actually ship is decided against the DDR text (an opinion
+    the DDR never references is dropped, with a logged decision).
 
     A file that matches no bucket is left out on purpose; the manifest's MISSING
     and DECISIONS sections make any such gap visible rather than silent.
@@ -420,6 +477,7 @@ def classify_unit_files(files_dir: Path, recurse: bool = True) -> dict[str, Any]
     paths = (p for p in (files_dir.rglob("*") if recurse else files_dir.glob("*"))
              if p.is_file())
     file_index: dict[str, Path] = {}
+    title_opinions: list[Path] = []
     dpu: list[Path] = []
     leases: list[Path] = []
     sellers: list[Path] = []
@@ -433,35 +491,151 @@ def classify_unit_files(files_dir: Path, recurse: bool = True) -> dict[str, Any]
             dpu.append(path)
         elif _WELL_NAME_RE.search(name):
             wells.append(path)
+        elif _TO_NAME_RE.search(name):
+            title_opinions.append(path)                # candidate — vetted vs DDR
         elif _SELLER_INCLUDE_RE.search(name) and not _SELLER_EXCLUDE_RE.search(name):
             sellers.append(path)                       # farmout / JOA / assignment
         elif _LEASE_NAME_RE.search(name):
             leases.append(path)
-    return {"file_index": file_index, "dpu": dpu, "leases": leases,
-            "sellers": sellers, "wells": wells}
+    return {"file_index": file_index, "title_opinions": title_opinions, "dpu": dpu,
+            "leases": leases, "sellers": sellers, "wells": wells}
+
+
+def expand_archives(
+    paths: Iterable[Path],
+    dest_dir: Path,
+    member_filter: Callable[[str], bool] | None = None,
+) -> list[Path]:
+    """Extract every .zip in `paths` into `dest_dir` (namespaced by the archive
+    stem) and return the member document paths; non-archive paths pass through
+    unchanged. PLM wants the individual lease documents in the Leases folder,
+    not the archive they arrived in, so a zip is replaced by its members.
+
+    member_filter decides which members survive; the default keeps recognised
+    document types and drops packaging cruft (thumbnails, desktop.ini)."""
+    if member_filter is None:
+        member_filter = lambda n: Path(n).suffix.lower() in _DOC_MEMBER_EXTS
+    dest_dir = Path(dest_dir)
+    out: list[Path] = []
+    for path in paths:
+        path = Path(path)
+        if path.suffix.lower() == ".zip" and zipfile.is_zipfile(path):
+            target_root = dest_dir / path.stem
+            with zipfile.ZipFile(path) as zf:
+                for info in zf.infolist():
+                    if info.is_dir():
+                        continue
+                    member = Path(info.filename).name
+                    if not member or not member_filter(member):
+                        continue
+                    target_root.mkdir(parents=True, exist_ok=True)
+                    target = target_root / member
+                    with zf.open(info) as src, open(target, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    out.append(target)
+        else:
+            out.append(path)
+    return out
+
+
+def _to_reference_tokens(name: str) -> list[str]:
+    """The tokens that would identify this title opinion in DDR text: its opinion
+    number (T0######) and its distinctive party surname(s)."""
+    tokens: list[str] = [m.group(0).upper() for m in _TO_NUMBER_RE.finditer(name)]
+    stem = Path(name).stem.upper()
+    head = re.split(r"A-?\d{2,}", stem, maxsplit=1)[0]
+    tokens += [t for t in re.findall(r"[A-Z]{4,}", head)
+               if t not in _TO_STOP and t not in {"TITLE", "OPINIONS", "OPINION"}]
+    return tokens
+
+
+def select_used_title_opinions(
+    candidates: Iterable[Path],
+    ddr_texts: Iterable[str],
+) -> tuple[list[Path], list[tuple[Path, str]]]:
+    """Split candidate opinions into (used, unused). An opinion is USED if any of
+    its identifying tokens — opinion number or party surname — appears anywhere
+    in the DDR text, which INCLUDES notes and the audit trail, not just report
+    cells. That is what catches an opinion cited only as the note-basis of a
+    decision (e.g. the Alamo Christie/Gann opinions grounding a blank lease).
+    Returns (used_paths, [(unused_path, reason), ...])."""
+    blob = "\n".join(str(t).upper() for t in ddr_texts if t is not None)
+    used: list[Path] = []
+    unused: list[tuple[Path, str]] = []
+    for path in candidates:
+        tokens = _to_reference_tokens(path.name)
+        hit = next((t for t in tokens if re.search(rf"\b{re.escape(t)}\b", blob)), None)
+        if hit:
+            used.append(path)
+        else:
+            unused.append((path, "present in FILES but the DDR never references it "
+                                 f"(looked for {tokens or ['(no identifying token)']})"))
+    return used, unused
 
 
 def build_plan_from_unit_folder(
     unit_name: str,
     ddr_path: Path | None,
     files_dir: Path,
-    consumed_title_opinions: Iterable[str],
     runsheet_rows: Iterable[dict[str, Any]],
+    ddr_texts: Iterable[str] | None = None,
+    consumed_title_opinions: Iterable[str] | None = None,
+    unit_dpu_contract: str | None = None,
+    archive_workdir: Path | None = None,
     recurse: bool = True,
 ) -> SubmissionPlan:
-    """Build a submission plan from a unit's FILES folder plus the two things
-    only the finished DDR knows: which title opinions it consumed and its
-    runsheet rows. The DPU / Leases / Seller's Files / Well Files buckets are
-    inferred from the folder by `classify_unit_files`."""
+    """Build a submission plan from a unit's FILES folder plus what only the
+    finished DDR knows: its runsheet rows and its full text (cells + notes +
+    audit trail). The DPU / Leases / Seller's Files / Well Files buckets are
+    inferred from the folder by `classify_unit_files`.
+
+    Title opinions are chosen by vetting the folder's candidate opinions against
+    `ddr_texts` — an opinion referenced anywhere in the DDR (including a note or
+    the audit trail) is shipped; one the DDR never references is dropped with a
+    logged decision. Pass `consumed_title_opinions` to override that vetting with
+    an explicit list. Lease archives are expanded into their member documents so
+    the Leases folder holds individual leases, not zips."""
     b = classify_unit_files(files_dir, recurse=recurse)
-    return build_submission_plan(
+
+    to_decisions: list[str] = []
+    if consumed_title_opinions is not None:
+        consumed = list(consumed_title_opinions)
+    else:
+        used, unused = select_used_title_opinions(b["title_opinions"], ddr_texts or [])
+        consumed = [p.name for p in used]
+        to_decisions = [f"Title Opinions: excluded {p.name!r} — {why}" for p, why in unused]
+
+    workdir = Path(archive_workdir) if archive_workdir else Path(tempfile.mkdtemp(prefix="plm_pkg_"))
+
+    # Unit Designation: keep only this unit's own DPU, then expand it into its
+    # declaration + amendment documents (dropping CAF / legal-approval cruft).
+    # A foreign unit's designation is dropped with a logged decision.
+    own_dpu, foreign_dpu = [], []
+    for p in b["dpu"]:
+        (own_dpu if _dpu_is_own_unit(p.name, unit_name, unit_dpu_contract) else foreign_dpu).append(p)
+    dpu_decisions = [
+        f"Unit Designation: excluded {p.name!r} — a designation for another unit, not "
+        f"{title_case_unit_name(unit_name)}'s own DPU"
+        + (f" ({unit_dpu_contract})" if unit_dpu_contract else "")
+        for p in foreign_dpu
+    ]
+    dpu_members = expand_archives(own_dpu, workdir / "dpu", member_filter=_dpu_member_filter)
+
+    lease_files = expand_archives(b["leases"], workdir / "leases")
+
+    plan = build_submission_plan(
         unit_name=unit_name,
         ddr_path=ddr_path,
-        consumed_title_opinions=consumed_title_opinions,
-        dpu_files=b["dpu"],
-        lease_files=b["leases"],
+        consumed_title_opinions=consumed,
+        dpu_files=dpu_members,
+        lease_files=lease_files,
         runsheet_rows=runsheet_rows,
         sellers_files=b["sellers"],
         well_files=b["wells"],
         file_index=b["file_index"],
+        unit_dpu_contract=unit_dpu_contract,
+        filter_dpu=False,          # ownership already vetted above
     )
+    plan.decisions.extend(dpu_decisions)
+    plan.decisions.extend(to_decisions)
+    return plan

@@ -1355,6 +1355,7 @@ def run_dd_pipeline_for_unit(
             unit_folder=unit_folder,
             to_files_dir=to_files_dir,
             stage_submission_dir=stage_submission_dir,
+            dpu_contract_no=dpu_contract_no,
             progress_callback=progress_callback,
         )
 
@@ -1393,12 +1394,15 @@ def _stage_submission_package(
     unit_folder: str | Path | None,
     to_files_dir: str | Path | None,
     stage_submission_dir: str | Path,
+    dpu_contract_no: str | None,
     progress_callback: ProgressCallback | None,
 ) -> Path | None:
     """Assemble the PLM submission folder from what the pipeline already knows.
 
-    Consumed title opinions come from the manifest (those confirmed to cover the
-    unit); runsheet rows come from the filtered supplemental records; the DPU /
+    Title opinions are vetted against the finished DDR's full text (cells, notes,
+    and audit trail) so an opinion cited only as a note-basis still ships; the
+    unit's own DPU is matched by contract number and foreign designations are
+    excluded; runsheet rows come from the filtered supplemental records; and the
     Leases / Seller's Files / Well Files buckets are inferred from the unit's
     FILES folder. Every gap lands in SUBMISSION_MANIFEST's MISSING section.
     """
@@ -1416,11 +1420,7 @@ def _stage_submission_package(
               f"Unit {unit_name} — submission packager skipped: no FILES folder located.")
         return None
 
-    consumed = [
-        Path(to.pdf_path).stem if to.pdf_path else to.file_number
-        for to in manifest.title_opinions
-        if to.confirm_coverage and (to.pdf_available or to.pdf_path)
-    ]
+    ddr_texts = _read_ddr_texts(ddr_path)
     runsheet_rows = [
         {
             "instrument": rec.document_title or rec.document_type or rec.instrument_number or "",
@@ -1430,19 +1430,47 @@ def _stage_submission_package(
         for rec in records
     ]
 
+    stage_root = Path(stage_submission_dir)
     plan = build_plan_from_unit_folder(
         unit_name=unit_name,
         ddr_path=ddr_path,
         files_dir=files_dir,
-        consumed_title_opinions=consumed,
         runsheet_rows=runsheet_rows,
+        ddr_texts=ddr_texts,
+        unit_dpu_contract=dpu_contract_no,
+        archive_workdir=stage_root / "_extracted",
     )
-    root = stage_submission(plan, Path(stage_submission_dir))
+    root = stage_submission(plan, stage_root)
     _emit(progress_callback, "ok",
           f"Unit {unit_name} — submission package staged at {root}: "
           f"{len(plan.placed)} file(s) placed, {len(plan.missing)} missing. "
           f"See {root / 'SUBMISSION_MANIFEST.txt'}")
     return root
+
+
+def _read_ddr_texts(ddr_path: Path) -> list[str]:
+    """Every string value in the finished DDR except the Runsheet (which cites
+    recorded instruments, not title opinions). Feeds title-opinion vetting so an
+    opinion referenced only in a note or the audit trail is still recognised as
+    used."""
+    import openpyxl
+
+    texts: list[str] = []
+    try:
+        wb = openpyxl.load_workbook(ddr_path, data_only=True, read_only=True)
+    except Exception:
+        return texts
+    try:
+        for name in wb.sheetnames:
+            if name == "Runsheet":
+                continue
+            for row in wb[name].iter_rows(values_only=True):
+                for cell in row:
+                    if cell is not None:
+                        texts.append(str(cell))
+    finally:
+        wb.close()
+    return texts
 
 
 def _print_dd_completion(summary: dict[str, Any]) -> None:
