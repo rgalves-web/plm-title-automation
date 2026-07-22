@@ -1001,6 +1001,7 @@ def run_dd_pipeline_for_unit(
     unit_folder: str | Path | None = None,
     dpu_work_dir: str | Path | None = None,
     dpu_contract_no: str = "K1400813",
+    stage_submission_dir: str | Path | None = None,
 ) -> DDPipelineResult:
     """Run the full DD pipeline for one unit: build manifest, parse available
     title opinions, resolve the controlling certification date, filter and QA
@@ -1342,6 +1343,21 @@ def run_dd_pipeline_for_unit(
             f"VALIDATION NOT READY — {validation.summary()}. See the sidecar report next to "
             "the DDR; this workbook must not be sent until every FAIL is resolved.")
 
+    # OPTIONAL final step: assemble the PLM submission folder for this unit.
+    # Off unless a staging directory is supplied — it copies client files into a
+    # review tree, so callers opt in explicitly.
+    if stage_submission_dir is not None:
+        _stage_submission_package(
+            unit_name=unit_name,
+            ddr_path=ddr_result.output_path,
+            manifest=manifest,
+            records=records,
+            unit_folder=unit_folder,
+            to_files_dir=to_files_dir,
+            stage_submission_dir=stage_submission_dir,
+            progress_callback=progress_callback,
+        )
+
     summary = {
         "unit_name": unit_name,
         "title_opinions_total": len(manifest.title_opinions),
@@ -1367,6 +1383,66 @@ def run_dd_pipeline_for_unit(
         ddr_result=ddr_result,
         summary=summary,
     )
+
+
+def _stage_submission_package(
+    unit_name: str,
+    ddr_path: Path,
+    manifest: "UnitManifest",
+    records: list[SourceDocument],
+    unit_folder: str | Path | None,
+    to_files_dir: str | Path | None,
+    stage_submission_dir: str | Path,
+    progress_callback: ProgressCallback | None,
+) -> Path | None:
+    """Assemble the PLM submission folder from what the pipeline already knows.
+
+    Consumed title opinions come from the manifest (those confirmed to cover the
+    unit); runsheet rows come from the filtered supplemental records; the DPU /
+    Leases / Seller's Files / Well Files buckets are inferred from the unit's
+    FILES folder. Every gap lands in SUBMISSION_MANIFEST's MISSING section.
+    """
+    from src.dd.submission_packager import build_plan_from_unit_folder, stage_submission
+
+    files_dir = None
+    for candidate in (Path(unit_folder) / "FILES" if unit_folder else None,
+                      Path(to_files_dir) if to_files_dir else None,
+                      Path(unit_folder) if unit_folder else None):
+        if candidate and candidate.exists():
+            files_dir = candidate
+            break
+    if files_dir is None:
+        _emit(progress_callback, "warn",
+              f"Unit {unit_name} — submission packager skipped: no FILES folder located.")
+        return None
+
+    consumed = [
+        Path(to.pdf_path).stem if to.pdf_path else to.file_number
+        for to in manifest.title_opinions
+        if to.confirm_coverage and (to.pdf_available or to.pdf_path)
+    ]
+    runsheet_rows = [
+        {
+            "instrument": rec.document_title or rec.document_type or rec.instrument_number or "",
+            "source_ref": (f"Vol {rec.book} Pg {rec.page}" if rec.book and rec.page
+                           else (rec.instrument_number or "")),
+        }
+        for rec in records
+    ]
+
+    plan = build_plan_from_unit_folder(
+        unit_name=unit_name,
+        ddr_path=ddr_path,
+        files_dir=files_dir,
+        consumed_title_opinions=consumed,
+        runsheet_rows=runsheet_rows,
+    )
+    root = stage_submission(plan, Path(stage_submission_dir))
+    _emit(progress_callback, "ok",
+          f"Unit {unit_name} — submission package staged at {root}: "
+          f"{len(plan.placed)} file(s) placed, {len(plan.missing)} missing. "
+          f"See {root / 'SUBMISSION_MANIFEST.txt'}")
+    return root
 
 
 def _print_dd_completion(summary: dict[str, Any]) -> None:
