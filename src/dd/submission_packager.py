@@ -80,6 +80,81 @@ _SELLER_INCLUDE_RE = re.compile(
     r"\b(farmout|farm.out|joa|joint operating|assignment|asmt|conveyance|"
     r"bill of sale|ratification)\b", re.IGNORECASE)
 
+# Member-level exclusions inside a contract archive: everything that is NOT the
+# recorded conveyance instrument. Broader than the archive-name filter because
+# the cruft (CAF, legal approval, notes, drafts, letters, payment elections,
+# transmittals, correspondence, bonus, LAR, division orders, summaries) lives as
+# individual members that must never be mass-uploaded.
+_SELLER_MEMBER_EXCLUDE_RE = re.compile(
+    r"\b(caf|legal approval|\blar\b|notes?|draft|division order|\bd\.?o\.?\b|"
+    r"bonus|lease summary|summary of lease|lease acquisition|transmittal|proposal|"
+    r"payment[s]? election|leasehold payment|correspondence|\bltr\b|letter|\bpsa\b|"
+    r"offer to purchase|election|consent|calculation|\binfo\b|ratificaiton)\b",
+    re.IGNORECASE)
+# A recorded instrument carries a "- REC" (or "-REC") marker.
+_REC_RE = re.compile(r"-\s*rec\b", re.IGNORECASE)
+# A contract / recording number that identifies which package a member belongs to.
+_CONTRACT_NO_RE = re.compile(r"\b(K\d{5,7}[A-Z]*|\d{7})\b", re.IGNORECASE)
+# Instrument / legal boilerplate that is not a party name — dropped when reducing
+# an instrument name to the parties it conveys between.
+_SELLER_NONPARTY = {
+    "ASMT", "AMENDED", "AMENDMENT", "REC", "PARTIAL", "CORRECTION", "CORRECTED",
+    "FARMOUT", "FARM", "OUT", "ASSIGNMENT", "RATIFICATION", "JOA", "JOINT",
+    "OPERATING", "AGMT", "AGREEMENT", "BILL", "SALE", "CONVEYANCE", "DECLARATION",
+    "UNIT", "POOLED", "DESIGNATION", "OGL", "OGML", "THE", "AND", "ETAL", "TIF",
+    "PDF", "OGA", "CO", "COUNTY", "AGMTASMT", "SIGNED", "CORRECTED",
+}
+
+
+def _member_party_tokens(name: str) -> set[str]:
+    """The party surnames/company tokens in an instrument name, boilerplate
+    stripped — e.g. "ASMT-ENCANA TO EOG (K1400170)-REC" -> {ENCANA, EOG}, while
+    a terse "ASMT AMENDED - REC" -> {} (belongs to its package, no foreign party)."""
+    head = _CONTRACT_NO_RE.sub(" ", Path(name).stem.upper())
+    return {t for t in re.findall(r"[A-Z]{3,}", head) if t not in _SELLER_NONPARTY}
+
+
+def _seller_own_contract(archive_name: str) -> str:
+    m = re.match(r"\s*(K\d+[A-Z-]*)", archive_name, re.IGNORECASE)
+    return _norm(m.group(1)) if m else ""
+
+
+def _seller_subject_parties(archive_name: str) -> set[str]:
+    """The parties a contract package is about, from its filename — the package's
+    own subject. A member naming a party foreign to this set is not part of the
+    package's recorded instrument."""
+    inside = re.search(r"\((.*)\)", archive_name)
+    return _member_party_tokens(inside.group(1) if inside else archive_name)
+
+
+def seller_member_verdict(name: str, subject_parties: set[str], own_contract: str = "") -> str | None:
+    """None to KEEP a contract-archive member, else the reason to EXCLUDE it.
+    Keeps ONLY the recorded ("- REC") source-cited instrument(s) of this package's
+    own subject; drops cruft, unrecorded drafts, foreign contracts, foreign
+    parties — so nothing extraneous is mass-uploaded."""
+    if Path(name).suffix.lower() not in _DOC_MEMBER_EXTS:
+        return "not a document file"
+    if _SELLER_MEMBER_EXCLUDE_RE.search(name):
+        return "extraneous (CAF / legal approval / notes / draft / D.O. / bonus / LAR / summary / payment / correspondence)"
+    if not _SELLER_INCLUDE_RE.search(name):
+        return "not a source-cited instrument (assignment / farmout / JOA / conveyance)"
+    if not _REC_RE.search(name):
+        return "unrecorded draft — only the recorded (- REC) instrument ships"
+    foreign_nos = [n for n in _CONTRACT_NO_RE.findall(name) if _norm(n) != own_contract]
+    if own_contract and foreign_nos:
+        return f"pertains to a different contract ({', '.join(foreign_nos)}), not {own_contract}"
+    parties = _member_party_tokens(name)
+    if parties and subject_parties and not (parties & subject_parties):
+        return (f"pertains to another party ({', '.join(sorted(parties))}), "
+                "not this contract's subject")
+    return None
+
+
+def _seller_dedup_key(name: str) -> str:
+    """Collapse scan duplicates ("... - REC (2)") of the same instrument."""
+    stem = re.sub(r"\s*\(\d+\)\s*$", "", Path(name).stem)
+    return _norm(stem)
+
 # Recorded-instrument volume/page, however the runsheet prints it.
 _VOL_PAGE_RE = re.compile(
     r"\b(?:vol(?:ume)?|book|bk)\.?\s*(\d+)\D{0,14}?(?:p(?:a)?g(?:e)?)\.?\s*(\d+)\b",
@@ -228,6 +303,7 @@ def build_submission_plan(
     file_index: dict[str, Path],
     unit_dpu_contract: str | None = None,
     filter_dpu: bool = True,
+    filter_sellers: bool = True,
 ) -> SubmissionPlan:
     """Decide what goes where — pure, no disk writes.
 
@@ -330,14 +406,16 @@ def build_submission_plan(
         plan.placed.append(PlacedFile(SUBFOLDERS[4], path, dest_name,
                                       note=f"renamed from {path.name!r} ({instrument[:30]})"))
 
-    # 6. Seller's Files — ONLY source-relevant, conservative.
+    # 6. Seller's Files — ONLY source-relevant, conservative. filter_sellers=False
+    # means the caller already expanded the contract archives and vetted members
+    # (recorded instruments of this package's subject only); then place all.
     for path in _dedupe_paths(sellers_files):
         name = path.name
-        if _SELLER_EXCLUDE_RE.search(name):
+        if filter_sellers and _SELLER_EXCLUDE_RE.search(name):
             plan.decisions.append(f"Seller's Files: excluded {name!r} — extraneous "
                                   "(division order / receipt / LAR / summary)")
             continue
-        if not _SELLER_INCLUDE_RE.search(name):
+        if filter_sellers and not _SELLER_INCLUDE_RE.search(name):
             plan.decisions.append(f"Seller's Files: excluded {name!r} — not a source-cited "
                                   "instrument (conservative: when in doubt, leave out)")
             continue
@@ -565,6 +643,61 @@ def expand_archives(
     return out
 
 
+def select_seller_instruments(
+    archives: Iterable[Path],
+    dest_dir: Path,
+) -> tuple[list[Path], list[tuple[str, str, str]]]:
+    """From each seller contract package keep ONLY the recorded conveyance
+    instrument(s) of its own subject, extracting them into dest_dir. Returns
+    (kept_paths, [(archive_name, member_name, reason), ...]) — every excluded
+    member is reported so the manifest can log why it was left out.
+
+    This is the coordinator's rule made mechanical: never mass-upload a contract
+    zip whole; ship the "- REC" instruments and drop the CAF / legal-approval /
+    notes / draft / foreign-unit cruft that rides along inside."""
+    dest_dir = Path(dest_dir)
+    kept: list[Path] = []
+    excluded: list[tuple[str, str, str]] = []
+    for arc in archives:
+        arc = Path(arc)
+        own = _seller_own_contract(arc.name)
+        subject = _seller_subject_parties(arc.name)
+        seen: dict[str, str] = {}
+        if arc.suffix.lower() == ".zip" and zipfile.is_zipfile(arc):
+            target_root = dest_dir / arc.stem
+            with zipfile.ZipFile(arc) as zf:
+                # Prefer the clean name over its "(2)" scan-copy so the copy is
+                # the one dropped as a duplicate, not the canonical name.
+                infos = sorted(
+                    (i for i in zf.infolist() if not i.is_dir()),
+                    key=lambda i: (bool(re.search(r"\(\d+\)", Path(i.filename).name)), i.filename))
+                for info in infos:
+                    member = Path(info.filename).name
+                    if not member:
+                        continue
+                    reason = seller_member_verdict(member, subject, own)
+                    if reason:
+                        excluded.append((arc.name, member, reason))
+                        continue
+                    key = _seller_dedup_key(member)
+                    if key in seen:
+                        excluded.append((arc.name, member, f"duplicate of {seen[key]!r} already placed"))
+                        continue
+                    seen[key] = member
+                    target_root.mkdir(parents=True, exist_ok=True)
+                    target = target_root / member
+                    with zf.open(info) as src, open(target, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    kept.append(target)
+        else:  # a discrete (already-loose) seller document
+            reason = seller_member_verdict(arc.name, subject, own)
+            if reason:
+                excluded.append((arc.name, arc.name, reason))
+            else:
+                kept.append(arc)
+    return kept, excluded
+
+
 def _to_reference_tokens(name: str) -> list[str]:
     """The tokens that would identify this title opinion in DDR text: its opinion
     number (T0######) and its distinctive party surname(s)."""
@@ -658,6 +791,14 @@ def build_plan_from_unit_folder(
 
     lease_files = expand_archives(b["leases"], workdir / "leases")
 
+    # Seller's Files: expand each contract package and keep ONLY its recorded
+    # instruments, logging every excluded member with its reason.
+    seller_files, seller_excluded = select_seller_instruments(b["sellers"], workdir / "sellers")
+    seller_decisions = [
+        f"Seller's Files [{Path(arc).stem[:22]}]: excluded {member!r} — {why}"
+        for arc, member, why in seller_excluded
+    ]
+
     plan = build_submission_plan(
         unit_name=unit_name,
         ddr_path=ddr_path,
@@ -665,14 +806,16 @@ def build_plan_from_unit_folder(
         dpu_files=dpu_members,
         lease_files=lease_files,
         runsheet_rows=runsheet_rows,
-        sellers_files=b["sellers"],
+        sellers_files=seller_files,
         well_files=b["wells"],
         file_index=file_index,
         unit_dpu_contract=unit_dpu_contract,
         filter_dpu=False,          # ownership already vetted above
+        filter_sellers=False,      # members already vetted above
     )
     plan.decisions.extend(dpu_decisions)
     plan.decisions.extend(to_decisions)
+    plan.decisions.extend(seller_decisions)
     return plan
 
 

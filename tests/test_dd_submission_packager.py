@@ -17,7 +17,9 @@ from src.dd.submission_packager import (
     package_unit_submission,
     parse_vol_page,
     render_manifest,
+    select_seller_instruments,
     select_used_title_opinions,
+    seller_member_verdict,
     stage_submission,
     title_case_unit_name,
 )
@@ -154,6 +156,68 @@ def test_assignment_is_included_in_sellers_files(tmp_path):
     asmt = tmp_path / "ASSIGNMENT - Joe Bob Smith to EOG.pdf"; asmt.write_bytes(b"x")
     plan = _plan(sellers_files=[asmt])
     assert len(plan.for_subfolder(SUBFOLDERS[5])) == 1
+
+
+# --- Seller's Files: member-level expansion (recorded instruments only) ------
+
+def test_seller_zip_yields_only_the_REC_instrument_and_logs_exclusions(tmp_path):
+    import zipfile
+    z = tmp_path / "K1400049 (ASMT - JOE BOB SMITH-ASSIGNMENT).zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("K1400049/ASMT JOE BOB SMITH TO EOG-REC.TIF", b"rec")   # the recorded instrument
+        zf.writestr("K1400049/CAF.TIF", b"c")
+        zf.writestr("K1400049/LEGAL APPROVAL.TIF", b"l")
+        zf.writestr("K1400049/NOTES.TIF", b"n")
+        zf.writestr("K1400049/LAR - ASMT.TIF", b"a")
+        zf.writestr("K1400049/BONUS.TIF", b"b")
+        zf.writestr("K1400049/ASMT JOE BOB SMITH TO EOG.TIF", b"draft")      # unrecorded draft
+    kept, excluded = select_seller_instruments([z], tmp_path / "work")
+    assert {p.name for p in kept} == {"ASMT JOE BOB SMITH TO EOG-REC.TIF"}
+    exc = {member: reason for _arc, member, reason in excluded}
+    assert "CAF.TIF" in exc and "extraneous" in exc["CAF.TIF"]
+    assert "NOTES.TIF" in exc and "LAR - ASMT.TIF" in exc and "BONUS.TIF" in exc
+    assert "unrecorded" in exc["ASMT JOE BOB SMITH TO EOG.TIF"]             # draft dropped
+
+
+def test_seller_member_verdict_rules():
+    subj = {"ENCANA", "EOG"}
+    assert seller_member_verdict("ASMT-ENCANA TO EOG (K1400170)-REC.TIF", subj, "K1400170") is None
+    assert "unrecorded" in seller_member_verdict("FARMOUT AMENDMENT (SIGNED).PDF", subj, "K1400170")
+    assert "extraneous" in seller_member_verdict("CAF - RATIFICATION.TIF", subj, "K1400170")
+    # A foreign party's recorded instrument riding inside the zip is dropped.
+    v = seller_member_verdict("RATIFICATION TO JOA - SPICE RESOURCES ET AL - REC.PDF", subj, "K1400170")
+    assert v and "another party" in v
+    # A foreign contract number is dropped.
+    v2 = seller_member_verdict("RATIFICATION TO JOA - REC (1800516).PDF", subj, "K1400170")
+    assert v2 and "different contract" in v2
+    # A terse in-package instrument (no foreign party named) is kept.
+    assert seller_member_verdict("ASMT AMENDED - REC.TIF", subj, "K1400170") is None
+
+
+def test_seller_scan_duplicates_are_deduped(tmp_path):
+    import zipfile
+    z = tmp_path / "K1400347 (ASMT-JOE B SMITH TO EOG-ASSIGNMENT).zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("K1400347/ASMT JOE BOB SMITH TO EOG - REC.TIF", b"1")
+        zf.writestr("K1400347/ASMT JOE BOB SMITH TO EOG - REC (2).TIF", b"2")   # scan dup
+    kept, excluded = select_seller_instruments([z], tmp_path / "work")
+    assert len(kept) == 1
+    assert any("duplicate of" in reason for _a, _m, reason in excluded)
+
+
+def test_sellers_folder_via_build_plan_expands_members(tmp_path):
+    import zipfile
+    z = tmp_path / "K1400049 (ASMT - JOE BOB SMITH-ASSIGNMENT).zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("K1400049/ASMT JOE BOB SMITH TO EOG-REC.TIF", b"rec")
+        zf.writestr("K1400049/CAF.TIF", b"c")
+    ddr = tmp_path / "DDR.xlsx"; ddr.write_bytes(b"x")
+    plan = build_plan_from_unit_folder(
+        unit_name="MAXWELL A UNIT", ddr_path=ddr, files_dir=tmp_path,
+        runsheet_rows=[], consumed_title_opinions=[], archive_workdir=tmp_path / "work")
+    names = {p.dest_name for p in plan.for_subfolder(SUBFOLDERS[5])}
+    assert names == {"ASMT JOE BOB SMITH TO EOG-REC.TIF"}       # member, not the zip
+    assert any("CAF.TIF" in d and "Seller's Files" in d for d in plan.decisions)
 
 
 # --- Well Files + manifest + staging ---------------------------------------
