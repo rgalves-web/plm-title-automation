@@ -17,6 +17,12 @@ logger = get_logger(__name__)
 TEXT_EXTRACTED = "TEXT_EXTRACTED"
 LOW_CONFIDENCE_TEXT = "LOW_CONFIDENCE_TEXT"
 OCR_REQUIRED = "OCR_REQUIRED"
+
+# Schema version for the OCR text cache. Bump whenever a change to this module
+# alters the text it produces, so stale entries from the older reader are
+# ignored instead of silently served.
+#   ocr_v2 — every frame of a multi-page TIF is OCR'd (v1 read page 1 only).
+OCR_CACHE_VERSION = "ocr_v2"
 EXTRACTION_ERROR = "EXTRACTION_ERROR"
 
 LOW_CONFIDENCE_THRESHOLD = 0.55
@@ -488,12 +494,29 @@ def _extract_image_ocr(
 
     _configure_tesseract()
 
+    # Recorded instruments are routinely MULTI-PAGE TIFs (a Declaration of Pooled
+    # Unit and its Exhibit A lease list, a recorded lease and its exhibits). PIL
+    # opens such a file positioned on frame 0, so OCR'ing the image as-is reads
+    # page 1 and silently discards the rest — the pages carrying the lease
+    # schedule. Every frame is OCR'd and page_count reflects the real total.
     try:
+        from PIL import ImageSequence
+
         img = PILImage.open(path)
-        ocr_text = pytesseract.image_to_string(img, lang="eng", config="--psm 6")
+        page_texts: list[str] = [
+            pytesseract.image_to_string(frame, lang="eng", config="--psm 6")
+            for frame in ImageSequence.Iterator(img)
+        ]
     except Exception as exc:
         logger.warning("Image OCR failed for %s: %s", path, exc)
         return _ocr_required_result(path, 1, f"Image OCR failed: {exc}")
+
+    page_count = len(page_texts) or 1
+    # Same page separator the PDF OCR path uses, so downstream text handling
+    # (page splitting, snippet offsets) behaves identically for both.
+    ocr_text = "\n\f\n".join(page_texts)
+    if page_count > 1:
+        logger.debug("OCR'd %s pages of multi-page image %s", page_count, path.name)
 
     if text_cache_dir:
         _save_ocr_cache(path, text_cache_dir, ocr_text)
@@ -501,7 +524,7 @@ def _extract_image_ocr(
     if not _has_useful_text(ocr_text):
         return PDFExtractionResult(
             file_path=str(path),
-            page_count=1,
+            page_count=page_count,
             extraction_status=LOW_CONFIDENCE_TEXT,
             extraction_confidence=0.0,
             extraction_engine="tesseract_ocr",
@@ -511,7 +534,7 @@ def _extract_image_ocr(
         )
 
     return _build_result_from_text(
-        path, 1, ocr_text, engine="tesseract_ocr", ocr_penalty=True
+        path, page_count, ocr_text, engine="tesseract_ocr", ocr_penalty=True
     )
 
 
@@ -589,11 +612,18 @@ def _ocr_cache_key(path: Path) -> str:
     # folder has its own "LEASE.pdf"/"LEASE.TIF"), and a stem-only key made
     # them all collide onto one cache entry — returning the first file's OCR
     # text for every other file. The stem stays in the name for readability.
+    #
+    # The key is also VERSIONED. The cache is keyed on the input, so it happily
+    # serves text produced by an older, buggier reader: when multi-page TIF
+    # support landed, every cached entry still held the first-page-only text and
+    # the fix was inert until the cache was cleared by hand. Bump the version
+    # whenever a change alters the text this module produces — old entries are
+    # then ignored rather than silently trusted.
     import hashlib
 
     stem = re.sub(r"[^A-Za-z0-9._-]+", "_", path.stem)[:60]
     digest = hashlib.md5(str(path.resolve()).encode("utf-8", "replace")).hexdigest()[:12]
-    return f"{stem}_{digest}_ocr.txt"
+    return f"{stem}_{digest}_{OCR_CACHE_VERSION}_ocr.txt"
 
 
 def _load_ocr_cache(path: Path, cache_dir: str | Path) -> str | None:

@@ -13,6 +13,7 @@ Seller-row selection is deterministic and auditable.
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import time
@@ -36,8 +37,13 @@ from src.utils import get_logger
 
 logger = get_logger(__name__)
 
+# Main extraction stays v1 so the reviewer-confirmed WI/mineral figures are
+# reused from cache and never destabilized by LLM re-extraction variance. The
+# lease schedule is a SEPARATE, additive cache (schedule_v1) merged on top.
 DD_TO_CACHE_SCHEMA_VERSION = "dd_to_v1"
+DD_SCHEDULE_CACHE_VERSION = "schedule_v1"
 MAX_OCR_CHARS = 16000
+MAX_SCHEDULE_OCR_CHARS = 48000  # the lease schedule can span many pages
 SELLER_MATCH_THRESHOLD = 80  # rapidfuzz token_sort_ratio
 
 
@@ -61,6 +67,7 @@ class TOWorkingInterestRow(BaseModel):
 
 
 class TOLeaseBlock(BaseModel):
+    lease_identifier: LLMFieldResult = Field(default_factory=LLMFieldResult)
     lease_date: LLMFieldResult = Field(default_factory=LLMFieldResult)
     recording_info: LLMFieldResult = Field(default_factory=LLMFieldResult)
     lessor: LLMFieldResult = Field(default_factory=LLMFieldResult)
@@ -125,12 +132,7 @@ def parse_title_opinion(
 
     model = os.environ.get(LLM_MODEL_ENV, DEFAULT_MODEL)
 
-    if cache_dir:
-        cached = _load_cache(to_ref.file_number, model, cache_dir)
-        if cached is not None:
-            logger.debug("TO cache hit: %s", to_ref.file_number)
-            return cached
-
+    cached = _load_cache(to_ref.file_number, model, cache_dir) if cache_dir else None
     pdf_path = _materialize_to_pdf(to_ref, Path(work_dir))
 
     from src.pdf_reader import extract_document
@@ -139,27 +141,114 @@ def parse_title_opinion(
     extraction = extract_document(pdf_path, text_cache_dir=_OCR_CACHE_DIR)
     ocr_text = extraction.full_text or ""
 
+    if cached is not None:
+        logger.debug("TO cache hit: %s", to_ref.file_number)
+        result = cached
+    else:
+        try:
+            result = _call_claude(
+                to_ref.file_number, str(pdf_path), ocr_text, target_unit_name, model
+            )
+        except LLMConfigError:
+            raise
+        except Exception as exc:
+            logger.warning("TO extraction failed for %s: %s", to_ref.file_number, exc)
+            result = TitleOpinionExtraction(
+                file_number=to_ref.file_number,
+                source_pdf_path=str(pdf_path),
+                model=model,
+                error=str(exc),
+            )
+        if cache_dir and not result.error:
+            _save_cache(to_ref.file_number, model, result, cache_dir)
+
+    # Additive second pass: the FULL lease-analysis schedule, cached SEPARATELY
+    # so it never re-runs — or destabilizes — the main extraction's WI/mineral
+    # data. Applies whether the main extraction was cached or freshly parsed.
+    if not result.error and result.tracts:
+        schedule = _load_or_extract_schedule(to_ref.file_number, ocr_text, model, cache_dir)
+        if len(schedule) > len(result.tracts[0].leases):
+            result.tracts[0].leases = schedule
+
+    _resolve_seller_working_interest(result, seller_name)
+    return result
+
+
+def _load_or_extract_schedule(
+    file_number: str, ocr_text: str, model: str, cache_dir: str | Path | None
+) -> list[TOLeaseBlock]:
+    if cache_dir:
+        path = Path(cache_dir) / _schedule_cache_name(file_number, model)
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                return [TOLeaseBlock(**{k: _field(v) for k, v in b.items()}) for b in data]
+            except Exception:
+                pass
     try:
-        result = _call_claude(
-            to_ref.file_number, str(pdf_path), ocr_text, target_unit_name, model
-        )
+        schedule = extract_lease_schedule(file_number, ocr_text, model)
     except LLMConfigError:
         raise
     except Exception as exc:
-        logger.warning("TO extraction failed for %s: %s", to_ref.file_number, exc)
-        result = TitleOpinionExtraction(
-            file_number=to_ref.file_number,
-            source_pdf_path=str(pdf_path),
-            model=model,
-            error=str(exc),
-        )
+        # A failed call is not a resolved result — return [] WITHOUT caching so
+        # it retries next run.
+        logger.warning("Lease-schedule extraction failed for %s: %s", file_number, exc)
+        return []
+    # Cache the successful result (even when empty — "no schedule found" is a
+    # resolved answer) so a re-run makes no call.
+    if cache_dir:
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+        (Path(cache_dir) / _schedule_cache_name(file_number, model)).write_text(
+            json.dumps([b.model_dump(mode="json") for b in schedule]), encoding="utf-8")
+    return schedule
 
-    _resolve_seller_working_interest(result, seller_name)
 
-    if cache_dir and not result.error:
-        _save_cache(to_ref.file_number, model, result, cache_dir)
+def _schedule_cache_name(file_number: str, model: str) -> str:
+    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in file_number)[:80]
+    return f"{safe}_{model.replace('.', '').replace('/', '_')[:24]}_{DD_SCHEDULE_CACHE_VERSION}.json"
 
-    return result
+
+def extract_lease_schedule(file_number: str, ocr_text: str, model: str) -> list[TOLeaseBlock]:
+    """Dedicated LLM call that extracts ONLY the lease-analysis schedule (every
+    lease block), so a dense opinion never truncates. Bounded output schema,
+    full-document OCR context. Returns [] on any failure — the caller keeps the
+    main extraction's leases in that case."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise LLMConfigError("ANTHROPIC_API_KEY is not set.")
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=api_key)
+    prompt = (
+        f"TITLE OPINION FILE NUMBER: {file_number}\n\n=== OCR TEXT ===\n"
+        f"{ocr_text[:MAX_SCHEDULE_OCR_CHARS]}\n=== END OCR TEXT ==="
+    )
+    last_exc: Exception | None = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=16000,
+                system=_LEASE_SCHEDULE_SYSTEM,
+                tools=[_LEASE_SCHEDULE_TOOL],
+                tool_choice={"type": "tool", "name": "extract_lease_schedule"},
+                messages=[{"role": "user", "content": prompt}],
+            )
+            block = next((b for b in response.content if getattr(b, "type", None) == "tool_use"), None)
+            if not block:
+                return []
+            leases = (block.input or {}).get("leases") or []
+            return [TOLeaseBlock(**{k: _field(v) for k, v in lease.items()}) for lease in leases]
+        except anthropic.RateLimitError as exc:
+            last_exc = exc
+            time.sleep(RETRY_BASE_DELAY * (2 ** attempt))
+        except anthropic.APITimeoutError as exc:
+            last_exc = exc
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(RETRY_BASE_DELAY)
+    if last_exc:
+        raise last_exc
+    return []
 
 
 def _resolve_seller_working_interest(
@@ -324,12 +413,44 @@ _LEASE_BLOCK_SCHEMA: dict[str, Any] = {
     "properties": {
         field: _FIELD_SCHEMA
         for field in (
-            "lease_date", "recording_info", "lessor", "lessee", "land_covered",
-            "interest_covered", "primary_term", "royalty", "shut_in_royalty",
-            "pooling", "pugh_clause", "continuous_development", "depth_limitations",
+            "lease_identifier", "lease_date", "recording_info", "lessor", "lessee",
+            "land_covered", "interest_covered", "primary_term", "royalty",
+            "shut_in_royalty", "pooling", "pugh_clause", "continuous_development",
+            "depth_limitations",
         )
     },
 }
+
+# Dedicated lease-schedule tool: a SECOND, bounded call that extracts ONLY the
+# lease-analysis schedule (every lease block) — no mineral/WI tables — so a
+# dense opinion (e.g. Cox: 20+ leases) never truncates the main extraction.
+_LEASE_SCHEDULE_TOOL: dict[str, Any] = {
+    "name": "extract_lease_schedule",
+    "description": "Extract EVERY oil & gas lease listed in a title opinion's lease-analysis section.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"leases": {"type": "array", "items": _LEASE_BLOCK_SCHEMA}},
+        "required": ["leases"],
+        "additionalProperties": False,
+    },
+}
+
+_LEASE_SCHEDULE_SYSTEM = """\
+You are an oil and gas title analyst. From the OCR text of a title opinion,
+extract EVERY lease in the lease-analysis / lease-schedule section — there are
+usually many (10-30), often numbered ("Lease No. 1", "1.", "Tract 1 Lease").
+Return ONLY a call to the `extract_lease_schedule` tool with one entry per lease.
+
+For each lease transcribe, exactly as printed (never compute):
+  lease_identifier (the lease number/label if given), lessor, lessee, lease_date,
+  recording_info (volume/page or instrument no.), land_covered, interest_covered
+  (the mineral interest/fraction the lease covers, e.g. "1/2 mineral interest"),
+  primary_term, royalty, shut_in_royalty, pooling, pugh_clause,
+  continuous_development, depth_limitations.
+Leave a field null with confidence < 0.4 if not stated. Do NOT skip leases; if the
+schedule lists 20 leases, return 20 entries. Provide a short `provenance` quote per
+value where practical.
+"""
 
 _TRACT_SCHEMA: dict[str, Any] = {
     "type": "object",

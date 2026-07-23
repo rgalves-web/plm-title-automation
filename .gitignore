@@ -28,6 +28,11 @@ data/output/
 data/archive/
 data/input/dd/
 data/input/document_packages/
+# Approved client baselines (e.g. the verified Maxwell v5 DDR the R1 regression
+# test compares against) and the agent workspace DB. Client material: the tests
+# read these from disk and skip when absent — they are never committed.
+data/reference/
+data/agent/
 
 # Client-derived sample workbook at repo root (Arapahoe Section 15).
 /Section15_SAMPLE_improved.xlsx

@@ -30,8 +30,15 @@ from src.utils import get_logger
 
 logger = get_logger(__name__)
 
-DD_LEASE_CACHE_SCHEMA_VERSION = "dd_lease_v1"
-MAX_OCR_CHARS = 16000
+# dd_lease_v2 — extractions are re-read from FULL multi-page OCR text. The v1
+# entries were produced from first-page-only TIF reads (pdf_reader ocr_v1), so
+# they are not comparable and must not be served.
+DD_LEASE_CACHE_SCHEMA_VERSION = "dd_lease_v2"
+
+# A recorded lease runs 24k-41k OCR chars once every page is read (the v1
+# first-page-only reads fit under 16k, which is why this was never hit). Sized to
+# take a whole recorded lease; matches title_opinion_parser's schedule budget.
+MAX_OCR_CHARS = 48000
 
 
 class LeaseExtraction(BaseModel):
@@ -188,6 +195,13 @@ def _call_claude(pdf_path: str, lease_key: str, ocr_text: str, model: str) -> Le
     import anthropic
 
     client = anthropic.Anthropic(api_key=api_key)
+    if len(ocr_text) > MAX_OCR_CHARS:
+        # Never drop source text silently: the reader must know the extraction
+        # saw only part of the instrument.
+        logger.warning(
+            "Lease %s: OCR text is %s chars, truncated to %s for extraction — "
+            "later pages were not read; raise MAX_OCR_CHARS or split the call.",
+            lease_key, f"{len(ocr_text):,}", f"{MAX_OCR_CHARS:,}")
     user_prompt = (
         f"LEASE KEY: {lease_key}\n\n=== OCR TEXT ===\n{ocr_text[:MAX_OCR_CHARS]}\n=== END OCR TEXT ==="
     )
@@ -214,10 +228,21 @@ def _call_claude(pdf_path: str, lease_key: str, ocr_text: str, model: str) -> Le
 
 
 def _field(data: dict[str, Any] | None) -> LLMFieldResult:
-    data = data or {}
+    if data is None:
+        return LLMFieldResult(value=None, confidence=0.0)
+    if not isinstance(data, dict):
+        # The tool schema asks for {value, confidence, provenance}, but the model
+        # sometimes returns a bare scalar for a field. Take it as the value with
+        # an unstated confidence rather than raising — one field's shape must not
+        # cost the whole lease its extraction (this lost 0221168-000 entirely).
+        logger.warning("Lease field returned as %s, not an object: %.60r",
+                       type(data).__name__, data)
+        text = str(data).strip()
+        return LLMFieldResult(value=text or None, confidence=0.0,
+                              provenance="model returned a bare value; confidence unstated")
     return LLMFieldResult(
         value=data.get("value") or None,
-        confidence=float(data.get("confidence", 0.0)),
+        confidence=float(data.get("confidence") or 0.0),
         provenance=data.get("provenance"),
     )
 

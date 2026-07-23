@@ -222,19 +222,17 @@ def build_lease_review_rows(
                     "source_to_file_number": file_number,
                 }
             )
-            # Pull MI / WI / royalty / ORRI numeric values from the matched tract
-            # so _fill_ownership_report can populate the Mineral Fraction and NMA
-            # columns (S/T/U) instead of leaving them blank.
-            if tract.mineral_owners:
-                mi_text = tract.mineral_owners[0].fraction_text
-                mi = parse_fraction_text(mi_text) if mi_text else None
-                if mi is not None:
-                    row["mi_value"] = mi
-            wi, _wi_needs_review = resolve_seller_wi(tract)
-            if wi is not None:
-                row["wi_value"] = wi
+            # MI and WI are intentionally NOT set here. Matching a lease *block*
+            # says nothing about which of a tract's several mineral owners this
+            # lessor is, so taking mineral_owners[0] (or the tract-aggregate WI)
+            # would flatten every lease in a multi-owner tract to one owner's
+            # fraction. Per-lease MI/WI come from enrich_lease_rows_with_details,
+            # which name-matches each lessor to its OWN mineral owner (the
+            # authoritative per-owner fraction). Only royalty/ORRI — which are
+            # genuinely tract-level here — are pulled from the matched tract.
             # Royalty: parse the first royalty_owner fraction; fall back to
             # block.royalty text (which is prose like "1/8 for oil").
+            royalty = None
             if tract.royalty_owners:
                 royalty = parse_fraction_text(tract.royalty_owners[0].fraction_text)
                 if royalty is not None:
@@ -253,6 +251,242 @@ def build_lease_review_rows(
                 row["orri_burdens"] = orri_total
         rows.append(row)
     return rows
+
+
+def enrich_lease_rows_with_details(
+    lease_review_rows: list[dict[str, Any]],
+    manifest: UnitManifest,
+    controlling: dict[str, TitleOpinionExtraction],
+    reconciliation: "ReconciliationResult",
+    lease_document_details: dict[str, dict[str, Any]] | None = None,
+) -> tuple[list[Any], list[str]]:
+    """Fill per-lease MI/WI/royalty/tract-acres/legal on each row from the
+    controlling opinions' mineral ownership (Collin items 1-2), never
+    overwriting a value already resolved from a matched lease block. Returns the
+    QA gate results (MI-sums-to-1 per tract, Seller WI == expected)."""
+    from src.dd.lease_detail import build_lease_details
+    from src.dd.dd_qa_gates import (
+        mineral_interest_sums_to_one,
+        mineral_interest_within_tract_not_over_one,
+        seller_wi_matches_expected,
+        workbook_headline_wi,
+    )
+
+    royalty_by_lease = {
+        r["lease_no"]: (r.get("royalty_text") or r.get("royalty"))
+        for r in lease_review_rows
+        if r.get("lease_no") and (r.get("royalty_text") or r.get("royalty"))
+    }
+    details = {
+        d.lease_no: d
+        for d in build_lease_details(
+            manifest.leases, controlling, royalty_by_lease,
+            tract_gross_fn=_tract_gross_acres,
+            # The Seller's WI as the CONTROLLING opinion states it. `controlling`
+            # already holds the newest opinion per chain, so a supplement's
+            # figure supersedes the original's (Cox SUPP .84953704, not ORIG
+            # .82175926; Brumbaugh SUPP .625).
+            tract_wi_fn=lambda t: resolve_seller_wi(t)[0],
+        )
+    }
+    for row in lease_review_rows:
+        d = details.get(row.get("lease_no"))
+        if d is None:
+            continue
+        # Name-matched per-owner MI is authoritative and ALWAYS wins — it must
+        # never be left flattened to a tract-uniform value. The lease-block
+        # interest_covered is only a fallback: it fills an empty MI, but never
+        # overwrites an owner match.
+        if d.mi_value is not None:
+            if d.mi_source == "mineral_owner" or row.get("mi_value") is None:
+                row["mi_value"] = d.mi_value
+        # WI is the controlling opinion's stated tract figure and always wins:
+        # it is sourced, not inferred, so nothing earlier in the pipeline should
+        # override it. An unstated WI carries its reason instead of a value.
+        if d.wi_value is not None:
+            row["wi_value"] = d.wi_value
+            row["wi_source"] = d.wi_source
+        elif d.wi_reason:
+            row["wi_reason"] = d.wi_reason
+        if d.mi_reason and d.mi_value is None:
+            row["mi_reason"] = d.mi_reason
+        if row.get("tract_gross_acres") is None and d.tract_gross_acres is not None:
+            row["tract_gross_acres"] = d.tract_gross_acres
+        if not row.get("legal_description") and d.legal_description:
+            row["legal_description"] = d.legal_description
+        # Royalty into the Ownership Report (col G): prefer a carried Lease
+        # Review value, then the matched tract royalty. Parse the leading
+        # fraction/percent from prose like "20% on oil, gas and casinghead gas".
+        if row.get("royalty") is None and d.royalty is not None:
+            from src.dd.lease_detail import _leading_fraction
+            parsed = _leading_fraction(d.royalty)
+            if parsed is not None:
+                row["royalty"] = parsed
+        if d.tract_key and not row.get("tract_key"):
+            row["tract_key"] = d.tract_key
+        if not row.get("source_to_file_number") and d.source:
+            row["source_lease_detail"] = d.source
+        if d.notes:
+            row.setdefault("notes", []).extend(d.notes)
+
+    # Merge the authoritative recorded-lease-document fields. Fill empties; on a
+    # genuine TO-vs-document disagreement, itemize the conflict (never silent) —
+    # the recorded instrument wins for lease terms, but both values are reported.
+    conflicts = _merge_lease_document_details(lease_review_rows, lease_document_details or {})
+
+    computed_wi = reconciliation.computed_wi if reconciliation and reconciliation.wi_status not in ("NOT_COMPUTED",) else None
+    unit_gross = parse_fraction_text(str(manifest.unit_gross_acres)) if manifest.unit_gross_acres else None
+    gate_results = [
+        mineral_interest_sums_to_one(controlling),
+        mineral_interest_within_tract_not_over_one(lease_review_rows),
+        seller_wi_matches_expected(computed_wi, manifest.expected_seller_wi),
+        workbook_headline_wi(lease_review_rows, unit_gross, manifest.expected_seller_wi),
+    ]
+    return gate_results, conflicts
+
+
+def _documents_on_disk(unit_folder) -> set[str]:
+    """Contract/lease identifiers whose packages exist in the unit folder."""
+    if unit_folder is None:
+        return set()
+    from src.dd.ddr_validator import documents_on_disk
+    return documents_on_disk(unit_folder)
+
+
+def _validation_allowlist(manifest: UnitManifest, lease_review_rows: list[dict[str, Any]]):
+    """What legitimately belongs to THIS unit, for the leakage rules."""
+    from src.dd.agreements_xref import unit_identity_tokens
+    from src.dd.ddr_validator import UnitAllowlist
+
+    return UnitAllowlist(
+        unit_name=manifest.unit_name,
+        leases={str(r.get("lease_no")) for r in lease_review_rows if r.get("lease_no")}
+               | {str(x.lease_no) for x in manifest.leases if getattr(x, "lease_no", None)},
+        contracts={str(c.file_number) for c in manifest.reference_contracts
+                   if getattr(c, "file_number", None)},
+        title_opinions={str(t.file_number) for t in manifest.title_opinions
+                        if getattr(t, "file_number", None)},
+        identity_tokens=set(unit_identity_tokens(manifest.unit_name)),
+    )
+
+
+def _build_provenance_store(lease_review_rows, controlling, to_files_dir,
+                            unit_folder, lease_document_dir, dpu_recording_map):
+    """Locate document+page for each derived value, INDEPENDENTLY of the
+    extraction. Returns a ProvenanceStore (internal; rides in the sidecar and
+    audit trail, never a tab)."""
+    from src.dd.provenance import populate_provenance
+    from src.dd.source_truth_check import SourceIndex
+
+    roots = [Path(p) for p in (unit_folder, to_files_dir, lease_document_dir,
+                               Path("data/working/maxwell_a_unit_tos")) if p]
+    try:
+        index = SourceIndex(roots)
+    except Exception as exc:  # provenance is best-effort; never blocks a write
+        logger.warning("Provenance index unavailable: %s", exc)
+        return None
+    # Controlling opinion OCR: the documents MI/WI values must be found in.
+    controlling_docs = []
+    for file_number in controlling:
+        path = index.resolve(file_number)
+        if path is not None:
+            try:
+                controlling_docs.append((path.name, index.text(path)))
+            except Exception:  # noqa: BLE001 — a single unreadable doc must not stop the rest
+                continue
+    # The writer lays rows out from Excel row 8 in list order; mirror that so the
+    # provenance cells line up with the cells the writer actually wrote.
+    for i, row in enumerate(lease_review_rows):
+        row["_excel_row"] = 8 + i
+    store, notes = populate_provenance(
+        lease_review_rows, index, controlling_docs=controlling_docs,
+        dpu_recording_map=dpu_recording_map)
+    for note in notes:
+        logger.info("Provenance: %s", note)
+    return store
+
+
+def _validation_source_roots(unit_folder, to_files_dir, lease_document_dir) -> list[Path]:
+    """Where source-truth looks for the documents the audit trail cites."""
+    return [Path(p) for p in (unit_folder, to_files_dir, lease_document_dir) if p]
+
+
+def _register_pending_reasons(rows: list[dict[str, Any]], registry) -> None:
+    """Turn each row's per-field reason into a Pending Items entry.
+
+    The reason never goes into the client cell — it goes here, so a blank in the
+    workbook can always be traced to why it is blank and what to do about it.
+    """
+    from src.dd.dd_pending import PendingReason
+
+    fields = (
+        ("mi_value", "mi_reason", "MI Value (col S)",
+         "the controlling opinion's MINERALS section for this lessor"),
+        ("wi_value", "wi_reason", "WI Value (col T)",
+         "the controlling opinion's LEASEHOLD ESTATE table for this tract"),
+        ("tract_gross_acres", None, "Tract Gross Acres (col R)",
+         "the controlling opinion's tract description"),
+    )
+    for row in rows:
+        lease_no = str(row.get("lease_no") or "?")
+        for value_key, reason_key, label, where in fields:
+            if row.get(value_key) is not None:
+                continue
+            reason = row.get(reason_key) if reason_key else None
+            if reason is None:
+                reason = PendingReason.NOT_FOUND
+            registry.add("Ownership Report", f"row {lease_no}", label, reason, where,
+                         identifier=f"lease {lease_no}")
+
+
+def _merge_lease_document_details(
+    lease_review_rows: list[dict[str, Any]],
+    lease_document_details: dict[str, dict[str, Any]],
+) -> list[str]:
+    conflicts: list[str] = []
+    rows_by_lease = {r.get("lease_no"): r for r in lease_review_rows}
+    for lease_no, fields in lease_document_details.items():
+        row = rows_by_lease.get(lease_no)
+        if row is None:
+            continue
+        source = fields.get("_source", "lease document")
+        for key, value in fields.items():
+            if key.startswith("_"):
+                continue
+            existing = row.get(key)
+            if existing in (None, "", "-"):
+                row[key] = value
+            elif _values_conflict(existing, value):
+                conflicts.append(
+                    f"{lease_no} · {key}: title opinion says {str(existing)[:50]!r}; "
+                    f"{source} says {str(value)[:50]!r} — using the recorded instrument; verify.")
+                row[key] = value
+        # Ownership Report royalty (col G) is a Fraction parsed from the text.
+        if row.get("royalty") is None and row.get("royalty_text"):
+            from src.dd.lease_detail import _leading_fraction
+            frac = _leading_fraction(row["royalty_text"])
+            if frac is not None:
+                row["royalty"] = frac
+        row["source_lease_document"] = source
+    return conflicts
+
+
+def _normalize_for_conflict(text: Any) -> str:
+    s = str(text).lower()
+    s = re.sub(r"\bvolume\b", "vol", s)
+    s = re.sub(r"\bpage\b", "pg", s)
+    s = re.sub(r"[^a-z0-9 ]+", " ", s)  # drop punctuation
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _values_conflict(a: Any, b: Any) -> bool:
+    """True only for a meaningful disagreement — normalize case / punctuation /
+    common abbreviations and ignore a pure substring/superset (a title-opinion
+    summary vs the fuller recorded-instrument text)."""
+    sa, sb = _normalize_for_conflict(a), _normalize_for_conflict(b)
+    if not sa or not sb or sa == sb:
+        return False
+    return sa not in sb and sb not in sa
 
 
 def build_to_summaries(
@@ -762,6 +996,12 @@ def run_dd_pipeline_for_unit(
     uploaded_title_opinion_pdfs: list[str | Path] | None = None,
     runsheet_clean_note: str | None = None,
     supplemental_search_complete: bool = False,
+    lease_document_dir: str | Path | None = None,
+    lease_document_cache_dir: str | Path | None = None,
+    unit_folder: str | Path | None = None,
+    dpu_work_dir: str | Path | None = None,
+    dpu_contract_no: str = "K1400813",
+    stage_submission_dir: str | Path | None = None,
 ) -> DDPipelineResult:
     """Run the full DD pipeline for one unit: build manifest, parse available
     title opinions, resolve the controlling certification date, filter and QA
@@ -951,6 +1191,57 @@ def run_dd_pipeline_for_unit(
     for summary in to_summaries:
         summary["controlling"] = summary["file_number"] in basis.chosen_file_numbers
 
+    # Per-lease MI/WI/royalty/legal from the controlling opinions' MINERALS
+    # section (Collin items 1-2): fills the 26/30 leases the lease-block match
+    # left blank, matching each lease's lessor to its mineral owner. Then run
+    # the MI-sums-to-1 and Seller-WI gates.
+    controlling = {
+        fn: to_extractions[fn] for fn in basis.chosen_file_numbers if fn in to_extractions
+    }
+    lease_document_details: dict[str, dict[str, Any]] = {}
+    if lease_document_dir is not None:
+        from src.dd.lease_document_source import build_lease_document_details
+        lease_document_details = build_lease_document_details(
+            lease_document_dir, manifest.leases,
+            work_dir=output_dir / "lease_document_work",
+            cache_dir=lease_document_cache_dir, progress=progress_callback,
+        )
+        _emit(progress_callback, "ok",
+              f"Unit {unit_name} — {len(lease_document_details)} lease document(s) read from the new-files folder")
+    gate_results, lease_conflicts = enrich_lease_rows_with_details(
+        lease_review_rows, manifest, controlling, reconciliation, lease_document_details,
+    )
+
+    # Record Book/Page from the unit's recorded Declaration of Pooled Unit and
+    # its Amendment (Exhibit "A" is the authoritative recording reference).
+    from src.dd.dd_pending import PendingRegistry
+    pending_registry = PendingRegistry()
+    dpu_notes: list[str] = []
+    dpu_recording_map: dict[str, tuple] = {}
+    if unit_folder is not None:
+        from src.dd.dpu_source import apply_recording_to_rows, load_unit_dpu, reconcile_lease_set
+        dpu = load_unit_dpu(
+            unit_folder,
+            work_dir=Path(dpu_work_dir) if dpu_work_dir else (output_dir / "dpu_work"),
+            contract_no=dpu_contract_no,
+        )
+        applied = apply_recording_to_rows(lease_review_rows, dpu, pending_registry)
+        dpu_notes = list(dpu.notes)
+        # The declaration is historical; the XREF is the active list. Record the
+        # difference so the exclusions are auditable, not silent.
+        dpu_notes.extend(reconcile_lease_set(
+            dpu, [str(r.get("lease_no")) for r in lease_review_rows]))
+        # Exhibit A is the authority for every recording reference (the
+        # "Volume 37 vs 371" class of defect is decided against it).
+        dpu_recording_map = {l.lease_no: (l.record_book, l.record_page)
+                             for l in dpu.leases}
+        if dpu.dpu_source:
+            _emit(progress_callback, "ok",
+                  f"Unit {unit_name} — Record Book/Page for {len(applied)}/{len(lease_review_rows)} "
+                  f"lease(s) from {dpu.dpu_source}"
+                  + (f" + {', '.join(dpu.amendment_sources)}" if dpu.amendment_sources else ""))
+    _register_pending_reasons(lease_review_rows, pending_registry)
+
     if aggregation is None or reconciliation is None:
         from src.dd.unit_aggregation import AggregationResult, ReconciliationResult
         from fractions import Fraction
@@ -982,6 +1273,31 @@ def run_dd_pipeline_for_unit(
         manifest, to_extractions, basis, reconciliation, controlling_date, xref_to_numbers,
         supplemental_search_complete=supplemental_search_complete,
     )
+    # Surface any TO-vs-lease-document conflicts (never silently resolved).
+    for conflict in lease_conflicts:
+        review_flags.potential_defects.append(f"Source conflict — {conflict}")
+    # Leases the DPU's Amendment added to the unit ("inadvertently excluded").
+    for note in dpu_notes:
+        review_flags.section_notes.append(f"DPU Amendment — {note}")
+    # Fold QA-gate failures into the review narrative and QA exceptions so a
+    # failing gate blocks a clean "done" and is itemized with its location.
+    for gate in gate_results:
+        if not gate.passed:
+            review_flags.potential_defects.append(f"QA gate '{gate.name}': {gate.detail}")
+            for loc in gate.locations:
+                review_flags.potential_defects.append(loc)
+            qa_exceptions.append(
+                QAException(severity="WARNING", code=f"DD_GATE_{gate.name.upper()}",
+                            message=gate.detail, field=gate.name)
+            )
+
+    # Cell-level document+page provenance, located INDEPENDENTLY of the
+    # extraction (src/dd/provenance): for each MI/WI the opinion where THIS
+    # owner's value actually appears, for recording the DPU. A cite names the
+    # document that contains the value, not the one the extractor guessed.
+    provenance_store = _build_provenance_store(
+        lease_review_rows, controlling, to_files_dir, unit_folder,
+        lease_document_dir, dpu_recording_map)
 
     ddr_result = fill_ddr_template(
         template_path=ddr_template_path,
@@ -990,6 +1306,7 @@ def run_dd_pipeline_for_unit(
         aggregation=aggregation,
         reconciliation=reconciliation,
         lease_review_rows=lease_review_rows,
+        provenance_store=provenance_store,
         runsheet_records=records,
         runsheet_note=(
             f"Supplemental title from {controlling_date.isoformat()} (controlling title "
@@ -999,7 +1316,46 @@ def run_dd_pipeline_for_unit(
         to_summaries=to_summaries,
         review_flags=review_flags,
         runsheet_clean_note=runsheet_clean_note,
+        pending_registry=pending_registry,
     )
+
+    # MANDATORY final gate. Every unit, every run — a gate that runs when someone
+    # remembers is a suggestion, and Maxwell shipped ~30 correction cycles' worth
+    # of defects that these rules now catch mechanically. The DDR is written
+    # either way; `validation_ready` says whether it may be SENT.
+    from src.dd.ddr_validator import DDRNotReadyError, run_final_validation
+
+    validation = run_final_validation(
+        ddr_result.output_path,
+        template_path=ddr_template_path,
+        allowlist=_validation_allowlist(manifest, lease_review_rows),
+        dpu_by_lease=dpu_recording_map,
+        documents_available=_documents_on_disk(unit_folder),
+        client_name=manifest.client_name,
+        source_roots=_validation_source_roots(unit_folder, to_files_dir, lease_document_dir),
+    )
+    _emit(progress_callback, "ok" if validation.ready else "error",
+          f"Unit {unit_name} — validation: {validation.summary()}")
+    for finding in validation.failures[:20]:
+        _emit(progress_callback, "error", f"  {finding.describe()}")
+    if not validation.ready:
+        review_flags.potential_defects.append(
+            f"VALIDATION NOT READY — {validation.summary()}. See the sidecar report next to "
+            "the DDR; this workbook must not be sent until every FAIL is resolved.")
+
+    # FINAL step: assemble the ready-to-upload PLM submission tree INSIDE the
+    # unit's own project folder (never a scratch dir). Runs whenever the real
+    # unit folder is known, or an explicit target is supplied.
+    if unit_folder is not None or stage_submission_dir is not None:
+        _stage_submission_package(
+            unit_name=unit_name,
+            ddr_path=ddr_result.output_path,
+            unit_folder=unit_folder,
+            to_files_dir=to_files_dir,
+            stage_submission_dir=stage_submission_dir,
+            dpu_contract_no=dpu_contract_no,
+            progress_callback=progress_callback,
+        )
 
     summary = {
         "unit_name": unit_name,
@@ -1026,6 +1382,54 @@ def run_dd_pipeline_for_unit(
         ddr_result=ddr_result,
         summary=summary,
     )
+
+
+def _stage_submission_package(
+    unit_name: str,
+    ddr_path: Path,
+    unit_folder: str | Path | None,
+    to_files_dir: str | Path | None,
+    stage_submission_dir: str | Path | None,
+    dpu_contract_no: str | None,
+    progress_callback: ProgressCallback | None,
+) -> Path | None:
+    """Build the ready-to-upload PLM submission tree INSIDE the unit's own
+    project folder (the parent of its FILES folder), copying from FILES and
+    leaving it untouched. Delegates to submission_packager.package_unit_submission,
+    which prints the absolute path of the created tree.
+
+    An explicit stage_submission_dir still overrides the location (used by tests)."""
+    from src.dd.submission_packager import package_unit_submission
+
+    # Locate the real project unit folder — the parent of FILES.
+    project_folder = None
+    if unit_folder and (Path(unit_folder) / "FILES").exists():
+        project_folder = Path(unit_folder)
+    elif to_files_dir and Path(to_files_dir).name.upper() == "FILES":
+        project_folder = Path(to_files_dir).parent
+    elif unit_folder:
+        project_folder = Path(unit_folder)
+
+    if stage_submission_dir is not None:
+        # Explicit override: honour it, but still copy the finished DDR in.
+        project_folder = Path(stage_submission_dir)
+
+    if project_folder is None or not (project_folder / "FILES").exists():
+        _emit(progress_callback, "warn",
+              f"Unit {unit_name} — submission packager skipped: no FILES folder located.")
+        return None
+
+    root, plan = package_unit_submission(
+        unit_folder=project_folder,
+        ddr_path=Path(ddr_path),
+        unit_name=unit_name,
+        unit_dpu_contract=dpu_contract_no,
+    )
+    _emit(progress_callback, "ok",
+          f"Unit {unit_name} — submission package created at {root.resolve()}: "
+          f"{len(plan.placed)} file(s) placed, {len(plan.missing)} missing, "
+          f"{len(plan.decisions)} decision(s).")
+    return root
 
 
 def _print_dd_completion(summary: dict[str, Any]) -> None:

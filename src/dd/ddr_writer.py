@@ -24,7 +24,7 @@ from typing import Any
 
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
-from openpyxl.styles import Alignment, PatternFill
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.worksheet.worksheet import Worksheet
 
 from src.dd.manifest import UnitManifest
@@ -134,6 +134,8 @@ def fill_ddr_template(
     to_summaries: list[dict[str, Any]],
     review_flags: "DDReviewFlags | None" = None,
     runsheet_clean_note: str | None = None,
+    pending_registry: Any | None = None,
+    provenance_store: Any | None = None,
 ) -> DDRWriteResult:
     template_path = Path(template_path)
     output_dir = Path(output_dir)
@@ -164,15 +166,27 @@ def fill_ddr_template(
     _fill_plm_title_review(wb, manifest, to_summaries, ctx)
     _fill_agreements(wb, manifest, ctx)
     _fill_unit_and_pooling_agreements(wb, manifest, ctx)
+    _apply_title_case(wb, ctx)
     _scrub_placeholders(wb, ctx)
+    # Pending reasons go into DD_Audit_Trail, not a tab of their own: the
+    # deliverable's tab set must equal the template's plus DD_Audit_Trail.
+    # Recorded BEFORE the sheet is written, or they never reach it.
+    _record_pending_reasons(ctx, pending_registry)
+    # Cell-level document+page provenance (src/dd/provenance). Located
+    # INDEPENDENTLY of the extraction, so a cite names the document that
+    # actually contains the value. Rides in the audit trail; never a tab.
+    if provenance_store is not None:
+        for prov in provenance_store.audit_rows():
+            ctx.record(*prov)
     _write_audit_trail_sheet(wb, ctx)
 
     wb.save(output_path)
 
     saved_workbook = _load(output_path)
-    # DD_Audit_Trail is added BY DESIGN (hidden provenance sheet) — drop it
-    # from the comparison copy so sheet_names_preserved checks the template's
-    # own tabs only. The saved file on disk keeps the audit sheet.
+    # DD_Audit_Trail (hidden provenance) and Pending Items (the blanks work list)
+    # are added BY DESIGN — drop them from the comparison copy so
+    # sheet_names_preserved checks the template's own tabs only. The saved file
+    # on disk keeps both.
     if "DD_Audit_Trail" in saved_workbook.sheetnames:
         del saved_workbook["DD_Audit_Trail"]
     integrity_report = _build_template_integrity_report(
@@ -196,7 +210,19 @@ def fill_ddr_template(
 
 
 def _load(path: str | Path):
-    return load_workbook(path, data_only=False)
+    # Retry on PermissionError: on Windows, antivirus real-time scanning can hold
+    # a brief lock on a freshly-copied .xlsx, blocking the immediate re-open. The
+    # retry is output-neutral (it only re-attempts the same read).
+    import time as _t
+
+    last: Exception | None = None
+    for attempt in range(6):
+        try:
+            return load_workbook(path, data_only=False)
+        except PermissionError as exc:
+            last = exc
+            _t.sleep(0.3 * (attempt + 1))
+    raise last
 
 
 _DIFF_KEY_TO_CHECK = {
@@ -284,6 +310,36 @@ def _insert_rows_preserving_heights(ws, insert_at: int, amount: int) -> None:
     for row_number, height in moved.items():
         if height is not None:
             dims[row_number + amount].height = height
+
+
+# Client-facing text columns to normalize to Title Case (Collin item 4):
+# (sheet, first_data_row, [columns]). Numbers/fractions are never touched.
+_TITLE_CASE_TARGETS = (
+    ("Ownership Report", 8, (5, 6, 15)),   # WI Owner? no — lessor(5), lessee(6), legal(15)
+    ("Lease Review", 2, (3, 4, 7)),        # lessor(3), lessee(4), legal desc(7)
+)
+
+
+def _apply_title_case(wb, ctx: "DDRWriteContext | None" = None) -> None:
+    """Config-driven ALL-CAPS -> Title Case pass over the client-facing name /
+    legal columns of the Ownership Report and Lease Review tabs. Idempotent and
+    exception-aware (LLC, Jr., A-122...) via src.dd.title_case."""
+    from src.dd.title_case import to_title_case
+
+    for sheet_name, first_row, cols in _TITLE_CASE_TARGETS:
+        if sheet_name not in wb.sheetnames:
+            continue
+        ws = wb[sheet_name]
+        for row_number in range(first_row, ws.max_row + 1):
+            for col in cols:
+                cell = ws.cell(row_number, col)
+                if isinstance(cell, MergedCell) or not isinstance(cell.value, str):
+                    continue
+                new_value = to_title_case(cell.value)
+                if new_value != cell.value:
+                    cell.value = new_value
+                    if ctx is not None:
+                        ctx.own_cell(sheet_name, cell.coordinate)
 
 
 def _scrub_placeholders(wb, ctx: "DDRWriteContext | None" = None) -> int:
@@ -419,6 +475,12 @@ def _fill_ownership_report(
         ws.cell(row_number, 5).value = row.get("lessor")
         ws.cell(row_number, 6).value = row.get("lessee")
         ws.cell(row_number, 7).value = float(row["royalty"]) if row.get("royalty") is not None else None
+        # Record Book / Page — the recording reference the unit's Declaration of
+        # Pooled Unit (and its Amendment) prints for this lease in Exhibit "A".
+        # Written as TEXT, matching the approved baseline: a volume/page is a
+        # reference, not a quantity, and the baseline stores it as text.
+        ws.cell(row_number, 11).value = row.get("record_book")
+        ws.cell(row_number, 12).value = row.get("record_page")
         ws.cell(row_number, 14).value = manifest.county
         ws.cell(row_number, 15).value = row.get("legal_description")
         ws.cell(row_number, 18).value = float(row["tract_gross_acres"]) if row.get("tract_gross_acres") is not None else None
@@ -436,6 +498,13 @@ def _fill_ownership_report(
             source or "Lease to Well XREF",
             confidence=row.get("confidence"),
         )
+        if row.get("record_book_source"):
+            ctx.record("Ownership Report", f"K{row_number}:L{row_number}", "dpu_exhibit_a",
+                       row["record_book_source"], confidence=1.0,
+                       extracted_text=f"Vol {row.get('record_book')}, Pg {row.get('record_page')}")
+        if row.get("wi_source"):
+            ctx.record("Ownership Report", f"T{row_number}", "to_pdf", row["wi_source"],
+                       confidence=1.0)
 
     for row_number in range(data_start + n, data_start + template_row_count):
         for col in range(1, ws.max_column + 1):
@@ -997,9 +1066,19 @@ def _fill_unit_and_pooling_agreements(wb, manifest: UnitManifest, ctx: DDRWriteC
 # explicit clean-export step)
 # ---------------------------------------------------------------------------
 
+def _record_pending_reasons(ctx: DDRWriteContext, registry) -> None:
+    """Fold every pending reason into the audit trail — the provenance layer is
+    where a blank's reason belongs, not a tab of its own."""
+    if registry is None:
+        return
+    for row in registry.audit_rows():
+        ctx.record(*row)
+
+
 def _write_audit_trail_sheet(wb, ctx: DDRWriteContext) -> None:
     ws = wb.create_sheet("DD_Audit_Trail")
     ws.append(["Sheet", "Location", "Source Type", "Source Reference", "Confidence", "Extracted Text"])
     for row in ctx.audit_rows:
         ws.append([row.sheet, row.location, row.source_type, row.source_reference, row.confidence, row.extracted_text])
     ws.sheet_state = "hidden"
+

@@ -33,12 +33,16 @@ class AggregationError(RuntimeError):
 
 # Tokenizer for interest-fraction expressions as printed in title opinions:
 # numbers/fractions/percents combined with x-multiplication, "plus" addition,
-# "less"/"minus" subtraction, and ()/[] grouping — e.g.
+# "less"/"minus" subtraction, and ()/[]/{} grouping — e.g.
 # "[(1/2 x 1/4) plus (1/2 x 1/9 x 1/4)]", "62.5% x 7/8 less (62.5% x 4.5%)".
+# Opinions nest all three bracket styles to depth 3+ in MINERALS formulas, e.g.
+# "[(1/3 x 1/9 x 1/4) plus (1/4 x 1/3 x 1/9 x 1/4)] plus {1/2 x [(…) plus (…)]}"
+# — braces are grouping, identical in meaning to () and []; the recursive-descent
+# parser below already handles the nesting once they tokenize.
 _EXPR_TOKEN_RE = re.compile(
     r"""\s*(?:
-          (?P<lpar>[\(\[])
-        | (?P<rpar>[\)\]])
+          (?P<lpar>[\(\[\{])
+        | (?P<rpar>[\)\]\}])
         | (?P<mul>x\b|×|of\b|times\b)
         | (?P<add>plus\b|\+)
         | (?P<sub>less\b|minus\b)
@@ -257,11 +261,120 @@ def parse_fraction_text(text: str | None) -> Fraction | None:
     # garbled in transcription and we refuse rather than pick a side.
     if pos == len(tokens) - 1 and tokens[pos][0] == "number":
         stated = _number_token_value(tokens[pos][1])
-        if stated is not None and abs(value - stated) <= Fraction(1, 10**6):
+        if stated is not None and abs(value - stated) <= _STATED_TOL:
             pos += 1
     if pos != len(tokens) or value < 0:
         return None
     return value
+
+
+# Tolerance for comparing an exact Fraction against an opinion's printed decimal
+# image (which is rounded to ~8 dp), e.g. 1/216 vs ".00462963".
+_STATED_TOL = Fraction(1, 10**6)
+
+
+def _split_stated_decimal(
+    tokens: list[tuple[str, str]],
+) -> tuple[list[tuple[str, str]], Fraction | None]:
+    """Split a trailing decimal 'checksum' image off an expression's tokens.
+
+    Opinions print "(1/2 x 1/3 x 1/8 x 1/4) .00462963" — the last number is the
+    formula's stated decimal value, not a factor. Returns (expr_tokens, stated),
+    or (tokens, None) when the trailing number is genuinely part of the math.
+    """
+    if len(tokens) >= 2 and tokens[-1][0] == "number":
+        head = tokens[:-1]
+        value, pos = _parse_expr(head, 0)
+        if value is not None and pos == len(head):
+            return head, _number_token_value(tokens[-1][1])
+    return tokens, None
+
+
+def royalty_from_leasehold_formula(text: str | None) -> Fraction | None:
+    """The lease royalty embedded as the TRAILING factor of a leasehold-royalty
+    formula, e.g. "(1/2 x 1/3 x 1/9 x 1/4 x 1/5) .00092593" -> 1/5.
+
+    A leasehold-royalty formula is (mineral fraction x royalty), so its last
+    multiplied factor is the lease's royalty. Used to fill Ownership col G when
+    the lease analysis carries no explicit royalty. Returns None unless the text
+    really is a product whose final factor is a multiplied number — never a guess.
+    """
+    if not text:
+        return None
+    tokens = _tokenize_fraction_expr(str(text).split("=")[0].strip())
+    if not tokens:
+        return None
+    expr_tokens, _stated = _split_stated_decimal(tokens)
+    for index in range(len(expr_tokens) - 1, -1, -1):
+        if expr_tokens[index][0] != "number":
+            continue
+        # The final factor only counts as the royalty if it was multiplied in.
+        if index > 0 and expr_tokens[index - 1][0] == "mul":
+            return _number_token_value(expr_tokens[index][1])
+        return None
+    return None
+
+
+def reconcile_mineral_fraction(
+    minerals_text: str | None,
+    royalty_text: str | None = None,
+) -> tuple[Fraction | None, str | None]:
+    """Resolve a MINERALS fraction, cross-validating a formula/decimal conflict
+    against the owner's LEASEHOLD ROYALTY formula. Returns (value, note).
+
+    Normal path: the formula and its printed decimal agree -> exact Fraction, no
+    note. Conflict path: they disagree, which means the opinion's own text is
+    internally inconsistent — one of the two is a typo. We do NOT pick a side by
+    preference. The leasehold-royalty formula is an INDEPENDENT statement of the
+    same interest (it embeds mineral fraction x royalty), so dividing out its
+    trailing royalty factor reconstructs the mineral fraction exactly. When that
+    reconstruction confirms the stated decimal, the MINERALS formula is the
+    probable source typo: we return the decimal-consistent value WITH a note for
+    itemization. When nothing corroborates, we return (None, None) and the value
+    stays empty — never guessed.
+
+    Golden case (Maxwell / Pete Andrew Wallace Jr.): MINERALS prints
+    "(1/2 x 1/3 x 1/8 x 1/4) .00462963" — the product is 1/192 (.00520833), which
+    contradicts the printed .00462963. The royalty formula
+    "(1/2 x 1/3 x 1/9 x 1/4 x 1/5) .00092593" divided by its 1/5 royalty gives
+    1/216 = .00462963, confirming the decimal and exposing "1/8" as a typo for
+    "1/9".
+    """
+    if not minerals_text:
+        return None, None
+    tokens = _tokenize_fraction_expr(str(minerals_text).split("=")[0].strip())
+    if not tokens:
+        return None, None
+    expr_tokens, stated = _split_stated_decimal(tokens)
+    computed, pos = _parse_expr(expr_tokens, 0)
+    if computed is None or pos != len(expr_tokens) or computed < 0:
+        return None, None
+    if stated is None or abs(computed - stated) <= _STATED_TOL:
+        return computed, None  # agrees (or nothing to check against)
+
+    # Formula and printed decimal disagree — corroborate via leasehold royalty.
+    royalty = royalty_from_leasehold_formula(royalty_text)
+    if royalty is None or royalty == 0:
+        return None, None
+    r_tokens = _tokenize_fraction_expr(str(royalty_text).split("=")[0].strip())
+    r_expr, r_stated = _split_stated_decimal(r_tokens or [])
+    r_value, r_pos = _parse_expr(r_expr, 0)
+    if r_value is None or r_pos != len(r_expr):
+        return None, None
+    # The royalty formula must itself be internally consistent to be trusted.
+    if r_stated is not None and abs(r_value - r_stated) > _STATED_TOL:
+        return None, None
+    derived = r_value / royalty
+    if abs(derived - stated) > _STATED_TOL:
+        return None, None  # royalty does not corroborate the decimal — refuse
+    note = (
+        f"MINERALS formula {str(minerals_text).strip()[:60]!r} computes to "
+        f"{float(computed):.8f} but the opinion prints {float(stated):.8f}; the "
+        f"leasehold-royalty formula (royalty {royalty}) independently confirms "
+        f"{float(derived):.8f} = {derived}. Using the decimal-consistent value — "
+        "the MINERALS formula is a probable source typo; verify against the opinion."
+    )
+    return derived, note
 
 
 @dataclass
