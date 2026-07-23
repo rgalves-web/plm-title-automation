@@ -1,0 +1,21 @@
+# Minorh Title Workbench — local config. Copy to config.yaml and edit.
+# config.yaml is gitignored (it names client paths); this example is safe to commit.
+
+# Acquisition folder that holds each unit's project directory (<project_root>/<UNIT>/
+# with its FILES/ and DDR). Required for the SHIP step to find FILES.
+project_root: "C:/Users/Renato/PURPLE LAND MGMT/BKV122TX - Project Emirates"
+
+# The blank DDR template (for the structural gate's sheet-set check).
+template_path: "C:/Users/Renato/PURPLE LAND MGMT/BKV122TX - Project Emirates/DDR - Template (PLM).xlsx"
+
+# Where per-unit manifest.yaml files live (pipeline output). Drives OPEN.
+manifests_dir: "data/output/dd"
+
+# Per-unit case files (state.yaml). Gitignored.
+units_dir: "data/units"
+
+# OCR binary for the source-truth gate. Reported honestly if missing; never fatal.
+tesseract_cmd: "C:/Program Files/Tesseract-OCR/tesseract.exe"
+
+# Default OCR window (seconds). Long by default — the gate runs in the background.
+ocr_window_seconds: 600

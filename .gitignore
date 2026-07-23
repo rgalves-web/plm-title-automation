@@ -36,6 +36,8 @@ data/agent/
 # Flow layer per-unit case files (state.yaml + retained versions). Derived
 # metadata, but lives under data/ and references client paths: never commit.
 data/units/
+# Local workbench config — names client paths. config.example.yaml is committed.
+/config.yaml
 
 # Client-derived sample workbook at repo root (Arapahoe Section 15).
 /Section15_SAMPLE_improved.xlsx

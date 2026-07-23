@@ -31,6 +31,8 @@ _DEFAULTS: dict[str, Any] = {
     "model": "claude-opus-4-8",
     "units_dir": "data/units",
     "template_path": None,
+    "project_root": None,               # acquisition folder holding <UNIT>/ project dirs
+    "manifests_dir": "data/output/dd",  # where per-unit manifest.yaml files live
 }
 
 
@@ -42,6 +44,8 @@ class Config:
     model: str = "claude-opus-4-8"
     units_dir: str = "data/units"
     template_path: str | None = None
+    project_root: str | None = None
+    manifests_dir: str = "data/output/dd"
     source_path: str | None = None      # where this config was loaded from (provenance)
 
     def tesseract_available(self) -> bool:
@@ -66,6 +70,8 @@ class Config:
             "model": self.model,
             "units_dir": self.units_dir,
             "template_path": self.template_path,
+            "project_root": self.project_root,
+            "manifests_dir": self.manifests_dir,
         }
 
 
