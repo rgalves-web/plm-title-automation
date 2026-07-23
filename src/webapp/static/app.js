@@ -21,7 +21,7 @@ async function loadBoard(){
   const cfg = await API.get("/api/config").catch(()=>({}));
   $("who").textContent = "Renato G.";
   const openable = (data.openable||[]).map(u=>
-    `<button class="btn small secondary" onclick="openUnit('${esc(u)}')">Open ${esc(u)}</button>`).join(" ");
+    `<button class="btn small secondary" onclick="openNew('${esc(u)}')">Open ${esc(u)}</button>`).join(" ");
   const cards = (data.units||[]).map(cardHTML).join("") ||
     `<div class="card" style="padding:22px;color:var(--gray4)">No unit case files yet. ${openable?"Open one:":""} ${openable}</div>`;
   $("scr-board").innerHTML = `
@@ -56,9 +56,12 @@ function cardHTML(u){
 function pill(dot,txt){ return `<span class="pill"><span class="dot ${dot}"></span>${esc(txt)}</span>`; }
 
 async function openUnit(name){
-  CURRENT = await API.get(`/api/units/${encodeURIComponent(name)}`);
-  renderUnit();
-  go("scr-unit");
+  try{ CURRENT = await API.get(`/api/units/${encodeURIComponent(name)}`); renderUnit(); go("scr-unit"); }
+  catch(e){ toast("Open failed: "+e.message); }
+}
+async function openNew(name){   // a unit with a manifest but no case file yet
+  try{ toast("Opening "+name+"…"); CURRENT = await API.post(`/api/units/${encodeURIComponent(name)}/open`); renderUnit(); go("scr-unit"); }
+  catch(e){ toast("Open failed: "+e.message); }
 }
 async function refresh(){ CURRENT = await API.get(`/api/units/${encodeURIComponent(CURRENT.unit_name)}`); renderUnit(); }
 
@@ -174,6 +177,7 @@ function paneRun(){
   const runlineT = `<div class="runline"><span class="res" id="truth-mark" style="color:${truthDone?'var(--lime)':'var(--gray5)'}">${truthDone?'✓':'○'}</span><span class="nm">Source-truth gate <span class="desc">— every cited cell re-read from its document (OCR)</span></span><span class="res dim" id="truth-time"></span></div>`;
   let primary;
   if(!structuralDone) primary = `<button class="btn primary" id="run-btn" onclick="runStructural()">Run the gates →</button>`;
+  else if(fail>0) primary = `<button class="btn primary" id="run-btn" onclick="runStructural()">Re-run structural gate (${fail} FAIL)</button>`;
   else if(!truthDone) primary = `<button class="btn primary" id="run-btn" onclick="runTruth()">Run source-truth gate (background)</button>`;
   else primary = `<button class="btn primary" onclick="setStage('REVIEW')">Go to review →</button>`;
   return `<div class="pane-head"><div class="h2">Build &amp; prove</div><div class="hint">The allowlist is derived from your confirmed evidence — never typed by hand, never stale.</div></div>
@@ -294,6 +298,6 @@ async function doShip(){
 }
 
 loadBoard().catch(e=>{ $("scr-board").innerHTML=`<div class="card" style="padding:22px">Failed to load: ${esc(e.message)}</div>`; });
-window.openUnit=openUnit; window.go=go; window.showStage=showStage; window.setStage=setStage;
+window.openUnit=openUnit; window.openNew=openNew; window.go=go; window.showStage=showStage; window.setStage=setStage;
 window.seedEvidence=seedEvidence; window.runStructural=runStructural; window.runTruth=runTruth;
 window.trace=trace; window.verdict=verdict; window.doShip=doShip;

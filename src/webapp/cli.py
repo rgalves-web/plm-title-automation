@@ -38,7 +38,7 @@ def serve(argv: list[str]) -> int:
     app = create_app(config)
     url = f"http://{args.host}:{args.port}/"
 
-    print(f"minorh. title workbench → {url}")
+    print(f"minorh. title workbench -> {url}")
     print(f"  units:     {config.units_dir}")
     print(f"  manifests: {config.manifests_dir}")
     print(f"  project:   {config.project_root or '(unset — set project_root to enable SHIP)'}")
