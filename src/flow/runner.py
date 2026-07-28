@@ -31,9 +31,21 @@ def build_allowlist(state: UnitState):
 
 
 def _unit_folder(state: UnitState) -> Path | None:
-    if state.ddr_path:
-        return Path(state.ddr_path).parent
-    return None
+    """The unit's PROJECT folder — the ancestor of the DDR that holds FILES.
+
+    A deliverable can sit nested inside a submission tree (Bowen:
+    <unit>/Bowen A Unit/1. Landman Submitted/PLM Report/DDR….xlsx), so the
+    DDR's immediate parent is NOT the unit root. Walking up to the first
+    ancestor containing a FILES folder finds the real root; pointing the
+    source index at the wrong folder silently yields 0 confirmed cells —
+    an artifact, not a verdict."""
+    if not state.ddr_path:
+        return None
+    ddr = Path(state.ddr_path)
+    for ancestor in ddr.parents:
+        if (ancestor / "FILES").exists():
+            return ancestor
+    return ddr.parent
 
 
 def revalidate_from_state(

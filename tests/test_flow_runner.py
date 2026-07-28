@@ -35,6 +35,26 @@ def test_build_allowlist_is_derived_from_the_ledger():
     assert allow.unit_name == "MAXWELL A UNIT"
 
 
+def test_unit_folder_walks_up_to_the_FILES_ancestor(tmp_path):
+    # Bowen layout: the DDR sits nested in the submission tree; the unit root
+    # (which holds FILES) is 3 levels up. Pointing the source index at the
+    # DDR's parent yields 0 confirmed cells — an artifact, not a verdict.
+    from src.flow.runner import _unit_folder
+    unit = tmp_path / "BOWEN A UNIT"
+    (unit / "FILES").mkdir(parents=True)
+    ddr = unit / "Bowen A Unit" / "1. Landman Submitted" / "PLM Report" / "DDR.xlsx"
+    ddr.parent.mkdir(parents=True)
+    ddr.write_bytes(b"x")
+    st = _state(); st.ddr_path = str(ddr)
+    assert _unit_folder(st) == unit
+    # Flat layout (Maxwell): DDR at the unit root, FILES beside it.
+    flat = tmp_path / "MAXWELL A UNIT"
+    (flat / "FILES").mkdir(parents=True)
+    ddr2 = flat / "DDR.xlsx"; ddr2.write_bytes(b"x")
+    st2 = _state(); st2.ddr_path = str(ddr2)
+    assert _unit_folder(st2) == flat
+
+
 def test_revalidate_requires_a_readable_ddr(tmp_path):
     st = _state()
     st.ddr_path = str(tmp_path / "does_not_exist.xlsx")
