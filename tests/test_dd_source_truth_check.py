@@ -56,6 +56,19 @@ def test_the_templates_own_nri_formula_is_confirmed_not_recomputed():
     assert check_nri_arithmetic(0.2, 0, "=1-G8-W8")[0] == CONFIRMED
 
 
+def test_prose_orri_makes_the_identity_unverifiable_not_a_mismatch():
+    # Bowen V8: ORRI column carries "Burdens reflected in FIRST SUPP T-O NRI
+    # 0.51875 (see opinion)" — prose, not a number. Treating it as zero would
+    # manufacture a mismatch out of a type error; the identity is simply not
+    # computable. Blank ORRI still means zero; numeric ORRI still verifies.
+    outcome, expected = check_nri_arithmetic(
+        0.125, "Burdens reflected in FIRST SUPP T-O NRI 0.51875 (see opinion)",
+        0.51875)
+    assert outcome == UNVERIFIABLE and expected is None
+    assert check_nri_arithmetic(0.125, "", 0.875)[0] == CONFIRMED   # blank = 0
+    assert check_nri_arithmetic(0.125, 0.1, 0.875)[0] == MISMATCH   # numeric still strict
+
+
 def test_nri_without_a_royalty_is_unverifiable_not_wrong():
     assert check_nri_arithmetic(None, 0, 0.8)[0] == UNVERIFIABLE
 

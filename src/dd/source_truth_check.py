@@ -467,12 +467,24 @@ def parse_loose_date(text: Any) -> date | None:
 
 def check_nri_arithmetic(royalty: Any, orri: Any, nri: Any) -> tuple[str, Any]:
     """NRI must equal 1 - royalty - ORRI. Computable, so a difference is a
-    MISMATCH against the workbook's own inputs, not an opinion."""
+    MISMATCH against the workbook's own inputs, not an opinion.
+
+    A blank ORRI means zero (the template's semantics). But PROSE in the ORRI
+    column — Bowen's "Burdens reflected in FIRST SUPP T-O NRI 0.51875 (see
+    opinion)" — is not a number, and treating it as zero manufactures a
+    mismatch out of a type error. When the burden is stated narratively the
+    identity is not computable: UNVERIFIABLE, never a fabricated expectation.
+    Numeric ORRI still verifies exactly."""
     r = parse_fraction_text(str(royalty)) if royalty is not None else None
-    o = parse_fraction_text(str(orri)) if orri is not None else Fraction(0)
     if r is None:
         return UNVERIFIABLE, None
-    expected = Fraction(1) - r - (o or Fraction(0))
+    if orri is None or str(orri).strip() == "":
+        o = Fraction(0)                      # absent = no override
+    else:
+        o = parse_fraction_text(str(orri))
+        if o is None:                        # prose burden — identity not computable
+            return UNVERIFIABLE, None
+    expected = Fraction(1) - r - o
     if isinstance(nri, str) and nri.strip().startswith("="):
         # The template's own =1-G-W formula IS the rule; nothing to contradict.
         return CONFIRMED, expected
@@ -611,13 +623,22 @@ def check_ownership_report(workbook, index: SourceIndex, cites: list[AuditCite],
         # 2. NRI against the workbook's own royalty/ORRI — arithmetic.
         nri = ws.cell(row, _OWN_COL["nri"]).value
         if nri is not None:
-            outcome, expected = check_nri_arithmetic(
-                ws.cell(row, _OWN_COL["royalty"]).value,
-                ws.cell(row, _OWN_COL["orri"]).value, nri)
+            royalty_v = ws.cell(row, _OWN_COL["royalty"]).value
+            orri_v = ws.cell(row, _OWN_COL["orri"]).value
+            outcome, expected = check_nri_arithmetic(royalty_v, orri_v, nri)
+            if outcome != UNVERIFIABLE:
+                why = ""
+            elif royalty_v is None or str(royalty_v).strip() == "":
+                why = "royalty absent, so NRI is not computable"
+            elif orri_v is not None and parse_fraction_text(str(orri_v)) is None \
+                    and str(orri_v).strip() != "":
+                why = (f"ORRI column carries prose ({str(orri_v)[:60]!r}) — "
+                       "burden stated narratively, identity not computable")
+            else:
+                why = "NRI identity not computable from the row's inputs"
             report.add(TruthFinding(
                 _OWN, f"V{row}", "NRI = 1-royalty-ORRI", nri, expected, outcome,
-                source_file="(computed from G/W)",
-                detail="" if outcome != UNVERIFIABLE else "royalty absent, so NRI is not computable"))
+                source_file="(computed from G/W)", detail=why))
 
         # 3. MI / WI against the opinion the audit trail cites.
         for key, label in (("mi", "MI Value"), ("wi", "WI Value")):
