@@ -122,8 +122,9 @@ def apply_sanctions(report: Any, sanctions: dict[str, dict[str, str]]) -> list[A
     other cell keep failing exactly as before."""
     if not sanctions:
         return []
+    import dataclasses
     applied = []
-    for f in report.findings:
+    for i, f in enumerate(report.findings):
         if str(getattr(f, "severity", "")).upper() != "FAIL":
             continue
         s = sanctions.get(sanction_key(f))
@@ -131,10 +132,16 @@ def apply_sanctions(report: Any, sanctions: dict[str, dict[str, str]]) -> list[A
             continue
         if str(s.get("value", ""))[:60] != str(getattr(f, "value", ""))[:60]:
             continue                     # value changed since the human ruled
-        f.severity = "SANCTIONED"
-        f.expected = f"SANCTIONED by {s.get('by', 'landman')}: {s.get('reason', '')} " \
-                     f"[was: {f.expected}]"
-        applied.append(f)
+        text = (f"SANCTIONED by {s.get('by', 'landman')}: {s.get('reason', '')} "
+                f"[was: {f.expected}]")
+        try:
+            new = dataclasses.replace(f, severity="SANCTIONED", expected=text)
+        except TypeError:                # plain object (tests) — mutate in place
+            f.severity = "SANCTIONED"
+            f.expected = text
+            new = f
+        report.findings[i] = new
+        applied.append(new)
     return applied
 
 
