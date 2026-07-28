@@ -56,6 +56,40 @@ def test_the_templates_own_nri_formula_is_confirmed_not_recomputed():
     assert check_nri_arithmetic(0.2, 0, "=1-G8-W8")[0] == CONFIRMED
 
 
+def test_resolver_maps_a_recording_cite_to_the_volpage_named_instrument(tmp_path):
+    # Bowen audit: "DPU K1400725 Exhibit A (Vol 479 Pg 590-596)" must reach the
+    # instrument filed as "479.590 - Declaration of Pooled Unit - Bowen A Unit.tif".
+    from src.dd.source_truth_check import SourceIndex
+    dpu = tmp_path / "479.590 - Declaration of Pooled Unit - Bowen A Unit.tif"
+    dpu.write_bytes(b"x")
+    idx = SourceIndex([tmp_path], ocr_fn=lambda p: "")
+    assert idx.resolve("DPU K1400725 Exhibit A (Vol 479 Pg 590-596)") == dpu
+    assert idx.resolve("Amendment (Vol 493, Pg 217)") is None      # não inventa
+
+
+def test_resolver_maps_an_inner_parenthesized_filename(tmp_path):
+    from src.dd.source_truth_check import SourceIndex
+    inner = tmp_path / "UNIT DEC - REC.TIF"
+    inner.write_bytes(b"x")
+    idx = SourceIndex([tmp_path], ocr_fn=lambda p: "")
+    assert idx.resolve("DPU K1400725 zip (UNIT DEC - REC.TIF)") == inner
+
+
+def test_resolver_maps_a_workbook_title_to_the_xlsx_with_copy_suffix(tmp_path):
+    from src.dd.source_truth_check import SourceIndex
+    import openpyxl
+    wb = openpyxl.Workbook(); wb.active["A1"] = "RAMA JOE BOWEN GILLASPIA"
+    wb.active["B1"] = "0220618-001"
+    sched = tmp_path / "Lease & Mineral Schedule 6.9.26 (2).xlsx"
+    wb.save(sched)
+    idx = SourceIndex([tmp_path], ocr_fn=lambda p: "")
+    got = idx.resolve("Lease & Mineral Schedule 6.9.26")
+    assert got == sched
+    # verificação tabular: as células viram texto pesquisável, sem OCR
+    text = idx.text(got)
+    assert "GILLASPIA" in text and "0220618-001" in text
+
+
 def test_prose_orri_makes_the_identity_unverifiable_not_a_mismatch():
     # Bowen V8: ORRI column carries "Burdens reflected in FIRST SUPP T-O NRI
     # 0.51875 (see opinion)" — prose, not a number. Treating it as zero would

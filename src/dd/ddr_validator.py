@@ -32,6 +32,9 @@ from typing import Any, Iterable
 
 FAIL = "FAIL"
 PENDING = "PENDING"
+# A divergence the landman DECLARED, with a recorded reason — logged in the gate
+# report, never silently absorbed, never a FAIL. Anything undeclared stays FAIL.
+DECLARED = "DECLARED"
 
 # Provenance layer: not client-facing, but still counted and orphan-checked.
 _AUDIT_SHEET = "DD_Audit_Trail"
@@ -231,7 +234,13 @@ _GENERIC_UNIT_QUALIFIERS = {"THE", "THIS", "SAID", "POOLED", "SUBJECT", "CAPTION
                             "PER", "AND", "ONE", "EACH", "ANY", "SUCH", "WITHIN",
                             "INTO", "FOR", "OTHER", "DRILLING", "PRODUCTION",
                             "ACRE", "ACRES", "WELLBORE", "GAS", "OIL", "POOLING",
-                            "SURFACE", "LEASEHOLD", "PRORATION", "SPACING"}
+                            "SURFACE", "LEASEHOLD", "PRORATION", "SPACING",
+                            # Common English words seen before "unit" in analyst
+                            # prose (Bowen: "a DIFFERENT unit", "OUTSIDE unit
+                            # boundary", "AFFECTS unit …"). No Texas unit is
+                            # plausibly NAMED one of these; a real name like
+                            # SIEBOLD still flags (regression-tested).
+                            "DIFFERENT", "OUTSIDE", "AFFECTS"}
 
 
 @dataclass
@@ -419,10 +428,18 @@ def expected_sheet_set(template_workbook,
     return template_tabs | set(sanctioned)
 
 
-def check_sheet_set(workbook, expected: set[str] | None) -> list[Finding]:
-    """The workbook's tab set must equal the expected set exactly."""
+def check_sheet_set(workbook, expected: set[str] | None,
+                    declared_exclusions: dict[str, str] | None = None) -> list[Finding]:
+    """The workbook's tab set must equal the expected set exactly.
+
+    declared_exclusions: {sheet_name: reason} — template tabs the landman
+    DECLARED excluded, with the reason recorded. A declared missing tab is
+    logged as a DECLARED EXCLUSION finding (visible in the report and sidecar),
+    not a FAIL. Any divergence NOT declared stays FAIL — the default is
+    unchanged, and extra tabs are never excusable this way."""
     if not expected:
         return []
+    declared = declared_exclusions or {}
     actual = set(workbook.sheetnames)
     findings = []
     for extra in sorted(actual - expected):
@@ -432,6 +449,11 @@ def check_sheet_set(workbook, expected: set[str] | None) -> list[Finding]:
                        f"plus {sorted(SANCTIONED_EXTRA_SHEETS)}")
         findings.append(Finding("(workbook)", extra, extra, "sheet_set", reason))
     for missing in sorted(expected - actual):
+        if missing in declared:
+            findings.append(Finding(
+                "(workbook)", missing, None, "sheet_set",
+                f"DECLARED EXCLUSION: {declared[missing]}", severity=DECLARED))
+            continue
         findings.append(Finding("(workbook)", missing, None, "sheet_set",
                                 "the template defines this tab; the deliverable is missing it"))
     return findings
@@ -975,7 +997,8 @@ def validate_ddr(workbook, allowlist: UnitAllowlist | None = None,
                  dpu_by_lease: dict | None = None,
                  client_name: str | None = None,
                  template_workbook=None,
-                 today=None) -> ValidationReport:
+                 today=None,
+                 declared_sheet_exclusions: dict[str, str] | None = None) -> ValidationReport:
     """Run every rule over every populated cell. Nothing is sampled.
 
     expected_sheets: the tab set the deliverable must have (see
@@ -984,10 +1007,13 @@ def validate_ddr(workbook, allowlist: UnitAllowlist | None = None,
     documents_available: identifiers of document packages present in the unit's
     project folder (see documents_on_disk). A PENDING marker referencing one of
     them is a FALSE "not in file" claim and FAILS.
+    declared_sheet_exclusions: {sheet: reason} — landman-declared template-tab
+    exclusions, logged as DECLARED, never FAIL (undeclared stays FAIL).
     """
     report = ValidationReport()
     audited, pending_reasons = _audit_index(workbook)
-    report.findings.extend(check_sheet_set(workbook, expected_sheets))
+    report.findings.extend(check_sheet_set(workbook, expected_sheets,
+                                           declared_exclusions=declared_sheet_exclusions))
     # PLM submission checklist — workbook-wide, so they run once, not per sheet.
     report.findings.extend(check_submission_date(workbook, today=today))
     report.findings.extend(check_disclaimer_names_the_client(workbook, client_name))
@@ -1080,6 +1106,7 @@ def run_final_validation(
     client_name=None,
     source_roots=(),
     run_source_truth_check: bool = True,
+    declared_sheet_exclusions: dict[str, str] | None = None,
 ) -> "ValidationReport":
     """Validate a written DDR and drop its sidecar. The pipeline's last act.
 
@@ -1107,6 +1134,7 @@ def run_final_validation(
         dpu_by_lease=dpu_by_lease,
         client_name=client_name,
         template_workbook=template_workbook,
+        declared_sheet_exclusions=declared_sheet_exclusions,
     )
     if run_source_truth_check and source_roots:
         from src.dd.source_truth_check import run_source_truth

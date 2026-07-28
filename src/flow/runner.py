@@ -87,6 +87,9 @@ def revalidate_from_state(
             source_roots = tuple(_validation_source_roots(
                 unit_folder, unit_folder / "FILES", None))
 
+    declared_sheets = {e["name"]: e.get("reason", "")
+                       for e in state.declared_exclusions
+                       if e.get("kind") == "sheet" and e.get("name")}
     report = run_final_validation(
         Path(state.ddr_path),
         template_path=template,
@@ -95,7 +98,9 @@ def revalidate_from_state(
         client_name=(state.manifest_snapshot or {}).get("client_name"),
         source_roots=source_roots,
         run_source_truth_check=run_source_truth,
+        declared_sheet_exclusions=declared_sheets or None,
     )
+    apply_sanctions(report, state.sanctions)
 
     state.gate_results = _summarize(report, allowlist)
     if persist:
@@ -103,16 +108,54 @@ def revalidate_from_state(
     return report
 
 
+def sanction_key(finding: Any) -> str:
+    return f"{getattr(finding, 'sheet', '')}!{getattr(finding, 'cell', '')}:{getattr(finding, 'rule', '')}"
+
+
+def apply_sanctions(report: Any, sanctions: dict[str, dict[str, str]]) -> list[Any]:
+    """Downgrade FAIL findings the landman explicitly sanctioned to SANCTIONED.
+
+    A sanction is per-finding (sheet!cell:rule) and carries the human's reason.
+    It applies ONLY while the finding's value is unchanged — the sanction stores
+    a value snapshot, and a changed cell voids it, so a sanction can never mask
+    new content. The matcher itself is untouched: unsanctioned findings on any
+    other cell keep failing exactly as before."""
+    if not sanctions:
+        return []
+    applied = []
+    for f in report.findings:
+        if str(getattr(f, "severity", "")).upper() != "FAIL":
+            continue
+        s = sanctions.get(sanction_key(f))
+        if s is None:
+            continue
+        if str(s.get("value", ""))[:60] != str(getattr(f, "value", ""))[:60]:
+            continue                     # value changed since the human ruled
+        f.severity = "SANCTIONED"
+        f.expected = f"SANCTIONED by {s.get('by', 'landman')}: {s.get('reason', '')} " \
+                     f"[was: {f.expected}]"
+        applied.append(f)
+    return applied
+
+
 def _summarize(report: Any, allowlist: Any) -> dict[str, Any]:
     fails = [f for f in report.findings
              if str(getattr(f, "severity", "FAIL")).upper() == "FAIL"]
     pend = [f for f in report.findings
             if str(getattr(f, "severity", "")).upper() == "PENDING"]
+    declared = [f for f in report.findings
+                if str(getattr(f, "severity", "")).upper() == "DECLARED"]
+    sanctioned = [f for f in report.findings
+                  if str(getattr(f, "severity", "")).upper() == "SANCTIONED"]
     summary: dict[str, Any] = {
         "structural": {
             "ready": bool(getattr(report, "ready", False)),
             "fail": len(fails),
             "pending": len(pend),
+            "declared": len(declared),
+            "sanctioned": len(sanctioned),
+            "declared_items": [f.describe() for f in declared],
+            "sanctioned_items": [f.describe() for f in sanctioned],
             "summary": report.summary() if hasattr(report, "summary") else "",
         },
         "allowlist_derived": {

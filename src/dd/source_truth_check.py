@@ -203,14 +203,29 @@ class SourceIndex:
         self.search_roots = [Path(r) for r in search_roots if r and Path(r).exists()]
         self._files: dict[str, Path] = {}
         self._text: dict[Path, str] = {}
+        self._by_volpage: dict[tuple[str, str], Path] = {}
         self._ocr_fn = ocr_fn
         for root in self.search_roots:
             for path in root.rglob("*"):
-                if path.is_file() and path.suffix.lower() in {".pdf", ".tif", ".tiff", ".txt"}:
+                if path.is_file() and path.suffix.lower() in {
+                        ".pdf", ".tif", ".tiff", ".txt", ".xlsx", ".xlsm"}:
                     self._files.setdefault(_norm_key(path.stem), path)
+                    # Recorded instruments named by recording cite: "479.590 - …"
+                    m = re.match(r"^\s*(\d{2,4})\.(\d{1,4})\b", path.stem)
+                    if m:
+                        self._by_volpage.setdefault((m.group(1), m.group(2)), path)
 
     def resolve(self, reference: str | None) -> Path | None:
-        """An audit source reference -> the file on disk, or None."""
+        """An audit source reference -> the file on disk, or None.
+
+        Beyond exact/contained stem matching, three real citation shapes are
+        understood (all seen in the Bowen audit trail):
+        - a recording cite in the reference ("DPU K1400725 Exhibit A (Vol 479
+          Pg 590-596)") -> the instrument filed as "479.590 - …";
+        - an inner filename in parentheses ("DPU K1400725 zip (UNIT DEC -
+          REC.TIF)") -> that file wherever it sits on disk;
+        - a workbook cited by title ("Lease & Mineral Schedule 6.9.26") -> the
+          .xlsx on disk, tolerant of "(2)" copy suffixes via containment."""
         if not reference:
             return None
         first = str(reference).split(" + ")[0].strip()
@@ -224,6 +239,19 @@ class SourceIndex:
         trimmed = _norm_key(re.split(r"\bPP?\.", stem, maxsplit=1)[0])
         if trimmed and trimmed in self._files:
             return self._files[trimmed]
+        # Recording cite inside the reference -> "<vol>.<page> - …" instrument.
+        m = re.search(r"\bVol\.?\s*(\d{2,4})[,\s]+P(?:g|age)\.?\s*(\d{1,4})\b",
+                      first, re.IGNORECASE)
+        if m and (m.group(1), m.group(2)) in self._by_volpage:
+            return self._by_volpage[(m.group(1), m.group(2))]
+        # An inner filename cited in parentheses ("… zip (UNIT DEC - REC.TIF)").
+        for inner in re.findall(r"\(([^()]+\.(?:pdf|tiff?|txt|xlsx|xlsm))\)",
+                                first, re.IGNORECASE):
+            inner_key = _norm_key(Path(inner).stem)
+            if inner_key in self._files:
+                return self._files[inner_key]
+        # Containment last: tolerant of copy suffixes ("… 6.9.26 (2).xlsx")
+        # and page-cite tails — unchanged from the original behavior.
         for candidate_key, path in self._files.items():
             if trimmed and (trimmed in candidate_key or candidate_key in trimmed):
                 return path
@@ -231,8 +259,14 @@ class SourceIndex:
 
     def text(self, path: Path) -> str:
         if path not in self._text:
-            if path.suffix.lower() == ".txt":
+            suffix = path.suffix.lower()
+            if suffix == ".txt":
                 self._text[path] = path.read_text(encoding="utf-8", errors="replace")
+            elif suffix in (".xlsx", ".xlsm"):
+                # Tabular source: the cells ARE the text — deterministic read,
+                # no OCR. Lets a value cited to a schedule/XREF workbook be
+                # verified against the workbook's own content.
+                self._text[path] = _workbook_text(path)
             else:
                 ocr = self._ocr_fn or _default_ocr
                 self._text[path] = ocr(path)
@@ -253,6 +287,24 @@ def _default_ocr(path: Path) -> str:
 
 def _norm_key(text: str) -> str:
     return re.sub(r"[^A-Z0-9]+", "", str(text).upper())
+
+
+def _workbook_text(path: Path) -> str:
+    """Every cell of every sheet as searchable text (deterministic, no OCR)."""
+    import openpyxl
+
+    lines: list[str] = []
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    try:
+        for name in wb.sheetnames:
+            lines.append(f"[sheet: {name}]")
+            for row in wb[name].iter_rows(values_only=True):
+                cells = [str(c) for c in row if c is not None]
+                if cells:
+                    lines.append(" | ".join(cells))
+    finally:
+        wb.close()
+    return "\n".join(lines)
 
 
 def normalize_for_match(text: Any) -> str:

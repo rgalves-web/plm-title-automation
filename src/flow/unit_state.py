@@ -42,6 +42,14 @@ class UnitState:
     ledger: EvidenceLedger = field(default_factory=EvidenceLedger)
     gate_results: dict[str, Any] = field(default_factory=dict)
     verdicts: dict[str, Any] = field(default_factory=dict)
+    # Landman-declared divergences, each with its recorded reason. Sheet-kind
+    # entries feed the sheet-set rule (DECLARED EXCLUSION, not FAIL); anything
+    # not declared here keeps the default FAIL.
+    declared_exclusions: list[dict[str, str]] = field(default_factory=list)
+    # Human sanctions of specific gate findings: key "Sheet!Cell:rule" ->
+    # {reason, by, at, value}. Applied only while the finding's value is
+    # unchanged — a changed cell voids its sanction.
+    sanctions: dict[str, dict[str, str]] = field(default_factory=dict)
     packaging_summary: dict[str, Any] = field(default_factory=dict)
     unit_dpu_contract: str | None = None
     ddr_path: str | None = None
@@ -77,7 +85,10 @@ class UnitState:
             "unit_name": self.unit_name, "stage": self.stage, "version": self.version,
             "manifest_snapshot": self.manifest_snapshot, "checklist": self.checklist,
             "ledger": self.ledger.to_dict(), "gate_results": self.gate_results,
-            "verdicts": self.verdicts, "packaging_summary": self.packaging_summary,
+            "verdicts": self.verdicts,
+            "declared_exclusions": self.declared_exclusions,
+            "sanctions": self.sanctions,
+            "packaging_summary": self.packaging_summary,
             "unit_dpu_contract": self.unit_dpu_contract, "ddr_path": self.ddr_path,
             "stage_history": self.stage_history,
             "created_at": self.created_at, "updated_at": self.updated_at,
@@ -91,6 +102,8 @@ class UnitState:
             checklist=d.get("checklist", []),
             ledger=EvidenceLedger.from_dict(d.get("ledger")),
             gate_results=d.get("gate_results", {}), verdicts=d.get("verdicts", {}),
+            declared_exclusions=d.get("declared_exclusions", []),
+            sanctions=d.get("sanctions", {}),
             packaging_summary=d.get("packaging_summary", {}),
             unit_dpu_contract=d.get("unit_dpu_contract"), ddr_path=d.get("ddr_path"),
             stage_history=d.get("stage_history", []),

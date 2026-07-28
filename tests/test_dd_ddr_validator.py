@@ -181,6 +181,48 @@ def test_catches_mi_flattened_across_a_tract():
     assert any(f.rule == "mi_per_tract_sum" for f in report.failures)
 
 
+def test_declared_sheet_exclusion_logs_DECLARED_not_FAIL():
+    # Bowen: "Ownership - 1H (No FO Option)" deliberately deleted by the landman.
+    from src.dd.ddr_validator import check_sheet_set
+    wb = _ddr([_own_row()], _audited())
+    expected = set(wb.sheetnames) | {"Ownership - 1H (No FO Option)"}
+    declared = {"Ownership - 1H (No FO Option)":
+                "excluída deliberadamente pelo landman 07/28 — análise No FO Option "
+                "fora do escopo desta entrega"}
+    findings = check_sheet_set(wb, expected, declared_exclusions=declared)
+    decl = [f for f in findings if f.severity == "DECLARED"]
+    assert len(decl) == 1 and "DECLARED EXCLUSION" in decl[0].expected
+    assert not [f for f in findings if f.severity == FAIL]
+
+
+def test_undeclared_missing_sheet_still_fails():
+    from src.dd.ddr_validator import check_sheet_set
+    wb = _ddr([_own_row()], _audited())
+    expected = set(wb.sheetnames) | {"Ownership - 1H (No FO Option)"}
+    findings = check_sheet_set(wb, expected, declared_exclusions={"Some Other Tab": "x"})
+    assert [f for f in findings if f.severity == FAIL and f.rule == "sheet_set"]
+
+
+def test_extra_tab_is_never_excusable_by_declaration():
+    from src.dd.ddr_validator import check_sheet_set
+    wb = _ddr([_own_row()], _audited())
+    wb.create_sheet("Stray Copy")
+    findings = check_sheet_set(wb, set(wb.sheetnames) - {"Stray Copy"},
+                               declared_exclusions={"Stray Copy": "nice try"})
+    assert [f for f in findings if f.severity == FAIL and f.cell == "Stray Copy"]
+
+
+def test_common_english_words_before_unit_do_not_flag_but_real_names_do():
+    # Bowen artifacts: "a DIFFERENT unit", "OUTSIDE unit boundary", "AFFECTS
+    # unit". A real neighboring unit (SIEBOLD) must still flag — the stoplist
+    # is safe only because no unit is plausibly NAMED a function word.
+    allow = _allow()
+    assert allow.foreign_units_in("leases feed a DIFFERENT Unit entirely") == set()
+    assert allow.foreign_units_in("tract lies OUTSIDE Unit boundary") == set()
+    assert allow.foreign_units_in("the amendment AFFECTS Unit acreage") == set()
+    assert "SIEBOLD" in allow.foreign_units_in("covered by the SIEBOLD Unit opinion")
+
+
 def test_pending_text_in_tract_gross_is_reported_not_a_crash():
     # Bowen: gross acres carried "Pending tract allocation (Brim legals … see
     # Original T-O 4/15/2008 request)" — a string. The gate must run and name

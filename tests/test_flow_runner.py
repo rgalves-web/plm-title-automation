@@ -35,6 +35,35 @@ def test_build_allowlist_is_derived_from_the_ledger():
     assert allow.unit_name == "MAXWELL A UNIT"
 
 
+def test_sanctions_downgrade_only_the_ruled_finding_while_value_unchanged():
+    import types
+    from src.flow.runner import apply_sanctions, sanction_key
+    f1 = types.SimpleNamespace(sheet="PLM Title Review", cell="B41", rule="foreign_unit_leakage",
+                               value="MISATTRIBUTED to Bowen A … SIEBOLD …", severity="FAIL",
+                               expected="names another unit (SIEBOLD)",
+                               describe=lambda: "f1")
+    f2 = types.SimpleNamespace(sheet="Summary", cell="B10", rule="foreign_unit_leakage",
+                               value="other", severity="FAIL", expected="x",
+                               describe=lambda: "f2")
+    report = types.SimpleNamespace(findings=[f1, f2])
+    sanctions = {sanction_key(f1): {
+        "reason": "Siebold Unit é vizinha real citada como contexto — confirmado pelo Renato",
+        "by": "Renato", "value": str(f1.value)}}
+    applied = apply_sanctions(report, sanctions)
+    assert [f1] == applied and f1.severity == "SANCTIONED"
+    assert f2.severity == "FAIL"                      # nada além do sancionado muda
+
+
+def test_sanction_is_void_when_the_cell_value_changes():
+    import types
+    from src.flow.runner import apply_sanctions, sanction_key
+    f = types.SimpleNamespace(sheet="S", cell="C1", rule="r", value="NEW CONTENT",
+                              severity="FAIL", expected="x", describe=lambda: "f")
+    sanctions = {sanction_key(f): {"reason": "ok", "by": "R", "value": "OLD CONTENT"}}
+    assert apply_sanctions(types.SimpleNamespace(findings=[f]), sanctions) == []
+    assert f.severity == "FAIL"
+
+
 def test_unit_folder_walks_up_to_the_FILES_ancestor(tmp_path):
     # Bowen layout: the DDR sits nested in the submission tree; the unit root
     # (which holds FILES) is 3 levels up. Pointing the source index at the
