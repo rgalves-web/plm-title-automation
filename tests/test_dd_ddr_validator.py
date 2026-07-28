@@ -181,6 +181,20 @@ def test_catches_mi_flattened_across_a_tract():
     assert any(f.rule == "mi_per_tract_sum" for f in report.failures)
 
 
+def test_pending_text_in_tract_gross_is_reported_not_a_crash():
+    # Bowen: gross acres carried "Pending tract allocation (Brim legals … see
+    # Original T-O 4/15/2008 request)" — a string. The gate must run and name
+    # the row as PENDING, not die on float().
+    wb = _ddr([_own_row(gross="Pending tract allocation (Brim legals: Brooks "
+                              "A-35 / Stephenson A-682 area)")],
+              _audited())
+    report = validate_ddr(wb, _allow())          # must not raise
+    pend = [f for f in report.findings
+            if f.rule == "mi_per_tract_sum" and f.severity == PENDING]
+    assert pend and "not numeric" in pend[0].expected
+    assert not [f for f in report.failures if f.rule == "mi_per_tract_sum"]
+
+
 def test_catches_a_foreign_lease_number():
     wb = _ddr([_own_row(lease="9999999-999")], _audited())
     report = validate_ddr(wb, _allow())

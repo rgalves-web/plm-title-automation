@@ -896,15 +896,31 @@ def check_royalty_presence(worksheet, rows, pending_reasons) -> list[Finding]:
 
 
 def check_mi_per_tract(worksheet, rows) -> list[Finding]:
-    """A tract's mineral ownership is a partition of unity: MI cannot sum > 1."""
+    """A tract's mineral ownership is a partition of unity: MI cannot sum > 1.
+
+    A tract-gross cell that carries TEXT instead of acreage (e.g. Bowen's
+    "Pending tract allocation … see Original T-O 4/15/2008 request") cannot be
+    assigned to a tract, so its row is excluded from the partition sum — and the
+    condition is surfaced as a PENDING finding, never skipped silently. Before
+    this guard the whole gate crashed on the float() call, which reported
+    nothing at all."""
     by_tract: dict[Any, list[tuple[int, Fraction]]] = {}
+    findings: list[Finding] = []
     for row in rows:
         mi = _as_fraction(worksheet.cell(row, _COL["mi"]).value)
         gross = worksheet.cell(row, _COL["tract_gross"]).value
         if mi is None or not is_populated(gross):
             continue
-        by_tract.setdefault(round(float(gross), 4), []).append((row, mi))
-    findings = []
+        try:
+            tract_key = round(float(gross), 4)
+        except (TypeError, ValueError):
+            findings.append(Finding(
+                _OWN, f"R{row}", str(gross)[:80], "mi_per_tract_sum",
+                "tract gross acres is not numeric — row excluded from the MI "
+                "partition check until the tract is allocated",
+                severity=PENDING))
+            continue
+        by_tract.setdefault(tract_key, []).append((row, mi))
     for tract, entries in by_tract.items():
         total = sum((mi for _r, mi in entries), Fraction(0))
         if total - Fraction(1) > Fraction(1, 10**6):
