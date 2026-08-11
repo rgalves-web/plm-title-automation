@@ -111,3 +111,75 @@ Tag guarda commit, não conhecimento. Duas estavam integralmente mergeadas; duas
 | `maxwell-lessons-hardening` | **0 à frente** — mergeada em 23/07 (`f416900`) | nada a preservar |
 | `maxwell-operational-minorh` | 1 commit (`0f49ad2`) | Reescrita do `app.py` Streamlit (±583 linhas): marca Minorh e **entrada por caminho de pasta** em vez de upload arquivo-a-arquivo. **Superada** pelo workbench FastAPI (`src/webapp`), que implementa a marca a partir do protótipo aprovado e opera por pasta de unidade. `app.py` segue congelado como fallback; não reintegrar. |
 | `phase1-conversational-shell` | 2 commits (`81691ce`, `be0f530`) | Pacote `src/agent/` completo (~1.188 linhas + 4 arquivos de teste): `cli`, `orchestrator`, `router`, `registry`, `progress`, `workspace` e `tools/{dd_tool,mor_tool}` — a "casca conversacional" que chama os pipelines existentes como ferramentas (a direção de produto do CLAUDE.md §Product direction). **Não descartado por estar errado**, e sim porque o workbench entregou a operação por UI primeiro. Se a camada conversacional voltar à pauta, **partir deste commit**, não do zero: o padrão tool-wrapper (pipeline determinístico exposto como ferramenta, nunca reescrito) é exatamente o que o OKF pede no S4/S6. |
+
+---
+
+## PR-4 (F4) — classificação por conteúdo, escopo real e o FETCH BRIEF da Josh B · **2026-08-11**
+
+O entregável deste PR não é código testado: é **um brief real e um perímetro real
+da Josh B, gerados a frio**, comparáveis com o que foi feito à mão.
+
+### Módulos novos
+| Arquivo | O que faz |
+|---|---|
+| `src/knowledge/vision.py` | Leitura por visão, **página a página**, cache por hash da página + instrução. Recupera o que o OCR determinístico não recupera: o Exhibit "A" da DPU saiu **67/67 leases** por visão contra **13** por tesseract (DPI 350/400/500, psm 4/6 — todos falharam). |
+| `src/knowledge/classifier.py` | S4 DROP no schema do flow spec §2. Filename é prior com **teto duro** (`FILENAME_ONLY_CEILING = 0.35`); vocabulário de categorias vem de L1; sem citação verbatim a confiança é capada. |
+| `src/knowledge/title_opinion.py` | Cert date por **passe dirigido** (varredura OCR barata → confirmação por visão) e `coverage_delta` entre original e supplemental. |
+| `src/knowledge/interest_formula.py` | Fórmula em prosa → `Fraction` exata, ou `Blocking`. Não existe terceiro ramo — em particular, **não existe fallback para a opinião anterior**. |
+| `src/knowledge/dpu_reader.py` | Lê a DPU gravada: recording, data efetiva, acres, surveys, Exhibit "A", e os **tratos partidos** (`split_deed_tracts`). |
+| `src/knowledge/lease_disposition.py` | A regra do supervisor como dado: memo grava os termos que declara **e** a lease vira MISSING LEASE. |
+| `src/knowledge/josh_b_round.py` | A rodada: perímetro + disposições → `fetch_brief.yaml` + o markdown. |
+
+### Aceitação (a) — re-drop frio da Bowen, nomes apagados
+13 documentos renomeados para `doc_NNN.<ext>`; nenhuma pista de filename.
+
+- **12/13 classificações corretas por conteúdo.** A única divergência é `PLAT.TIF` → `reference_workbook`: L1 **não tem categoria `plat`** (backlog #8), e o "esperado" que eu tinha escrito (`well_file`) também estava errado.
+- **Cert date do original: `February 4, 2008`**, igual ao filename do pacote entregue, extraída da **p.21 de 36**: *"Our opinion covers title through February 4, 2008"*. Não está na capa e não usa a palavra "certify" — a leitura de páginas de rosto devolvia a **data da carta** (17/03/2008), que não é o piso de escopo.
+- **Cert date do supplemental: BLOQUEANTE.** O documento não tem frase de certificação. O sistema devolve `cert_date_nao_localizada` **com candidato** `October 18, 2008` (p.24, *"Runsheet … covering the Land from Sovereignty to October 18, 2008"*, `requires_human_verdict: true`) — de onde vem o `10-18-2008` do filename entregue. Um clique adota; o código não adota sozinho.
+- **Delta A-226 reproduzido só do conteúdo:** `ENLARGED 141.5 ac -> 262.5 ac; surveys added: A-226`.
+- **Memo interno pós-cert-date → `of_record: not_recorded`** (`NOTES.TIF`, `INFO SHEET.TIF`, `VOID CHECK`), nunca elegível ao Runsheet.
+- **Defeito real corrigido no caminho:** a carta de encaminhamento. A p.1 da Original Title Opinion é *"Dear Mr. Bynum: Enclosed please find our Original Title Opinion"* e classificava o documento inteiro como `correspondence`. Uma capa não nomeia o documento — `_best_answer` agora prefere a página que nomeia o instrumento.
+
+### Aceitação (b) — rodada real da Josh B, a frio
+Namespace de replay `data/units/_josh_b_replay/` (nada escrito na árvore entregue; `frozen_paths` ativo).
+
+- **214 documentos lidos por conteúdo** (114 nas pastas de lease + 100 soltos em `FILES/`), 0 erros. Os soltos foram uma lacuna de cobertura minha, achada e fechada nesta rodada: o **4º title opinion** (`T-O ORIG W.S. SCARBOROUGH A-669 50AC.PDF`, o do Unit Tract 1) estava solto na raiz e o primeiro plano só andava pelas pastas de lease. Arquivo fora do formato esperado é exatamente o arquivo que ninguém lê.
+- **Perímetro:** `A-669` e `A-319 Blocks 5 e 6`. Os blocos **não estão na DPU** — vêm da p.1 do title opinion, citados em `blocks_source`. Sem eles, um documento de A-319 Bloco 12 passa no filtro mais barato da rodada.
+- **A série 0220936 sai do perímetro com prova documental de três peças**, não por suposição: Exhibit "B" p.5 (a unidade **começa dentro** do Tract 1 do Vol. 217 Pg. 491 e nomeia o Tract 2 apenas como *"occupied Southeast corner"*); o próprio deed Vol. 217 Pg. 491 (Hughes → Yentze, 04/01/1940), cujo **SECOND TRACT** é *"90 acres … part of Section No. 3422, T.E. & L.Co. Lands"* correndo *"with the S.W. Boundary line of the Wm. Scarborough Survey"* — vizinho, não dentro; e o plat do Exhibit "C" p.6, que põe **A-811 fora** do contorno.
+- **Achado novo, ainda não verificado:** o Exhibit "B" p.5 parte um **segundo** deed do mesmo jeito, com a polaridade invertida — Vol. 311 Pg. 189, Tract 2 (120 ac) *dentro*, Tract 1 (35 ac) só como canto. Não está no gabarito. Entra no brief como `confirm`, não como conclusão.
+- **Disposições das 67 leases:** 34 com instrumento of-record · 16 pasta sem instrumento · 9 sem pasta · 7 fora do perímetro · 1 memo-only.
+- **Gate do brief: 0 problemas.** 34 itens, 30 células em branco, **nenhuma órfã** (invariante 18).
+
+### Aceitação (c) — placar de reprodução
+**Das 13 conclusões verificáveis do gabarito, o sistema reproduziu 7 sozinho e a
+frio, 1 parcialmente, e 5 ainda dependem de você** — e 4 dessas 5 são de estágios
+que esta rodada não tentou.
+
+| # | Conclusão do gabarito | Resultado |
+|---|---|---|
+| 1 | DPU Vol. 611 Pg. 526, efetiva 08/01/2012, 220,00 ac | ✅ sozinho |
+| 2 | Surveys A-669 + A-319 Blocos 5 e 6 | ✅ sozinho (os blocos citados à p.1 do TO) |
+| 3 | 4 tratos, donos e acres somando 220,00 | ✅ sozinho (Exhibit "C") |
+| 4 | Exhibit "A" = 67 leases com recording | ✅ sozinho (67/67 por visão; o OCR dava 13) |
+| 5 | Série 0220936 fora do perímetro, zero acres | ✅ sozinho, **com a prova documental do deed Yentes** |
+| 6 | Divergências DPU × XREF / Lease & Mineral Schedule | ✅ sozinho (6 ausentes do XREF, 4 do Schedule) |
+| 7 | 3 title opinions cobrindo os 4 unit tracts | ✅ sozinho |
+| 8 | Pastas que existem mas não têm o instrumento | ⚠️ parcial — 17 contra as 9 do gabarito, 4 em comum; a diferença é a limitação 1 abaixo |
+| 9 | 5 leases memo-only → MISSING LEASE | ❌ o mecanismo funciona ponta a ponta (provado em `0220027-012`), mas **os 5 memorandos não estão em `FILES/`** — vieram do cartório, à mão |
+| 10 | Probates de Ector com número de causa | ❌ S5 GAP-HUNT, fora do escopo desta rodada |
+| 11 | RRC W-1 / P-12 / plat | ❌ S5 GAP-HUNT, fora do escopo desta rodada |
+| 12 | Tract 1: 1/2 não arrendado, EOG WI 0,50 / NRI 0,40 | ❌ matemática de interesse, próximo PR |
+| 13 | Runsheet com 23 instrumentos pós-certificação | ❌ S6 RUN, fora do escopo desta rodada |
+
+Sobre o item 8: as 13 leases que só o sistema aponta são quase todas da série
+`0220750`, e as pastas delas realmente **não têm** o instrumento — têm carta de
+extensão, LAR, affidavit, recibo de aluguel e o title opinion. As leases foram
+buscadas à mão durante a rodada de agosto e entraram direto no pacote (as 67
+estão em `1. Landman Submitted\Leases\`), sem passar por `FILES/`. Ou seja: o
+brief está mandando fazer exatamente o trabalho que foi feito à mão — o que ele
+reconstruiu sozinho foi a lista de busca, não uma falha nova.
+
+### Limitações honestas desta rodada
+1. **Disposição é por documento, não por campo** (backlog #9). O gabarito distingue "a lease está aqui mas falta o royalty" (`0220953-008/-010/-011`) e "as duas cópias estão ilegíveis" (`0221055-002`); o sistema diz `instrument_of_record` e para aí.
+2. **Tiering declarado:** pastas com um arquivo que o classificador confirma como a lease receberam **uma** leitura; pastas sem candidato óbvio receberam **todas**. Isso custou o inventário completo de title opinions dentro das pastas já resolvidas.
+3. **Curativa (probates de Ector) e RRC não foram tentados** nesta rodada — são S5 GAP-HUNT, não S2 SCOPE.

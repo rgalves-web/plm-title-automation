@@ -85,6 +85,11 @@ class Perimeter:
     wells: list[str] = field(default_factory=list)            # APIs
     divergences: list[Divergence] = field(default_factory=list)
     authority: str = ""                                       # the DPU, with page
+    # A DPU names the SURVEY; only the controlling title opinion narrows it to
+    # BLOCKS. Josh B sits in A-319 Blocks 5 and 6 — an A-319 Block 12 document is
+    # somewhere else entirely, and the refinement has to carry the document that
+    # made it or nobody can check it later.
+    block_sources: dict[str, str] = field(default_factory=dict)
 
     # --- the cheap filter -------------------------------------------------
     def covers(self, text: str) -> bool:
@@ -106,7 +111,8 @@ class Perimeter:
     def to_dict(self) -> dict[str, Any]:
         return {
             "unit": self.unit, "authority": self.authority,
-            "surveys": [{"abstract": s.abstract, "blocks": sorted(s.blocks)}
+            "surveys": [{"abstract": s.abstract, "blocks": sorted(s.blocks),
+                         "blocks_source": self.block_sources.get(s.abstract, "")}
                         for s in self.surveys],
             "tracts": dict(self.tracts), "leases": dict(self.leases),
             "wells": list(self.wells),
@@ -121,6 +127,8 @@ class Perimeter:
                      for s in d.get("surveys", [])],
             tracts=dict(d.get("tracts", {})), leases=dict(d.get("leases", {})),
             wells=list(d.get("wells", [])),
+            block_sources={s["abstract"]: s.get("blocks_source", "")
+                           for s in d.get("surveys", []) if s.get("blocks_source")},
             divergences=[Divergence(**x) for x in d.get("divergences", [])])
 
 
