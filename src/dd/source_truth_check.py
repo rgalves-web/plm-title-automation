@@ -33,6 +33,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from difflib import SequenceMatcher
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
@@ -231,7 +232,7 @@ class SourceIndex:
         first = str(reference).split(" + ")[0].strip()
         if first in _NON_DOCUMENT_SOURCES:
             return None
-        stem = Path(first).stem
+        stem = _citation_stem(first)
         key = _norm_key(stem)
         if key in self._files:
             return self._files[key]
@@ -250,12 +251,42 @@ class SourceIndex:
             inner_key = _norm_key(Path(inner).stem)
             if inner_key in self._files:
                 return self._files[inner_key]
-        # Containment last: tolerant of copy suffixes ("… 6.9.26 (2).xlsx")
-        # and page-cite tails — unchanged from the original behavior.
-        for candidate_key, path in self._files.items():
-            if trimmed and (trimmed in candidate_key or candidate_key in trimmed):
-                return path
-        return None
+        # Containment last: tolerant of copy suffixes ("… 6.9.26 (2).xlsx") and
+        # page-cite tails. It must never pick arbitrarily: taking the first hit
+        # in traversal order made resolution depend on FOLDER LAYOUT — after the
+        # Bowen package was reorganised by tract, a citation reading
+        # "T-O SUPP Bowen A-227 141.5 ac" resolved to an A-682 opinion (four
+        # candidates contained the key; the wrong one came first), and
+        # non-distinctive MI values then "CONFIRMED" against the wrong document.
+        # Now: the winner must be unique and clearly best, and must not
+        # contradict the citation's distinctive tokens. Ambiguity resolves to
+        # None — correct-and-fewer beats plausible-and-wrong.
+        if not trimmed:
+            return None
+        # Candidate pool. When the citation names an abstract, THAT is the
+        # discriminator (OKF ontology §2: a survey is abstract + block, never a
+        # name) — pool = files sharing it. Otherwise fall back to containment,
+        # which still serves titles like "Lease & Mineral Schedule 6.9.26".
+        cited_abstracts = _abstracts(first)
+        if cited_abstracts:
+            candidates = [(k, p) for k, p in self._files.items()
+                          if _abstracts(p.stem) & cited_abstracts]
+        else:
+            candidates = [(k, p) for k, p in self._files.items()
+                          if trimmed in k or k in trimmed]
+        candidates = [(k, p) for k, p in candidates
+                      if not _contradicts_abstract(first, p.stem)]
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0][1]
+        scored = sorted(
+            ((SequenceMatcher(None, trimmed, k).ratio(), k, p) for k, p in candidates),
+            key=lambda t: (-t[0], t[1]))
+        best, runner_up = scored[0], scored[1]
+        if best[0] - runner_up[0] < _RESOLVE_MARGIN:
+            return None                      # too close to call — stay honest
+        return best[2]
 
     def text(self, path: Path) -> str:
         if path not in self._text:
@@ -287,6 +318,42 @@ def _default_ocr(path: Path) -> str:
 
 def _norm_key(text: str) -> str:
     return re.sub(r"[^A-Z0-9]+", "", str(text).upper())
+
+
+# How much better the best containment candidate must be than the runner-up
+# before it may be named as the source. Below this, the citation is not
+# distinctive enough to identify one file and resolution returns None.
+_RESOLVE_MARGIN = 0.08
+
+_DOC_EXT_RE = re.compile(r"\.(pdf|tiff?|txt|xlsx|xlsm|docx?|png|jpe?g)$", re.IGNORECASE)
+
+
+def _citation_stem(text: str) -> str:
+    """Drop a trailing file extension — and NOTHING else.
+
+    Never use Path().stem on citation prose: a citation carrying a date
+    ("… cert. 10/18/2008") is read as a path, the slashes become separators and
+    the whole citation collapses to "2008". That is what made a Bowen citation
+    match any file whose name contained the year."""
+    return _DOC_EXT_RE.sub("", str(text).strip())
+
+
+_ABSTRACT_RE = re.compile(r"\bA-?(\d{2,4})\b", re.IGNORECASE)
+
+
+def _abstracts(text: str) -> set[str]:
+    """Abstract numbers named in a citation or filename ("A-227" -> {"227"}).
+
+    The abstract is the most distinctive identity token a title document
+    carries; two documents differing in abstract are never the same document
+    (OKF ontology §2: identify a survey by abstract + block, never by name)."""
+    return {m.group(1) for m in _ABSTRACT_RE.finditer(str(text))}
+
+
+def _contradicts_abstract(citation: str, candidate_name: str) -> bool:
+    """True when both sides name abstracts and they do not overlap."""
+    cited, candidate = _abstracts(citation), _abstracts(candidate_name)
+    return bool(cited and candidate and not (cited & candidate))
 
 
 def _workbook_text(path: Path) -> str:

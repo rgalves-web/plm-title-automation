@@ -90,6 +90,45 @@ def test_resolver_maps_a_workbook_title_to_the_xlsx_with_copy_suffix(tmp_path):
     assert "GILLASPIA" in text and "0220618-001" in text
 
 
+def test_a_citation_never_resolves_across_a_different_abstract(tmp_path):
+    # The real Bowen failure: the citation "T-O SUPP Bowen A-227 141.5 ac
+    # (T0140210), cert. 10/18/2008" resolved to an A-682 opinion. Two causes,
+    # both fixed: Path().stem read the date's slashes as path separators and
+    # collapsed the citation to "2008" (so any file naming that year matched),
+    # and containment then took whichever candidate traversal happened to hit
+    # first — making resolution depend on folder layout.
+    from src.dd.source_truth_check import SourceIndex
+    for name in ("T-O FIRST SUPP BOWEN UNIT A-682 146.5AC (issued 07-11-2008).pdf",
+                 "T-O ORIG BOWEN UNIT A-227 141.5AC (cert 02-04-2008).pdf",
+                 "T-O SUPP BOWEN UNIT A-227 141.5AC (cert 10-18-2008).pdf",
+                 "T-O ORIG W. EDWARDS A-227 125AC (12-31-2008).pdf"):
+        (tmp_path / name).write_bytes(b"x")
+    idx = SourceIndex([tmp_path], ocr_fn=lambda p: "")
+    got = idx.resolve("T-O SUPP Bowen A-227 141.5 ac (T0140210), cert. 10/18/2008")
+    assert got is not None and "A-682" not in got.name.upper()
+    assert got.name == "T-O SUPP BOWEN UNIT A-227 141.5AC (cert 10-18-2008).pdf"
+    # And the A-682 citation still finds its own document.
+    a682 = idx.resolve("T-O FIRST SUPP Bowen Unit A-682 146.5 ac (issued 07-11-2008)")
+    assert a682 is not None and "A-682" in a682.name.upper()
+
+
+def test_an_ambiguous_citation_resolves_to_nothing_rather_than_guessing(tmp_path):
+    # Correct-and-fewer: two equally-plausible candidates name no document.
+    from src.dd.source_truth_check import SourceIndex
+    for name in ("Assignment Package Copy A.pdf", "Assignment Package Copy B.pdf"):
+        (tmp_path / name).write_bytes(b"x")
+    idx = SourceIndex([tmp_path], ocr_fn=lambda p: "")
+    assert idx.resolve("Assignment Package Copy") is None
+
+
+def test_a_citation_carrying_a_date_is_not_reduced_to_its_year(tmp_path):
+    from src.dd.source_truth_check import _citation_stem, _norm_key
+    cite = "T-O SUPP Bowen A-227 141.5 ac (T0140210), cert. 10/18/2008"
+    assert _norm_key(_citation_stem(cite)) != "2008"
+    assert "BOWEN" in _citation_stem(cite).upper()
+    assert _citation_stem("UNIT DEC - REC.TIF") == "UNIT DEC - REC"   # extensão sai
+
+
 def test_prose_orri_makes_the_identity_unverifiable_not_a_mismatch():
     # Bowen V8: ORRI column carries "Burdens reflected in FIRST SUPP T-O NRI
     # 0.51875 (see opinion)" — prose, not a number. Treating it as zero would
