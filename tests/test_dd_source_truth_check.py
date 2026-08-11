@@ -112,6 +112,32 @@ def test_a_citation_never_resolves_across_a_different_abstract(tmp_path):
     assert a682 is not None and "A-682" in a682.name.upper()
 
 
+def test_a_citation_that_leads_with_the_filename_then_adds_prose(tmp_path):
+    # Real Bowen citations carry the document name and then commentary. The
+    # longest indexed name the citation STARTS WITH is the document it names.
+    from src.dd.source_truth_check import SourceIndex
+    (tmp_path / "T-O ORIG BOWEN UNIT A-227, 141.5 AC.PDF").write_bytes(b"x")
+    (tmp_path / "Lease & Mineral Schedule 6.9.26 (2).xlsx").write_bytes(b"x")
+    idx = SourceIndex([tmp_path], ocr_fn=lambda p: "")
+    assert idx.resolve("T-O ORIG BOWEN UNIT A-227, 141.5 AC.PDF (in all 0220649 lease "
+                       "folders)").name.startswith("T-O ORIG BOWEN UNIT A-227")
+    assert idx.resolve("Lease & Mineral Schedule 6.9.26 TRUE GROSS").suffix == ".xlsx"
+
+
+def test_byte_copies_of_one_document_are_one_identity(tmp_path):
+    # Four copies of the same opinion are not four rival candidates: the
+    # citation's identity is unambiguous, only the copy is. Resolve
+    # deterministically instead of refusing.
+    from src.dd.source_truth_check import SourceIndex
+    for suffix in ("", " (1)", " (2)", " (3)"):
+        (tmp_path / f"T-O ORIG BOWEN A-1449 119.2 AC{suffix}.PDF").write_bytes(b"x")
+    idx = SourceIndex([tmp_path], ocr_fn=lambda p: "")
+    got = idx.resolve("T-O ORIG BOWEN A-1449 119.2 AC.PDF p.1 (read visually)")
+    assert got is not None and "A-1449" in got.name
+    # Deterministic across runs — never traversal-order dependent.
+    assert idx.resolve("T-O ORIG BOWEN A-1449 119.2 AC.PDF p.1 (read visually)") == got
+
+
 def test_an_ambiguous_citation_resolves_to_nothing_rather_than_guessing(tmp_path):
     # Correct-and-fewer: two equally-plausible candidates name no document.
     from src.dd.source_truth_check import SourceIndex

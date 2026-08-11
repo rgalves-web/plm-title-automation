@@ -263,6 +263,21 @@ class SourceIndex:
         # None — correct-and-fewer beats plausible-and-wrong.
         if not trimmed:
             return None
+        # A citation normally LEADS with the document's name and then adds prose
+        # ("… .PDF p.1 (read visually)", "… TRUE GROSS", "… (in all 0220649 lease
+        # folders)"). So: the longest indexed name the citation starts with wins.
+        # Copy markers are normalised away first — four byte-copies of one
+        # opinion are one document, and which copy answers is not a question the
+        # citation was ever asking. Deterministic: ties inside a single identity
+        # resolve by sorted name, never by traversal order.
+        prefix_hits: dict[str, list[Path]] = {}
+        for path in self._files.values():
+            fkey = _norm_key(_copy_stripped(path.stem))
+            if fkey and trimmed.startswith(fkey) and not _contradicts_abstract(first, path.stem):
+                prefix_hits.setdefault(fkey, []).append(path)
+        if prefix_hits:
+            longest = max(prefix_hits, key=len)
+            return sorted(prefix_hits[longest], key=lambda p: p.name)[0]
         # Candidate pool. When the citation names an abstract, THAT is the
         # discriminator (OKF ontology §2: a survey is abstract + block, never a
         # name) — pool = files sharing it. Otherwise fall back to containment,
@@ -336,6 +351,18 @@ def _citation_stem(text: str) -> str:
     the whole citation collapses to "2008". That is what made a Bowen citation
     match any file whose name contained the year."""
     return _DOC_EXT_RE.sub("", str(text).strip())
+
+
+_COPY_SUFFIX_RE = re.compile(r"\s*\(\d+\)\s*$")
+
+
+def _copy_stripped(stem: str) -> str:
+    """A filename stem without its "(2)" copy marker.
+
+    Four byte-copies of one opinion are one DOCUMENT. Treating them as four
+    rival candidates made a citation ambiguous when its identity was never in
+    doubt — only which copy answers it."""
+    return _COPY_SUFFIX_RE.sub("", str(stem)).strip()
 
 
 _ABSTRACT_RE = re.compile(r"\bA-?(\d{2,4})\b", re.IGNORECASE)
