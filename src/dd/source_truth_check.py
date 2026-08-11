@@ -205,6 +205,10 @@ class SourceIndex:
         self._files: dict[str, Path] = {}
         self._text: dict[Path, str] = {}
         self._by_volpage: dict[tuple[str, str], Path] = {}
+        self._hashes: dict[Path, str] = {}
+        # Why a citation failed to resolve, when the reason is worth naming
+        # (e.g. same-named files whose bytes differ). Read by callers/logs.
+        self.unresolved_reasons: dict[str, str] = {}
         self._ocr_fn = ocr_fn
         for root in self.search_roots:
             for path in root.rglob("*"):
@@ -277,7 +281,21 @@ class SourceIndex:
                 prefix_hits.setdefault(fkey, []).append(path)
         if prefix_hits:
             longest = max(prefix_hits, key=len)
-            return sorted(prefix_hits[longest], key=lambda p: p.name)[0]
+            group = sorted(prefix_hits[longest], key=lambda p: p.name)
+            if len(group) == 1:
+                return group[0]
+            # "X (2).pdf is the same document as X.pdf" is only true if the
+            # BYTES agree. Same name + different content is not a copy — it is
+            # two documents wearing one name, and naming either would be a
+            # guess. Refuse, and say why.
+            digests = {self._digest(p) for p in group}
+            if len(digests) == 1:
+                return group[0]
+            self.unresolved_reasons[str(reference)] = (
+                f"{len(group)} files share the name {group[0].stem!r} but their bytes "
+                f"differ ({len(digests)} distinct hashes) — not copies of one document")
+            logger.warning("source resolve: %s", self.unresolved_reasons[str(reference)])
+            return None
         # Candidate pool. When the citation names an abstract, THAT is the
         # discriminator (OKF ontology §2: a survey is abstract + block, never a
         # name) — pool = files sharing it. Otherwise fall back to containment,
@@ -302,6 +320,21 @@ class SourceIndex:
         if best[0] - runner_up[0] < _RESOLVE_MARGIN:
             return None                      # too close to call — stay honest
         return best[2]
+
+    def _digest(self, path: Path) -> str:
+        """sha256 of a file, cached. Used to decide whether same-named files
+        really are copies of one document."""
+        if path not in self._hashes:
+            import hashlib
+            h = hashlib.sha256()
+            try:
+                with open(path, "rb") as fh:
+                    for chunk in iter(lambda: fh.read(1 << 20), b""):
+                        h.update(chunk)
+                self._hashes[path] = h.hexdigest()
+            except OSError:
+                self._hashes[path] = f"unreadable:{path}"
+        return self._hashes[path]
 
     def text(self, path: Path) -> str:
         if path not in self._text:

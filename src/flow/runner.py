@@ -105,8 +105,15 @@ def revalidate_from_state(
         run_source_truth_check=run_source_truth,
         declared_sheet_exclusions=declared_sheets or None,
         as_of=as_of,
+        write_sidecar=False,     # written below, AFTER the human rulings apply
     )
     apply_sanctions(report, state.sanctions)
+    # Now the report reflects the verdict (declared exclusions + sanctions), so
+    # the sidecar can be truthful. A replay never writes: re-validating a
+    # shipped unit must not mutate the delivered folder.
+    if as_of is None:
+        from src.dd.ddr_validator import write_validation_sidecar
+        write_validation_sidecar(report, Path(state.ddr_path))
 
     state.gate_results = _summarize(report, allowlist)
     if persist:

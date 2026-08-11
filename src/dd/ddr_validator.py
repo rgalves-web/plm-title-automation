@@ -1116,6 +1116,7 @@ def run_final_validation(
     run_source_truth_check: bool = True,
     declared_sheet_exclusions: dict[str, str] | None = None,
     as_of=None,
+    write_sidecar: bool | None = None,
 ) -> "ValidationReport":
     # as_of is REPLAY-ONLY: it pins the date the submission-date rule judges
     # against, so re-validating an already-shipped deliverable months later does
@@ -1156,5 +1157,15 @@ def run_final_validation(
         from src.dd.source_truth_check import run_source_truth
         report.truth = run_source_truth(workbook, list(source_roots),
                                         dpu_by_lease=dpu_by_lease)
-    write_validation_sidecar(report, output_path)
+    # The sidecar sits NEXT TO the deliverable, so writing it is a side effect on
+    # the delivered folder. Two rules:
+    #  - a REPLAY (as_of pinned) never writes: re-validating a shipped unit must
+    #    not mutate what was shipped;
+    #  - a caller that applies human rulings AFTER this call (the flow runner
+    #    applies sanctions) passes write_sidecar=False and writes it itself,
+    #    otherwise the file on disk would report FAILs the verdict has already
+    #    resolved.
+    should_write = (as_of is None) if write_sidecar is None else write_sidecar
+    if should_write:
+        write_validation_sidecar(report, output_path)
     return report

@@ -124,6 +124,23 @@ def test_a_citation_that_leads_with_the_filename_then_adds_prose(tmp_path):
     assert idx.resolve("Lease & Mineral Schedule 6.9.26 TRUE GROSS").suffix == ".xlsx"
 
 
+def test_same_name_different_bytes_is_not_a_copy(tmp_path):
+    # "X (2).pdf is the same document as X.pdf" holds only if the BYTES agree.
+    # Same name + different content is two documents wearing one name; naming
+    # either would be a guess, so resolution refuses AND says why.
+    from src.dd.source_truth_check import SourceIndex
+    (tmp_path / "T-O ORIG X A-100.PDF").write_bytes(b"same")
+    (tmp_path / "T-O ORIG X A-100 (1).PDF").write_bytes(b"same")
+    idx = SourceIndex([tmp_path], ocr_fn=lambda p: "")
+    assert idx.resolve("T-O ORIG X A-100.PDF p.1") is not None      # cópias reais
+
+    (tmp_path / "T-O ORIG X A-100 (2).PDF").write_bytes(b"DIFFERENT CONTENT")
+    idx2 = SourceIndex([tmp_path], ocr_fn=lambda p: "")
+    assert idx2.resolve("T-O ORIG X A-100.PDF p.1") is None
+    reason = " ".join(idx2.unresolved_reasons.values())
+    assert "bytes differ" in reason and "not copies" in reason
+
+
 def test_byte_copies_of_one_document_are_one_identity(tmp_path):
     # Four copies of the same opinion are not four rival candidates: the
     # citation's identity is unambiguous, only the copy is. Resolve
