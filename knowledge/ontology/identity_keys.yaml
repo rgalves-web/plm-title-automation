@@ -1,0 +1,63 @@
+# L0 — Identity keys: how each entity is identified, and how it must NEVER be.
+#
+# Nearly every expensive error in this project came from ambiguous identity: a
+# unit name read as another whose name it prefixes; a surname matched
+# approximately; one block of a survey read as another block of the same
+# abstract; a citation resolving to the wrong opinion because the match was on
+# text rather than on key.
+#
+# A reference that cannot fill every required field is `candidate`, never
+# `confirmed`, and it must name which fields are missing (OKF_SPEC §2).
+version: 1
+
+keys:
+  unit:
+    required: [dpu_book_page, effective_date]
+    never_identify_by: [name]
+    note: >
+      A unit whose name merely prefixes another's is not that other unit. The
+      recorded DPU book.page plus its effective date is what makes a unit that
+      unit.
+
+  unit_tract:
+    required: [unit, tract_number]
+    never_identify_by: [order_of_appearance_in_opinion]
+
+  survey:
+    required: [abstract, block]
+    never_identify_by: [abstract_alone, survey_name]
+    note: A-319 Block 5 is not A-319 Block 12.
+
+  lease:
+    required: [eog_lease_number, recording_book_page]
+    never_identify_by: [lessor_name]
+    note: >
+      Both fields or it is a candidate. One alone (number without recording, or
+      recording without number) never promotes to confirmed.
+
+  title_opinion:
+    required: [abstract, gross_acres, cert_date]
+    never_identify_by: [filename]
+    note: >
+      This is the key the 2026-08-11 resolver finding calls for: a citation
+      already carries abstract + acreage + opinion number + cert date, so it
+      should be parsed into this key and resolved by key — not matched as text.
+
+  instrument:
+    required: [recording_book_page]
+    alternates: [instrument_number]
+    never_identify_by: [document_title]
+
+  well:
+    required: [api]
+    never_identify_by: [well_name]
+
+  party:
+    required: [name_as_written_in_instrument]
+    never_identify_by: [approximate_surname, fuzzy_match_score]
+    note: >
+      Fuzzy similarity may propose a candidate; it may never confirm one.
+
+# States a reference may hold. Anything short of a full key stays `candidate`
+# and carries `missing_fields`.
+reference_states: [candidate, confirmed, rejected]

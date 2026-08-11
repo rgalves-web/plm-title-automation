@@ -1,0 +1,110 @@
+# L2 — The closed vocabulary of reasons.
+#
+# Every recorded reason — a blank cell, a triage SKIP, an unplaced file, a
+# waiver — is chosen from this list. Free prose in a reason field is a writing
+# error (invariant 11). This is what makes a checklist auditable and a SKIP
+# countable: you can total them, and every total means the same thing.
+version: 1
+
+reasons:
+  # --- why a document is out of scope -------------------------------------
+  fora_do_perimetro:
+    label: Outside the unit perimeter
+    applies_to: [skip, unplaced, blank]
+    definition: >
+      The document's abstract, tract or lease is not in the unit perimeter
+      derived from the DPU Exhibit "A".
+
+  trade_de_terceiro:
+    label: Third-party trade
+    applies_to: [skip, unplaced]
+    definition: An instrument between parties that never touches the Seller's interest.
+
+  pre_cert_date:
+    label: Predates the controlling certification date
+    applies_to: [skip]
+    definition: >
+      Of record before the controlling opinion's certification date, so it is
+      inside what the opinion already examined.
+
+  nao_adverso_a_eog:
+    label: Not adverse to the Seller
+    applies_to: [skip, blank]
+    definition: Reviewed and found not to affect the Seller's title.
+
+  # --- why a value could not be established --------------------------------
+  doc_nao_localizado:
+    label: Document not located
+    applies_to: [blank, unplaced, pending]
+    definition: >
+      The document is named and searched for, and is not in the file. Carries
+      the hunt: where we looked and with what search terms.
+    requires: [hunt_log]
+
+  pendente_de_terceiro:
+    label: Pending a third party
+    applies_to: [blank, pending]
+    definition: >
+      Awaiting the seller, the client, an examiner or a courthouse. Carries who
+      was asked and when.
+    requires: [asked_of, asked_on]
+
+  fato_inexistente_no_registro:
+    label: Absent from the record
+    applies_to: [blank]
+    definition: >
+      The record simply does not state it. Not a gap to chase — a fact about
+      the record.
+
+  # --- why a value is not computable ---------------------------------------
+  nao_computavel:
+    label: Not computable from the row's inputs
+    applies_to: [blank, pending]
+    definition: >
+      An identity cannot be evaluated because an input is narrative or absent
+      (e.g. a burden stated as prose instead of a number).
+
+  # --- why a document is not identifiable ----------------------------------
+  identidade_ambigua:
+    label: Ambiguous identity
+    applies_to: [unplaced, pending]
+    definition: >
+      More than one candidate fits and no key distinguishes them; or a required
+      identity field is missing. Never resolved by guessing.
+    requires: [candidates]
+
+  confirmar_no_cartorio:
+    label: Confirm at the courthouse
+    applies_to: [pending]
+    definition: >
+      Two sources of record disagree (e.g. conflicting volume/page) and only the
+      county record settles it.
+
+  # --- why a document is real but not usable here ---------------------------
+  nao_de_registro:
+    label: Not of record (internal paperwork)
+    applies_to: [skip, unplaced]
+    definition: >
+      Internal material — memo, correspondence, CAF, legal approval, draft,
+      transmittal. Kept visible in the ledger; never enters the Runsheet.
+
+  duplicata:
+    label: Duplicate of a document already placed
+    applies_to: [skip, unplaced]
+    definition: Byte-identical to a document already classified.
+    requires: [duplicate_of]
+
+  fora_do_tipo:
+    label: Not a document
+    applies_to: [skip]
+    definition: A non-document file (thumbnail, desktop.ini, empty container).
+
+# Which reasons a blank DDR cell may carry — the blueprint's three blank-reasons
+# are a subset of this vocabulary, not a separate list (OKF plan §2).
+blank_reasons:
+  - doc_nao_localizado
+  - pendente_de_terceiro
+  - fato_inexistente_no_registro
+  - nao_computavel
+  - fora_do_perimetro
+  - nao_adverso_a_eog

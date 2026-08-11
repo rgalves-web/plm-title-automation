@@ -48,6 +48,11 @@ class EvidenceEntry:
     page: str = ""
     cited_by: list[str] = field(default_factory=list)   # DDR cells, e.g. "Ownership Report!S14"
     reason: str = ""                 # why unplaced, or why blank/waived
+    # OKF L0: the identity fields established for this entry, and what is still
+    # missing. A reference that cannot fill its whole key is a CANDIDATE with
+    # the gap named — it never promotes to confirmed on a partial key.
+    identity: dict[str, Any] = field(default_factory=dict)
+    missing_identity_fields: list[str] = field(default_factory=list)
 
     def is_trusted(self) -> bool:
         return self.status in _TRUSTED
@@ -58,6 +63,8 @@ class EvidenceEntry:
             "status": self.status, "confidence": self.confidence,
             "evidence_quote": self.evidence_quote, "page": self.page,
             "cited_by": list(self.cited_by), "reason": self.reason,
+            "identity": dict(self.identity),
+            "missing_identity_fields": list(self.missing_identity_fields),
         }
 
     @classmethod
@@ -67,7 +74,8 @@ class EvidenceEntry:
             identifier=d.get("identifier"), status=d.get("status", STATUS_DROPPED),
             confidence=d.get("confidence"), evidence_quote=d.get("evidence_quote", ""),
             page=d.get("page", ""), cited_by=list(d.get("cited_by", [])),
-            reason=d.get("reason", ""),
+            reason=d.get("reason", ""), identity=dict(d.get("identity", {})),
+            missing_identity_fields=list(d.get("missing_identity_fields", [])),
         )
 
 
@@ -84,6 +92,43 @@ class EvidenceLedger:
                status: str = STATUS_CONFIRMED, **kw: Any) -> EvidenceEntry:
         return self.add(EvidenceEntry(file=file, kind=kind, identifier=identifier,
                                       status=status, **kw))
+
+    # --- OKF L0/L2 conformance -------------------------------------------
+    ENTITY_BY_KIND = {
+        KIND_TITLE_OPINION: "title_opinion", KIND_CONTRACT: "instrument",
+        KIND_LEASE: "lease", KIND_DPU: "instrument", KIND_WELL: "well",
+        KIND_RUNSHEET_INSTRUMENT: "instrument",
+    }
+
+    def record_with_identity(self, file: str, kind: str, entity: str,
+                             identity: dict[str, Any], knowledge: Any,
+                             **kw: Any) -> EvidenceEntry:
+        """Record an entry whose status follows its IDENTITY KEY.
+
+        A complete key may be confirmed; an incomplete one is a candidate that
+        names what it lacks. Nothing is promoted on a partial key (OKF L0)."""
+        missing = knowledge.missing_identity_fields(entity, identity)
+        status = STATUS_CLASSIFIED if missing else kw.pop("status", STATUS_CONFIRMED)
+        kw.pop("status", None)
+        return self.add(EvidenceEntry(
+            file=file, kind=kind, identifier=kw.pop("identifier", None),
+            status=status, identity=dict(identity),
+            missing_identity_fields=missing, **kw))
+
+    def conformance_problems(self, knowledge: Any) -> list[str]:
+        """Every entry whose reason is outside the closed vocabulary, or that is
+        confirmed on an incomplete identity key. Empty means the ledger obeys
+        the knowledge base."""
+        problems: list[str] = []
+        for e in self.entries:
+            if e.reason and not knowledge.is_valid_reason(e.reason):
+                problems.append(
+                    f"{e.file}: reason {e.reason!r} is not in the closed vocabulary")
+            if e.is_trusted() and e.missing_identity_fields:
+                problems.append(
+                    f"{e.file}: confirmed while missing identity fields "
+                    f"{e.missing_identity_fields}")
+        return problems
 
     # --- queries ---
     def by_kind(self, kind: str) -> list[EvidenceEntry]:

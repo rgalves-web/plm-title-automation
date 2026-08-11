@@ -1,0 +1,71 @@
+# L0 — Ontology: what things exist. Reusable across every unit and client.
+# Never contains a unit fact (invariant 13, enforced by the knowledge linter).
+# OKF_SPEC §2. Changes almost never.
+version: 1
+
+entities:
+  unit:
+    label: Unit
+    description: A pooled unit created by a recorded Declaration of Pooled Unit.
+    relations: [contains_tract, groups_lease]
+
+  unit_tract:
+    label: Unit Tract
+    description: A numbered tract inside a unit, as the DPU defines it.
+    relations: [belongs_to_unit, covered_by_title_opinion]
+
+  survey:
+    label: Survey / Abstract
+    description: The survey grant a legal description sits in, identified by
+      abstract number and, where the survey is blocked, its block.
+    relations: [contains_tract]
+
+  lease:
+    label: Lease
+    description: An oil, gas and mineral lease, as recorded.
+    relations: [grouped_in_unit, contributes_acres_to_unit, of_record_by_instrument]
+
+  title_opinion:
+    label: Title Opinion
+    description: An examining attorney's opinion over a legal description at a
+      certification date. Originals and supplements form a chain; the newest
+      certification date controls for the description it covers.
+    relations: [covers_tract, supersedes_title_opinion]
+
+  instrument:
+    label: Recorded Instrument
+    description: Anything of record — assignment, deed, release, lien,
+      memorandum, ratification, probate.
+    relations: [affects_lease, affects_tract, is_of_record_of_lease]
+
+  well:
+    label: Well
+    description: A wellbore, identified by API number.
+    relations: [produces_from_unit]
+
+  party:
+    label: Party
+    description: A person or entity as named in an instrument.
+    relations: [grants, receives]
+
+# Every relation an assertion may use. A relation always carries proof
+# (file + page); a relation without proof is a named pending item, never an
+# edge in the graph (OKF_SPEC §2, invariant 5).
+relations:
+  contains_tract:            {from: unit, to: unit_tract, proof: dpu_exhibit_a}
+  belongs_to_unit:           {from: unit_tract, to: unit, proof: dpu_exhibit_a}
+  groups_lease:              {from: unit, to: lease, proof: dpu_exhibit_a}
+  grouped_in_unit:           {from: lease, to: unit, proof: dpu_exhibit_a}
+  contributes_acres_to_unit: {from: lease, to: unit, proof: dpu_exhibit_a}
+  covers_tract:              {from: title_opinion, to: unit_tract, proof: legal_description}
+  covered_by_title_opinion:  {from: unit_tract, to: title_opinion, proof: legal_description}
+  supersedes_title_opinion:  {from: title_opinion, to: title_opinion, proof: cert_date}
+  affects_lease:             {from: instrument, to: lease, proof: legal_description}
+  affects_tract:             {from: instrument, to: unit_tract, proof: legal_description}
+  # A recorded memorandum is the of-record instrument for a lease that has no
+  # recorded lease of its own. OKF plan F2/F4.
+  is_of_record_of_lease:     {from: instrument, to: lease, proof: recording_reference}
+  of_record_by_instrument:   {from: lease, to: instrument, proof: recording_reference}
+  produces_from_unit:        {from: well, to: unit, proof: rrc_or_dpu}
+  grants:                    {from: party, to: instrument, proof: instrument_body}
+  receives:                  {from: party, to: instrument, proof: instrument_body}
