@@ -1069,8 +1069,11 @@ def write_validation_sidecar(report: ValidationReport, ddr_path) -> "Path":
     """
     from pathlib import Path
 
+    from src.flow.deliverable_io import assert_not_frozen
+
     ddr_path = Path(ddr_path)
     sidecar = ddr_path.with_name(f"{ddr_path.stem}_validation.txt")
+    assert_not_frozen(sidecar)     # never inside a delivered package
     sidecar.write_text(console_summary(report), encoding="utf-8")
     return sidecar
 

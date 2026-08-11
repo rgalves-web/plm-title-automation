@@ -527,7 +527,9 @@ def stage_submission(
     manifest_dir chooses where SUBMISSION_MANIFEST.txt is written; None writes it
     inside the unit root, a path writes it there (e.g. the SUBMISSION folder that
     holds the whole tree)."""
-    output_root = Path(output_root)
+    from src.flow.deliverable_io import assert_not_frozen
+
+    output_root = assert_not_frozen(output_root)   # never re-package into a shipped tree
     root = output_root / plan.unit_title / LANDMAN_SUBMITTED
     for sub in SUBFOLDERS:
         (root / sub).mkdir(parents=True, exist_ok=True)

@@ -81,6 +81,27 @@ Duas causas de raiz, ambas corrigidas (`1a4d749`, `48655b4`):
 
 Regras que ficaram: o **abstract é o discriminador** quando a citação o nomeia (ontologia OKF §2); a citação **lidera com o nome do documento** e o nome indexado mais longo com que ela começa vence; **cópias byte-a-byte são uma identidade** (`(2)` normalizado), com desempate por nome ordenado — nunca por ordem de varredura; ambiguidade real resolve para `None`. Maxwell serviu de controle: **inalterada**, provando ausência de efeito colateral.
 
+### Artefato entregue tocado por replay — registro e cerca (11/08)
+Durante a reconciliação, os replays de regressão **regravaram
+`DDR - Bowen A Unit_validation.txt` dentro do pacote entregue**
+(`BOWEN A UNIT\SUBMISSION PLM\…\PLM Report\`, mtime 11/08 09:32). Dois defeitos
+se combinavam: o sidecar era escrito *antes* de a camada de flow aplicar as
+sanções — por isso o arquivo dizia `NOT READY — 2 FAIL` enquanto o veredito
+registrado era `READY / 0 FAIL` — e o replay escrevia dentro da pasta enviada.
+O cabeçalho `REPLAY — as_of=2026-07-28`, criado horas antes, foi o que tornou o
+problema visível.
+
+**Decisão do Renato (11/08): não regenerar.** O arquivo **fica como está**; o
+DDR nunca foi tocado (428.339 bytes, round-trip íntegro). O `SOURCE_TRUTH_SPLIT`
+não está no pacote — ficou na árvore antiga removida em 31/07.
+
+**Cerca instalada (invariante 16):** `<UNIT>\SUBMISSION PLM\` é **read-only**.
+`assert_not_frozen()` guarda todo caminho de escrita do repo (save de
+deliverable, sidecar de validação, staging do packager) e
+`tests/test_flow_frozen_packages.py` falha se um caminho novo aparecer sem a
+guarda. Bowen A e Maxwell A seguem apenas como **fixtures de regressão em modo
+leitura**. Um replay (`as_of` pinado) tampouco escreve sidecar em lugar nenhum.
+
 ### Branches arquivadas — o que cada tag preserva
 Tag guarda commit, não conhecimento. Duas estavam integralmente mergeadas; duas tinham trabalho próprio, resumido aqui:
 

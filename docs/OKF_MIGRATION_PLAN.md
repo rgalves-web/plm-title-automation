@@ -106,10 +106,41 @@ Princípio da v1.1: **construir o mínimo que muda o próximo ship, entregar Jos
 **Mudanças:** `checklist_builder` instancia dos categories; `ddr_writer` resolve destino via `category_to_ddr` × template-contrato; `intake_router` para de rotear por convenção própria.
 **Aceitação:** loader rejeita categoria sem `feeds`; as ~10 categorias cobrem 100% do corpus Bowen + Maxwell + Josh B; toda célula escrita rastreável a uma categoria.
 
+**+ Aceitação incorporada (achado Bowen 11/08 — memorando como instrumento of-record):**
+Na Bowen, 6 células de Lease Review (F15/F16/F17/F26, F28/F29/F30) ficaram
+`UNVERIFIABLE` com o motivo *"no recorded document on disk for lease
+0220649-007 (memorandum only)"* — **embora o memorando gravado esteja em disco e
+resolva** (`356.92.pdf`, `371.302.pdf`). O checker procura o documento da lease
+**pelo número da lease** e não sabe que o memorando gravado responde por ela.
+Isso **não se corrige na Bowen** (entregue, congelada): é **regra L2 de
+identidade/precedência**, expressa como dado —
+*"o memorando de lease gravado é o instrumento of-record da lease quando não há
+lease gravada; a chave é lease nº + Vol/Pg do memorando"*. A categoria
+`lease_memorandum` já existe na taxonomia (OKF §3); o que falta é a relação
+`lease_memorandum —é_of_record_de→ lease` no grafo (F4).
+**Como se mede:** dado um corpus com lease sem instrumento gravado + memorando
+gravado, o termo da lease resolve contra o memorando, com citação de página, em
+vez de virar pendência.
+
 ### Fase 3 — Perímetro + triagem com peek (o maior ganho de custo)
 **Entrega:** `src/knowledge/perimeter.py` (o S2 mecânico) + `src/knowledge/triage.py` com D4.
 **Mudanças:** IA lê o Exhibit "A" da DPU com prova por página, cruza XREF + Schedule + Well List → `perimeter.yaml` + divergências como achados (o `manifest_builder` vira insumo, deixa de ser autoridade — fecha o gap #1). Relevância se auto-instancia do perímetro. Triagem: inventário completo (hash) → candidato READ/SKIP → **peek de 1ª página confirma todo SKIP** → OCR profundo só nos READ.
 **Aceitação:** Josh B: perímetro emite as 4 leases do Exhibit "A" ausentes do XREF como divergência e o conflito Schmidt 427.385×685 como `confirmar_no_cartorio`; nenhum SKIP sem peek ou metadado forte (teste conta); corte de leitura logado (N inventariados / N peeks / N OCR profundo / N SKIP por motivo — sem teto silencioso); 100% dos arquivos com disposição.
+
+**+ Aceitação incorporada (achado Bowen 11/08 — divergência de perímetro):**
+Na Bowen, 8 células de Ownership (K/L das linhas 21/22/23/32/34/35/36) ficaram
+`UNVERIFIABLE` com o motivo *"lease 0220649-007 not named in the DPU Exhibit A"*.
+**Isso não é bug — é exatamente o output que o S2 SCOPE deve emitir sozinho:**
+uma lease que o DDR trata como da unidade mas que o Exhibit "A" da DPU não
+nomeia é **divergência de perímetro**, não célula não-verificável. Hoje ela
+aparece como ruído no fundo de uma lista de 498 pendências; deveria aparecer
+como **achado nomeado no topo do perímetro**, com a pergunta que o resolve
+("confirmar com Collin/Trevor" ou "confirmar no cartório").
+**Como se mede:** rodando o perímetro sobre um corpus onde uma lease citada não
+consta do Exhibit "A", o sistema emite a divergência **antes** de qualquer OCR
+profundo, com origem (XREF/Schedule/DDR) × ausência (Exhibit A) explicitadas — e
+as células dependentes herdam esse motivo do vocabulário fechado
+(`fora_do_perimetro` / `confirmar_no_cartorio`), não um texto genérico.
 
 ### Fase 4-lite — Catálogo + classifier + veredito por risco
 **Entrega:** ledger estendido (D2) + projeções + classifier content-first + fila de veredito **por risco** (D5) no Workbench.

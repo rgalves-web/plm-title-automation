@@ -23,6 +23,35 @@ class RoundTripError(AssertionError):
     """The file on disk does not show what the save was supposed to write."""
 
 
+class FrozenArtifactError(PermissionError):
+    """A write was attempted inside a delivered, frozen package."""
+
+
+# Folders that hold SHIPPED work. Bowen A and Maxwell A live on only as
+# regression fixtures; the packages under "<UNIT>/SUBMISSION PLM/" are the
+# artefacts the client received. Nothing this repo runs may write a byte inside
+# them — not a regenerated sidecar, not a re-packaged tree, not a "harmless"
+# refresh. Reading is always fine.
+FROZEN_MARKERS: tuple[str, ...] = ("SUBMISSION PLM",)
+
+
+def assert_not_frozen(path: str | Path) -> Path:
+    """Raise FrozenArtifactError if `path` lies inside a delivered package.
+
+    Called by every write path this repo owns (deliverable saves, validation
+    sidecars, submission staging). A replay reads shipped work; it never
+    touches it."""
+    p = Path(path)
+    parts = {part.upper() for part in p.parts}
+    for marker in FROZEN_MARKERS:
+        if marker.upper() in parts:
+            raise FrozenArtifactError(
+                f"refusing to write inside a delivered package: {p}\n"
+                f"'{marker}' folders are frozen — shipped work is read-only "
+                f"(CLAUDE.md invariant 16). Write elsewhere, or read instead.")
+    return p
+
+
 def roundtrip_verify(
     path: str | Path,
     *,
@@ -86,6 +115,6 @@ def save_and_verify(workbook: Any, path: str | Path, **expectations: Any) -> Non
     """Save the workbook to ``path`` and immediately prove the DISK carries the
     expected state (see roundtrip_verify). The verification load is a brand-new
     openpyxl object — nothing is trusted from the one just saved."""
-    path = Path(path)
+    path = assert_not_frozen(path)
     workbook.save(path)
     roundtrip_verify(path, **expectations)

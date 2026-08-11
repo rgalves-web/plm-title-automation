@@ -32,6 +32,8 @@ The authoritative description of current state is **`docs/WORKBENCH_STATUS.md`**
 13. **`knowledge/` never contains a unit fact** in `global`/`project`/`ontology`/`taxonomy`/`rules` (enforced by a linter in the suite). Unit facts live in `data/units/`.
 14. **Every lesson has a fixture** (two-part format); a fixture without bytes on disk is a counted SKIP, never a silent pass.
 15. **The single source of truth for case files is the `evidence_ledger`**; `catalog.yaml`/`graph.yaml` are projections of it.
+16. **Delivered packages are frozen.** Nothing writes a byte inside `<UNIT>/SUBMISSION PLM/` — not a regenerated sidecar, not a re-packaged tree, not a "harmless" refresh. Bowen A and Maxwell A are shipped; they live on **only as read-mode regression fixtures**. Enforced by `assert_not_frozen()` on every write path this repo owns, and by `tests/test_flow_frozen_packages.py`.
+17. **A finding that does not change the current target's deliverable does not become a commit.** It becomes a line in `docs/BACKLOG.md`. Until the Josh B checkpoint, the target is Josh B's Phase I kit; every PR reports what it moved closer to shipping it.
 
 ---
 
