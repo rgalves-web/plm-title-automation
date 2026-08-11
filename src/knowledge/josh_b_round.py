@@ -23,6 +23,7 @@ from src.knowledge.fetch_brief import (ACTION_CONFIRM, ACTION_FETCH,
                                        blocks_certification, render_markdown,
                                        validate_brief, write_brief)
 from src.knowledge.lease_disposition import (STATUS_ILLEGIBLE, STATUS_MEMO_ONLY,
+                                             STATUS_TERMS_SOURCED,
                                              STATUS_NO_INSTRUMENT,
                                              STATUS_NOT_IN_CORPUS,
                                              STATUS_OUTSIDE,
@@ -45,17 +46,39 @@ def load_round() -> tuple[Perimeter, dict[str, list[dict[str, Any]]], Any]:
     return perimeter, by_lease, load_knowledge()
 
 
+OPINIONS = (
+    ("_to_a319_read.json", "schedule",
+     "T-O ORIG A-319 HILL CSL SURVEY BLKS 5 AND 6 318.3AC.PDF", "May 21, 2010"),
+)
+
+
+def term_sources(knowledge: Any) -> list[dict[str, Any]]:
+    """Documents that state OTHER entities' terms — today, the opinions."""
+    from src.knowledge.to_schedule import as_document
+
+    out: list[dict[str, Any]] = []
+    for filename, key, opinion, cert in OPINIONS:
+        path = CASE / filename
+        if not path.exists():
+            continue
+        blocks = json.loads(path.read_text(encoding="utf-8"))[key]
+        out.append(as_document(opinion, blocks, cert_date=cert))
+    return out
+
+
 def dispositions(perimeter: Perimeter, by_lease: dict[str, list[dict[str, Any]]],
                  knowledge: Any) -> list[Any]:
     outside = {d.subject: d for d in perimeter.divergences
                if d.kind == "outside_perimeter"}
+    extra = term_sources(knowledge)
     out = []
     for lease, recording in sorted(perimeter.leases.items()):
         div = outside.get(lease)
         out.append(dispose(
             lease, recording, by_lease.get(lease, []), knowledge,
             in_perimeter=div is None,
-            outside_reason=(f"{div.index_says} || PROOF: {div.proof}" if div else "")))
+            outside_reason=(f"{div.index_says} || PROOF: {div.proof}" if div else ""),
+            extra_sources=extra))
     return out
 
 
@@ -112,6 +135,122 @@ def _grouped_fetch(disps: list[Any], item_id: str,
         action=ACTION_FETCH, source="county_clerk_records",
         effort="one courthouse sitting for the whole table",
         origin=origin)
+
+
+# The opinions whose requirements the gap-hunter reads, and the county their
+# LAND sits in — which is the county a requirement's instrument does NOT have to
+# be in, and the whole reason the county is extracted per requirement.
+CURATIVE_SOURCES = (
+    ("_to_a319_read.json", "requirements",
+     "T-O ORIG A-319 HILL CSL SURVEY BLKS 5 AND 6 318.3AC.PDF", "A-319"),
+    ("_to_a669_50_read.json", "requirements",
+     "T-O ORIG W.S. SCARBOROUGH A-669 50AC.PDF", "A-669 Tract 1"),
+)
+LAND_COUNTY = "Montague"
+CURATIVE_FEEDS = ("outstanding_curative",)
+
+
+from src.knowledge.gap_hunter import feeds_of as gap_feeds
+
+
+def live_requirements() -> list[Any]:
+    """Every open requirement across the opinions we hold."""
+    from src.knowledge.gap_hunter import hunt_requirements, parse_requirements
+
+    gaps: list[Any] = []
+    for filename, key, opinion, tag in CURATIVE_SOURCES:
+        path = CASE / filename
+        if not path.exists():
+            continue
+        blocks = json.loads(path.read_text(encoding="utf-8"))[key]
+        gaps.extend(hunt_requirements(parse_requirements(blocks), opinion=opinion,
+                                      land_county=LAND_COUNTY, tag=tag))
+    return gaps
+
+
+def _curative_items() -> list[BriefItem]:
+    """Requirements grouped by WHO holds the answer — one sitting, one item.
+
+    Grouping by county is not cosmetic. Three of these probates are of record in
+    Ector County, ~350 miles from the land: they are one letter to one clerk,
+    and mixing them into a Montague item would send the operator to a courthouse
+    that has never heard of the decedents."""
+    gaps = live_requirements()
+    if not gaps:
+        return []
+    groups: dict[str, list[Any]] = {}
+    for g in gaps:
+        elsewhere = g.county and g.county.lower() != LAND_COUNTY.lower()
+        # Remote records group by county (one letter, one clerk). Local curative
+        # groups by KIND, because a quitclaim and an identity affidavit are
+        # different signatures from different people — one item each keeps the
+        # chase legible without going back to one item per row.
+        # Remote records group by COUNTY — a different clerk is a different
+        # letter. Local curative groups by what the requirement DECIDES:
+        # everything that changes who owns a tract is one chase and one
+        # blocker; the procedural rest is another. Splitting the local group any
+        # finer produced nine items saying the same thing.
+        if elsewhere:
+            key = f"{g.county} County"
+        elif "ownership_report" in gap_feeds(g.requirement_kind):
+            key = "the parties — ownership curative"
+        else:
+            key = "the parties — procedural"
+        groups.setdefault(key, []).append(g)
+
+    out: list[BriefItem] = []
+    for n, (holder, rows) in enumerate(sorted(groups.items()), start=1):
+        remote = holder.endswith("County")
+        table = ["| requirement | what is required | cause no. | leases |",
+                 "|---|---|---|---|"]
+        for g in sorted(rows, key=lambda x: x.subject):
+            table.append(f"| {g.subject} | {g.detail[:220]} | "
+                         f"{g.cause_no or '—'} | {', '.join(g.leases) or '—'} |")
+        if remote:
+            county = holder.replace(" County", "")
+            how = (f"Write to the {county} County Clerk by e-mail or post and "
+                   f"order certified copies, naming each cause number below. "
+                   f"This is NOT {LAND_COUNTY} County: the land is in "
+                   f"{LAND_COUNTY}; these records are of {county} because that "
+                   f"is where the parties were, and asking {LAND_COUNTY} for "
+                   f"them comes back empty. Cost unknown from the documents we "
+                   f"hold — ask the clerk for the certified-copy fee before "
+                   f"ordering, and record it so the next round states it.\n\n"
+                   + "\n".join(table))
+            where = [f"{county} County Clerk — probate records, by cause number, "
+                     f"requested in writing (e-mail or post)"]
+            source, action = "third_party_request", ACTION_REQUEST
+        else:
+            how = ("Obtain each instrument from the party named, or from the "
+                   f"{LAND_COUNTY} County real property records where one is of "
+                   "record. Every row is a separate signature to chase.\n\n"
+                   + "\n".join(table))
+            where = [f"County Clerk real property records, {COUNTY}",
+                     "the parties named in the table, via PLM / the Seller"]
+            source, action = "county_clerk_records", ACTION_FETCH
+        kinds = {g.requirement_kind for g in rows}
+        feeds = tuple({f for k in kinds for f in gap_feeds(k)})
+        out.append(BriefItem(
+            id=f"CURATIVE-{n:02d}",
+            what=(f"Outstanding curative held by {holder} — {len(rows)} "
+                  f"requirement(s) from the controlling title opinions"),
+            where=where, how=how,
+            looks_like=("Certified copies of the probate records / the executed "
+                        "curative instruments named in each row."),
+            unlocks=[f"Outstanding Curative!{g.subject.split(' —')[0]}"
+                     for g in rows],
+            already_searched=[f"{g.subject}: {g.proof[:150]}" for g in rows],
+            # A requirement that changes WHO OWNS a tract feeds the ownership
+            # tabs, and verified WI/NRI cannot be stated without it.
+            blocking=blocks_certification(feeds),
+            action=action, source=source,
+            effort=("one letter for the whole list; the clerk's per-instrument "
+                    "fee is the only cost" if remote
+                    else "one sitting per party"),
+            origin="COMMENTS AND REQUIREMENTS of the controlling opinions, read "
+                   "requirement by requirement; the county comes from the "
+                   "requirement's own text, never from the land's county"))
+    return out
 
 
 def build_items(perimeter: Perimeter, disps: list[Any]) -> list[BriefItem]:
@@ -182,6 +321,40 @@ def build_items(perimeter: Perimeter, disps: list[Any]) -> list[BriefItem]:
             blocking=False, action=ACTION_RESCAN, source="drive_plm",
             effort="minutes per file",
             origin="the reader reported the document illegible"))
+
+    # --- terms of record elsewhere: a DELIVERY, not a courthouse trip -------
+    sourced = [d for d in disps if d.status == STATUS_TERMS_SOURCED]
+    if sourced:
+        table = ["| lease | recording | terms already filled, cited to |",
+                 "|---|---|---|"]
+        for d in sorted(sourced, key=lambda x: x.lease):
+            cite = next(iter(d.proved_terms.values()))["cited_to"] \
+                if d.proved_terms else "—"
+            table.append(f"| {d.lease} | {d.recording or '—'} | "
+                         f"{len(d.proved_terms)} terms — {cite} |")
+        items.append(BriefItem(
+            id="SELLER-DELIVERY",
+            what=(f"Recorded instrument for {len(sourced)} lease(s) whose TERMS "
+                  f"are already of record via the title opinion"),
+            where=["Seller (EOG Resources, Inc.), via PLM — a file-delivery item"],
+            how=("Request the instruments from the Seller through PLM by e-mail, "
+                 "listing the lease numbers below. No cost. This is NOT a "
+                 "courthouse trip: the opinion's lease summary already states "
+                 "the terms, each cited to its page, so nothing is learned by "
+                 "pulling the recording — only the document itself is owed.\n\n"
+                 + "\n".join(table)),
+            looks_like="The executed OGML matching the recording in the table.",
+            # It unlocks only what is still BLANK. The terms the opinion already
+            # proved are filled and cited — claiming them here would make the
+            # item look bigger than it is and would double-own a filled cell.
+            unlocks=[f"Lease Review!{d.lease}.{t}"
+                     for d in sourced for t in sorted(d.unproved_terms)],
+            already_searched=[f"{d.lease}: {d.note}" for d in sourced],
+            blocking=blocks_certification(LEASE_REVIEW_FEEDS),
+            action=ACTION_REQUEST, source="third_party_request",
+            effort="one e-mail for the whole list",
+            origin="knowledge/taxonomy title_opinion.proves_terms — an of-record "
+                   "document that states a term is the source of that term"))
 
     # --- memo-only: the supervisor's rule ----------------------------------
     memo = [d for d in disps if d.status == STATUS_MEMO_ONLY]
@@ -262,6 +435,8 @@ def build_items(perimeter: Perimeter, disps: list[Any]) -> list[BriefItem]:
                 adopted_value="nothing adopted — the finding is new",
                 conflict_with=div.index_says, origin=div.proof))
 
+    items.extend(_curative_items())
+
     for div in perimeter.divergences:
         if div.kind == "conflicting_recording":
             items.append(BriefItem(
@@ -307,6 +482,8 @@ def _blanks(d: Any) -> list[str]:
     identified the file" is still a blank, and it still owes an owner
     (invariant 18) — it just owes a VERDICT item rather than a search."""
     if d.status == STATUS_MEMO_ONLY:
+        return [f"Lease Review!{d.lease}.{t}" for t in sorted(d.unproved_terms)]
+    if d.status == STATUS_TERMS_SOURCED:
         return [f"Lease Review!{d.lease}.{t}" for t in sorted(d.unproved_terms)]
     if d.status in (STATUS_NOT_IN_CORPUS, STATUS_NO_INSTRUMENT,
                     STATUS_UNIDENTIFIED, STATUS_ILLEGIBLE):

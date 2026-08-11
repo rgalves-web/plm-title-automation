@@ -231,3 +231,99 @@ correto.
 1. **Disposição é por documento, não por campo** (backlog #9). O gabarito distingue "a lease está aqui mas falta o royalty" (`0220953-008/-010/-011`) e "as duas cópias estão ilegíveis" (`0221055-002`); o sistema diz `instrument_of_record` e para aí.
 2. **Tiering declarado:** pastas com um arquivo que o classificador confirma como a lease receberam **uma** leitura; pastas sem candidato óbvio receberam **todas**. Isso custou o inventário completo de title opinions dentro das pastas já resolvidas.
 3. **Curativa (probates de Ector) e RRC não foram tentados** nesta rodada — são S5 GAP-HUNT, não S2 SCOPE.
+
+---
+
+## PR-5 — fonte que prova o termo, e o gap-hunter (S5) · **2026-08-11**
+
+### Regra 1 — `dual_disposition` generalizada
+
+A regra do memorando nunca foi uma regra sobre memorandos. O que faz um documento
+ser fonte é **estar de registro e declarar o termo**. Agora isso é dado em L1
+(`proves_terms`), declarado em três categorias:
+
+| categoria | prova os termos de | casa por | também é defeito |
+|---|---|---|---|
+| `lease_ogl` | si mesma | recording, nº EOG | não |
+| `lease_memorandum` | a lease que memorializa | recording, nº EOG | **sim** (MISSING LEASE) |
+| `title_opinion` | as leases que o LEASE SUMMARY recita | **recording apenas** | não |
+
+Duas disciplinas seguram a regra: casa-se por **identidade, nunca por nome** (o
+mesmo lessor tem lease em várias unidades, e um match por nome importa os termos
+da unidade errada com toda a convicção do mundo); e **silêncio não é valor** — o
+termo que a fonte não declara fica branco com motivo do vocabulário.
+
+Um teste que falhou e valeu o PR: `lease_ogl` **não estava declarada** como fonte,
+então o recital do examinador vencia o próprio instrumento. Óbvio demais para ter
+sido escrito — e por isso não era aplicado.
+
+**Efeito medido na Josh B:**
+
+| | antes | depois |
+|---|---|---|
+| tabela de `fetch` (viagem ao cartório) | **24** | **10** |
+| entrega do Seller (`request`, não-blocking) | 0 | **14** |
+| células de Lease Review preenchidas **com citação de página** que antes eram branco | 0 | **62** |
+
+As 14 não são as 13 "que têm o TO na pasta": são as que o **schedule do TO
+recita pelo recording**, e duas delas (`0220604-005`, `0220604-013`) nem têm pasta
+em `FILES/`. É a diferença entre casar por identidade e casar por proximidade.
+
+O TO declara a Lease 36 (Nan Kirkendahl) como **Unrecorded**, então ela não casa
+por recording e continua em `fetch` — conservador e correto: o Exhibit "A" lhe dá
+Vol. 610 Pg. 245 porque foi gravada depois.
+
+### Regra 2 — o gap-hunter
+
+`src/knowledge/gap_hunter.py`, com as cinco perguntas de examinador: citado mas
+ausente · lease posterior a toda cert date · requirement vivo × satisfeito ·
+conflito entre fontes · disciplina de INFERENCE (a conclusão marcada nomeia o que
+a refutaria, e **é retirada** se não sobreviver — nunca suavizada).
+
+**Aceitação contra o gabarito — os três alvos, todos emitidos sozinhos:**
+
+1. **Os 5 grupos de requirement do TO A-319:** Req 4 (Kramer/Wichita) · Req 6
+   (herdeiros de Leonard Lewis Walker, III) · Req 10 (quitclaims James W. Farrell
+   Trust) · Req 15 (Name Assumptions — identidade de lessor) · Req 17 (affidavit
+   of nonproduction).
+2. **A curativa do Tract 1** (TO A-669 50AC): Req 1 probate Julia Marlee Stewart ·
+   Req 2 identidade Marlee McConnell Stewart · Req 3 nonproduction.
+3. **O teste difícil — os três probates de ECTOR.** O item sai como
+   `[A-669 Tract 1] Req 4 — probate: Unrecorded Probates`, **county = Ector**,
+   causas **1449, 3734-A, 16915-02**, com o texto: *"This is NOT Montague County:
+   the land is in Montague; these records are of Ector because that is where the
+   parties were, and asking Montague for them comes back empty."* O condado vem do
+   texto do próprio requirement, não do condado da terra — que é exatamente a
+   diferença entre ler como examinador e casar strings.
+
+`blocking` da curativa deriva do que a exigência **decide**: probate, quitclaim,
+identidade, nonproduction e ratificação mexem em quem é dono e alimentam
+`ownership_report` (bloqueiam); runsheet, imposto, posse e consentimento são
+procedimentais (não bloqueiam).
+
+### Brief resultante
+
+**11 itens · 4 blocking** (perímetro 0220936 · split deed Vol. 311 Pg. 189 ·
+curativa de propriedade local · probates de Ector) · 94 células em branco, nenhuma
+órfã · gate com 0 problemas.
+
+O gate reprovou meus próprios itens de curativa três vezes antes de fechar: sem
+canal, sem custo, e propondo busca em portal para um `request`. O custo não está
+em nenhum documento que temos, e inventar "$5" a partir do gabarito seria importar
+fato numa réplica fria — então o contrato ganhou uma terceira forma aceita,
+*"cost unknown — ask before ordering"*. Silêncio continua reprovando.
+
+### Placar de reprodução — atualizado
+
+**Das 13 conclusões verificáveis do gabarito, o sistema agora emite 8 sozinho
+(era 7), 2 parcialmente (era 1), e 3 ainda dependem de você (era 5).**
+
+| # | Conclusão | PR-4 | PR-5 |
+|---|---|---|---|
+| 1–7 | DPU, surveys, tratos, Exhibit "A", série 0220936 com prova, divergências, title opinions | ✅ | ✅ |
+| 8 | Pastas sem o instrumento | ⚠️ | ⚠️ — agora 10 fetch + 14 entrega do Seller; 3 das 9 do gabarito em comum. As 6 restantes são gaps **de campo**, não de documento (backlog #9) |
+| 9 | 5 leases memo-only → MISSING LEASE | ❌ | ⚠️ — o mecanismo generalizou e produz MISSING LEASE para 15 leases com os termos citados; os 5 memorandos específicos continuam fora do corpus |
+| 10 | Probates de Ector com número de causa | ❌ | **✅ sozinho, com os 3 números e o condado certo** |
+| 11 | RRC W-1 / P-12 / plat | ❌ | ❌ — não tentado |
+| 12 | Tract 1: 1/2 não arrendado, EOG WI 0,50 / NRI 0,40 | ❌ | ⚠️ — a **curativa** que determina esses números é emitida; a aritmética não foi tentada |
+| 13 | Runsheet com 23 instrumentos pós-certificação | ❌ | ❌ — não tentado |

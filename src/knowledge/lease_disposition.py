@@ -38,6 +38,9 @@ STATUS_NOT_IN_CORPUS = "not_in_corpus"
 STATUS_OUTSIDE = "outside_perimeter"
 # The folder holds something nobody has identified. That is NOT absence.
 STATUS_UNIDENTIFIED = "unidentified_documents_in_folder"
+# The instrument is missing but its terms are of record elsewhere. The row is
+# FILLED and cited; what is owed is the document, not the facts.
+STATUS_TERMS_SOURCED = "terms_sourced_instrument_missing"
 # The instrument is here and cannot be read. Also not absence — and not a fetch.
 STATUS_ILLEGIBLE = "instrument_illegible"
 
@@ -74,13 +77,19 @@ def _rule(knowledge: Any) -> Any:
 
 def dispose(lease: str, recording: str, classifications: list[dict[str, Any]],
             knowledge: Any, *, in_perimeter: bool = True,
-            outside_reason: str = "") -> LeaseDisposition:
-    """Decide a lease's disposition from what was READ in its folder."""
+            outside_reason: str = "",
+            extra_sources: list[dict[str, Any]] | None = None) -> LeaseDisposition:
+    """Decide a lease's disposition from what was READ — anywhere.
+
+    `extra_sources` are documents that speak about OTHER entities: a title
+    opinion whose schedule recites this lease, a ratification, an assignment.
+    They are the reason a lease with no folder at all can still have most of its
+    terms filled and cited."""
     if not in_perimeter:
         return LeaseDisposition(lease=lease, status=STATUS_OUTSIDE,
                                 recording=recording, note=outside_reason)
 
-    if not classifications:
+    if not classifications and not extra_sources:
         return LeaseDisposition(
             lease=lease, status=STATUS_NOT_IN_CORPUS, recording=recording,
             note="no folder for this lease in the corpus")
@@ -115,11 +124,20 @@ def dispose(lease: str, recording: str, classifications: list[dict[str, Any]],
                   f"Absence of the instrument CANNOT be concluded while an "
                   f"unidentified file sits in the folder — one of them may be it."))
 
+    # The instrument is not here. That does NOT mean its terms are unknown: an
+    # of-record document elsewhere in the corpus may state them (rule
+    # `proves_terms`). Ask before declaring the row blank.
+    sourced = _from_other_sources(lease, recording, extra_sources or [], knowledge)
+    if sourced:
+        sourced.sources.extend(_source(c) for c in classifications)
+        return sourced
+
     # Only now is absence a claim the evidence supports: every document in the
-    # folder was read AND identified, and none is the instrument. The negative
-    # knowledge IS the product — "AUSTIN PRESBYTERIAN LSE 0220604-007.PDF" reads
-    # like the lease and is a letter from EOG to the lessor, and only naming it
-    # keeps someone from opening it again.
+    # folder was read AND identified, none is the instrument, and no other
+    # of-record document states its terms. The negative knowledge IS the product
+    # — "AUSTIN PRESBYTERIAN LSE 0220604-007.PDF" reads like the lease and is a
+    # letter from EOG to the lessor, and only naming it keeps someone from
+    # opening it again.
     return LeaseDisposition(
         lease=lease, status=STATUS_NO_INSTRUMENT, recording=recording,
         sources=[_source(c) for c in classifications],
@@ -128,6 +146,41 @@ def dispose(lease: str, recording: str, classifications: list[dict[str, Any]],
               + ", ".join(f"{Path(str(c.get('file',''))).name} = "
                           f"{c.get('classified_as')}" for c in classifications[:6])
               + (", ..." if len(classifications) > 6 else "") + ")"))
+
+
+def _from_other_sources(lease: str, recording: str,
+                        extra_sources: list[dict[str, Any]],
+                        knowledge: Any) -> LeaseDisposition | None:
+    """Terms proved by a document that is about this lease without being it."""
+    from src.knowledge.term_source import resolve
+
+    if not extra_sources:
+        return None
+    key = {"recording_book_page": recording, "eog_lease_number": lease}
+    sourcing = resolve(key, extra_sources, knowledge)
+    if not sourcing.proved:
+        return None
+
+    d = LeaseDisposition(lease=lease, status=STATUS_TERMS_SOURCED,
+                         recording=recording,
+                         sources=list(sourcing.sources_used))
+    d.proved_terms = {t: p.to_dict() for t, p in sourcing.proved.items()}
+    d.unproved_terms = dict(sourcing.unproved)
+    cite = next(iter(sourcing.proved.values())).citation()
+    d.defect = {
+        "label": "MISSING LEASE",
+        "lease": lease,
+        "destination": "potential_defects",
+        "text": (f"{lease} — the recorded instrument is not in the file. Its "
+                 f"terms are of record via {cite}; the instrument itself is "
+                 f"requested from the Seller."),
+        "owner": "Seller (EOG)",
+        "evidence": cite,
+    }
+    d.note = (f"{len(sourcing.proved)} term(s) proved by {cite}; the instrument "
+              f"is a delivery the Seller owes, not a document to go and learn "
+              f"facts from")
+    return d
 
 
 # An illegible instrument announces itself: the reader says so, or the read

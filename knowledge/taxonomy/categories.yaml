@@ -27,6 +27,23 @@ categories:
     precedence: >
       Per tract, the most recent certification date controls; earlier opinions
       over the same description are superseded, never merged.
+    # A title opinion's LEASE SUMMARY recites each lease it examined, with the
+    # recording. That recital is of record and it is the examiner's reading of
+    # the instrument — so it PROVES those terms even when the instrument itself
+    # is not in the folder. The lease is still missing; its terms are not.
+    proves_terms:
+      for_entity: lease
+      match_on: [recording_book_page]
+      proves: [lessor, lessee, instrument_date, recording, legal_description,
+               term, royalty, interest_covered]
+      cannot_prove: [bonus, depth_limitation]
+      reason_for_unstated_terms: doc_nao_localizado
+      also_a_defect: false
+      note: >
+        Match by RECORDING, never by lessor name: the same lessor holds leases
+        in several units, and the opinion's schedule is the only place the two
+        can be told apart. A lease the opinion does not schedule gets nothing
+        from it — coverage is not assumed from the opinion being in the folder.
 
   ownership_report:
     label: Ownership report (AFD/MOR)
@@ -71,6 +88,18 @@ categories:
     disposition_default: read
     risk_tier: high
     looks_like: Recorded OGML naming lessor and lessee, with term, royalty and description.
+    # The instrument is the primary source of its own terms. Obvious enough that
+    # it went unwritten, which meant an examiner's RECITAL of a lease could
+    # outrank the lease — the rule has to be declared to be applied.
+    proves_terms:
+      for_entity: lease
+      match_on: [recording_book_page, eog_lease_number]
+      proves: [lessor, lessee, instrument_date, recording, legal_description,
+               term, royalty, bonus, pooling_clause, shut_in, depth_limitation,
+               interest_covered]
+      cannot_prove: []
+      reason_for_unstated_terms: doc_nao_localizado
+      also_a_defect: false
 
   lease_memorandum:
     label: Memorandum of lease
@@ -82,6 +111,21 @@ categories:
     looks_like: >
       Short-form recorded instrument that memorialises a lease: parties, date,
       description and term, usually without royalty or the full clause set.
+    # The general rule (see title_opinion.proves_terms for the other instance):
+    # an of-record document that STATES a term is the source of that term.
+    proves_terms:
+      for_entity: lease
+      match_on: [recording_book_page, eog_lease_number]
+      proves: [lessor, lessee, instrument_date, recording, legal_description, term]
+      cannot_prove: [royalty, bonus, pooling_clause, shut_in, depth_limitation]
+      reason_for_unstated_terms: doc_nao_localizado
+      also_a_defect: true
+      defect_label: MISSING LEASE
+      note: >
+        The memorandum was the first case of this rule, and for a while it was
+        written as if it were the only one. It is not: what makes it a source is
+        being of record and declaring the term, not being a memorandum.
+
     # The PLM supervisor's rule, as data. Both halves hold at once.
     dual_disposition:
       as_source: >

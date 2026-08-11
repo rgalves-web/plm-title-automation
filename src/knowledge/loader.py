@@ -97,13 +97,33 @@ class IdentityKeys(BaseModel):
 RISK_TIERS = ("high", "low")
 
 
-class DualDisposition(BaseModel):
-    """A category that is simultaneously a SOURCE and a DEFECT.
+class ProvesTerms(BaseModel):
+    """An of-record document that STATES a term is the source of that term.
 
-    The PLM supervisor's rule for memorandum-only leases, as data: the recorded
-    memorandum proves the terms it states, AND the lease is reported missing.
-    Both halves hold at once — the terms it cannot prove stay blank with a
-    named reason, never inferred from its silence."""
+    This is the general rule; the memorandum was only the first instance of it.
+    A recorded memorandum, a title opinion whose lease summary recites a lease,
+    a ratification — each is of record, each declares terms, and each therefore
+    fills those cells with a citation to its own page. The document that is
+    missing is still missing; the terms it would have proved are not.
+
+    `for_entity` says whose terms this document proves (a title opinion proves
+    the terms of the LEASES it schedules, not of itself). `match_on` is the
+    identity that links the two — never a name, always the recording, because
+    the same lessor holds leases in several units."""
+    for_entity: str
+    match_on: list[str]
+    proves: list[str]
+    cannot_prove: list[str] = Field(default_factory=list)
+    reason_for_unstated_terms: str
+    # A source may also be a defect: a lease whose ONLY record is a memorandum
+    # is reported missing at the same time as its terms are filled in.
+    also_a_defect: bool = False
+    defect_label: str | None = None
+    note: str | None = None
+
+
+class DualDisposition(BaseModel):
+    """Retained name for the memorandum's shape; see ProvesTerms for the rule."""
     as_source: str
     as_defect: str
     terms_it_cannot_prove: str
@@ -127,6 +147,7 @@ class Category(BaseModel):
     of_record: bool | None = None
     reason: str | None = None
     dual_disposition: DualDisposition | None = None
+    proves_terms: ProvesTerms | None = None
 
     @field_validator("risk_tier")
     @classmethod

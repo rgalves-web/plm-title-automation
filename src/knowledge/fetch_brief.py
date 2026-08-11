@@ -229,8 +229,16 @@ def validate_item(item: BriefItem, knowledge: Any = None) -> list[str]:
         if "@" not in blob and not re.search(r"\b(phone|mail|portal|in person|email)\b",
                                              blob, re.IGNORECASE):
             problems.append(f"{item.id}: a request must name the CHANNEL to use")
-        if not re.search(r"\$|\bfree\b|\bno (?:fee|cost)\b|\bcusto\b", blob, re.IGNORECASE):
-            problems.append(f"{item.id}: a request must state the COST (or that there is none)")
+        # A price, "free", or an explicitly declared unknown. The third form
+        # exists because a cold round often does NOT know a clerk's fee, and the
+        # honest answer is "ask for it before ordering" — which is actionable.
+        # Inventing a figure to satisfy a validator would be worse than silence;
+        # silence itself still fails, which is the point of the check.
+        if not re.search(r"\$|\bfree\b|\bno (?:fee|cost)\b|\bcusto\b"
+                         r"|\bcost (?:is )?(?:not known|unknown)\b", blob,
+                         re.IGNORECASE):
+            problems.append(f"{item.id}: a request must state the COST (a figure, "
+                            f"'free', or 'cost unknown — ask before ordering')")
     if knowledge is not None:
         for hit in _forbidden_hits(item, knowledge):
             problems.append(f"{item.id}: uses a FORBIDDEN method — {hit}")
