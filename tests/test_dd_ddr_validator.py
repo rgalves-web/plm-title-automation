@@ -181,6 +181,22 @@ def test_catches_mi_flattened_across_a_tract():
     assert any(f.rule == "mi_per_tract_sum" for f in report.failures)
 
 
+def test_as_of_pins_the_submission_date_rule_for_regressions():
+    # A shipped deliverable carries its send date. Re-validated months later,
+    # that date must not become a manufactured FAIL — the regression pins
+    # as_of to the shipped date. At send time (as_of=None) a past date still fails.
+    from datetime import date
+    from src.dd.ddr_validator import check_submission_date
+    wb = _ddr([_own_row()], _audited())
+    ws = wb["Ownership Report"]          # any sheet: add a Date Submitted pair
+    ws["A50"] = "Date Submitted:"
+    ws["B50"] = "07/28/2026"
+    stale = check_submission_date(wb, today=date(2026, 8, 11))
+    assert any(f.rule == "submission_date" and f.severity == FAIL for f in stale)
+    pinned = check_submission_date(wb, today=date(2026, 7, 28))
+    assert not [f for f in pinned if f.severity == FAIL]
+
+
 def test_declared_sheet_exclusion_logs_DECLARED_not_FAIL():
     # Bowen: "Ownership - 1H (No FO Option)" deliberately deleted by the landman.
     from src.dd.ddr_validator import check_sheet_set

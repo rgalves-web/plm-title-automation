@@ -30,8 +30,9 @@ OCR_CONFIDENCE_PENALTY = 0.85
 PREVIEW_CHAR_LIMIT = 1200
 SNIPPET_CHAR_LIMIT = 280
 
-# Windows default Tesseract install path (UB Mannheim installer)
-_TESSERACT_WIN_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# Tesseract binary location is configured in ONE place: src/flow/config.py
+# (config.yaml / $MINORH_CONFIG, with the Windows default install as its
+# built-in fallback and honest degradation when absent). See _configure_tesseract.
 
 
 DOCUMENT_TYPE_KEYWORDS = [
@@ -374,13 +375,18 @@ def _extract_pdf_text_pdfplumber(path: Path) -> tuple[str, int, str]:
 # ---------------------------------------------------------------------------
 
 def _configure_tesseract() -> None:
-    """Point pytesseract at the Windows default install if not already in PATH."""
+    """Point pytesseract at the configured binary, if not already resolvable.
+
+    Delegates to src/flow/config — the single tesseract config point
+    (config.yaml / $MINORH_CONFIG; Windows default install as fallback;
+    honest degradation when absent). Never raises: OCR availability is a
+    reported state, not a crash."""
     try:
         import pytesseract
-        if pytesseract.pytesseract.tesseract_cmd == "tesseract" and not shutil.which("tesseract"):
-            win_path = Path(_TESSERACT_WIN_PATH)
-            if win_path.exists():
-                pytesseract.pytesseract.tesseract_cmd = str(win_path)
+        if pytesseract.pytesseract.tesseract_cmd != "tesseract" or shutil.which("tesseract"):
+            return                     # explicitly configured, or on PATH
+        from src.flow.config import configure_tesseract, load_config
+        configure_tesseract(load_config())
     except Exception:
         pass
 

@@ -1,92 +1,43 @@
-# PLM Title Automation
+# plm-title-automation
 
-Local MVP for audit-ready PLM/Arapahoe title document processing. The first version is deterministic and reviewable: it ingests a Document List, builds a Document Register, deduplicates likely duplicates, classifies rows by configurable rules, writes a preliminary runsheet into a copied Excel template, and produces QA workbooks.
+Local-first title automation for Purple Land Management: the **DD pipeline**
+(per-unit Due Diligence Reports for Project Emirates) and the **MOR pipeline**
+(Master Ownership Report / runsheet), operated through the **Minorh Title
+Workbench**.
 
-## What This MVP Does
-
-- Reads Document List files from `.xlsx`, `.xls`, or `.csv`.
-- Creates a source-traceable `document_register.xlsx`.
-- Marks likely duplicates without dropping the source row.
-- Classifies documents as `INCLUDE_FULL`, `INCLUDE_LIMITED`, `REDLINE`, `REVIEW`, or `DUPLICATE`.
-- Preserves ALM/GAC redline behavior: non-applicable documents remain accounted for and are placed at the bottom of the runsheet in red.
-- Copies the provided template workbook and writes only to the detected runsheet sheet.
-- Exports `redline_rows.xlsx`, `review_required.xlsx`, `QA_EXCEPTION_LOG.xlsx`, and `processing_summary.json`.
-
-## Setup
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-```
-
-### Tesseract OCR (required for scanned documents)
-
-OCR of scanned PDFs and image files requires the Tesseract binary in addition to the
-`pytesseract` Python package.
-
-**Windows** — install via winget (recommended):
-
-```powershell
-winget install UB-Mannheim.TesseractOCR
-```
-
-The app auto-detects `C:\Program Files\Tesseract-OCR\tesseract.exe`; no PATH change
-needed.  Alternatively add the install directory to your PATH.
-
-**macOS:**
+## Run
 
 ```bash
-brew install tesseract
+./minorh serve
 ```
 
-**Linux (Debian/Ubuntu):**
+Starts the local FastAPI workbench and opens the browser (units board →
+six-stage case flow: OPEN / GATHER / DROP / RUN / REVIEW / SHIP). Copy
+`config.example.yaml` to `config.yaml` and set your local paths first.
 
 ```bash
-sudo apt install tesseract-ocr
+python -m pytest -q
 ```
 
-Without Tesseract, PDFs that contain only scanned images will be marked
-`OCR_REQUIRED` and pushed to REVIEW instead of being extracted.
+The whole suite must be green before and after any change (see `CLAUDE.md`).
 
-## Run The App
+## Where things are
 
-```powershell
-streamlit run app.py
-```
+| Path | What |
+|---|---|
+| `CLAUDE.md` | Invariants — read first, they bind every session |
+| `docs/WORKBENCH_STATUS.md` | Current state of what is built and proven |
+| `docs/` | Architecture specs (flow, OKF, migration plan, workbench blueprint) |
+| `src/flow/` | Case-flow spine: config, evidence ledger, unit state, runner, round-trip IO |
+| `src/webapp/` | The workbench (FastAPI + front) |
+| `src/dd/` | DD engine: manifest, parsers, aggregation, DDR writer, gates, packager |
+| `src/` (root modules) | Shared + MOR pipeline |
+| `app.py` | Frozen Streamlit fallback — do not extend, do not delete |
+| `data/` | Client material and per-unit case files — **never committed** |
 
-Or double-click `run_app.bat` from Windows Explorer.
+## Non-negotiables
 
-Uploads are configured for up to 2 GB per file in `.streamlit/config.toml`.
-
-If browser upload fails for a large ZIP, place it manually in `data/input/document_packages/` and select it from the sidebar.
-
-## Generate Sample Files
-
-```powershell
-python scripts\generate_sample_data.py
-```
-
-The sample files are written to `data/input/sample/` and include a small Document List plus a template workbook that matches `config/template_map.yaml`.
-
-## Golden Set Workflow
-
-After review, use the app's `Golden Set` tab to mark corrected classifications and corrected runsheet rows as approved examples. Approved classification examples are stored in `data/golden_set/golden_classifications.csv`; approved runsheet rows are stored in `data/golden_set/golden_runsheet_rows.csv`.
-
-The Golden Set tab can compare current classifier output against approved classification examples and report drift. The same regression check is covered by the unit tests.
-
-## Run Tests
-
-```powershell
-pytest
-```
-
-## Configuration
-
-- `config/rules.yaml`: deterministic classification keywords and precedence.
-- `config/template_map.yaml`: runsheet sheet names, header aliases, required columns, and redline fill color.
-- `config/terminology.yaml`: workflow/status labels and QA severity names.
-
-## Notes For Future Extraction
-
-This MVP intentionally avoids paid OCR or AI services. `src/pdf_reader.py` provides local PDF text extraction and TODO stubs where Azure Document Intelligence, AWS Textract, LlamaParse, or OpenAI extraction can later be plugged in without changing the audit model.
+Interest math is exact (`fractions.Fraction`), never LLM-computed. Every
+deliverable value carries a source citation. Validation gates (structural +
+source-truth) run on every write; `0 FAIL / 0 MISMATCH` or it does not ship.
+Client data never leaves the machine. See `CLAUDE.md` for the full list.

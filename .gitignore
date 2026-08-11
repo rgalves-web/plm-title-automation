@@ -50,3 +50,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Claude Code local tooling config (launch profiles, local permissions)
+.claude/

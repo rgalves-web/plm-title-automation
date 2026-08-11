@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>minorh. — Title Workbench (prototype)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@1,9..144,900&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --g900:#1F1E1D; --g800:#262624; --g700:#32302E; --g650:#3E3B38;
+    --lime:#9CDB1C;
+    --gray4:#A29E96; --gray5:#767268;
+    --paper:#F0EEE9;
+    --amber:#D9A441; --red:#D96A5B;
+    --display:'Fraunces',serif;
+    --body:'Inter',sans-serif;
+    --mono:'JetBrains Mono',monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--g900);color:var(--paper);font-family:var(--body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  button{font-family:var(--body);cursor:pointer}
+  a{color:var(--lime);text-decoration:none}
+  :focus-visible{outline:2px solid var(--lime);outline-offset:3px}
+  .mono{font-family:var(--mono)}
+  .muted{color:var(--gray4)}
+  .dim{color:var(--gray5)}
+
+  /* ---------- app frame ---------- */
+  .topbar{display:flex;align-items:center;gap:20px;padding:0 24px;height:56px;border-bottom:1px solid var(--g700);position:sticky;top:0;background:var(--g900);z-index:50}
+  .wordmark{font-family:var(--display);font-style:italic;font-weight:900;font-size:22px;letter-spacing:-.02em}
+  .wordmark .dot{color:var(--lime)}
+  .topbar .proj{font-family:var(--mono);font-size:12px;color:var(--gray5);letter-spacing:.06em}
+  .topbar .spacer{flex:1}
+  .topbar .who{font-size:13px;color:var(--gray4)}
+  .proto-tag{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--g900);background:var(--lime);border-radius:4px;padding:2px 8px}
+
+  .shell{max-width:1180px;margin:0 auto;padding:28px 24px 80px}
+
+  /* ---------- generic ---------- */
+  .h-display{font-family:var(--display);font-style:italic;font-weight:900;font-size:34px;letter-spacing:-.01em;line-height:1.1}
+  .h2{font-size:20px;font-weight:600;margin-bottom:4px}
+  .label{font-size:11px;font-weight:500;letter-spacing:.09em;text-transform:uppercase;color:var(--gray4)}
+  .card{background:var(--g800);border:1px solid var(--g700);border-radius:6px}
+  .btn{font-weight:600;font-size:14px;padding:10px 20px;border-radius:6px;border:none}
+  .btn.primary{background:var(--lime);color:var(--g900)}
+  .btn.secondary{background:transparent;color:var(--paper);border:1px solid var(--g700)}
+  .btn.ghost{background:transparent;color:var(--gray4);border:none}
+  .btn.small{font-size:12px;padding:6px 12px}
+  .btn.confirm{background:transparent;color:var(--lime);border:1px solid var(--lime)}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;letter-spacing:.05em;border-radius:99px;padding:3px 10px;border:1px solid var(--g700);color:var(--gray4)}
+  .pill .dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+  .dot.ok{background:var(--lime)} .dot.warn{background:var(--amber)} .dot.bad{background:var(--red)} .dot.idle{background:var(--gray5)}
+  .hair{border:none;border-top:1px solid var(--g700)}
+
+  /* ---------- screens ---------- */
+  .screen{display:none}
+  .screen.active{display:block;animation:fade .18s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+  /* ---------- units board ---------- */
+  .board-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:26px;gap:24px}
+  .board-head p{max-width:520px;color:var(--gray4);font-size:14px;margin-top:8px}
+  .unit-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px}
+  .unit-card{padding:20px;cursor:pointer;transition:border-color .15s ease}
+  .unit-card:hover{border-color:var(--g650)}
+  .unit-card .name{font-weight:600;font-size:16px}
+  .unit-card .geo{font-family:var(--mono);font-size:11px;color:var(--gray5);margin-top:2px}
+  .stagebar{display:flex;gap:4px;margin:16px 0 10px}
+  .stagebar span{height:4px;flex:1;border-radius:2px;background:var(--g700)}
+  .stagebar span.done{background:var(--lime)}
+  .stagebar span.now{background:var(--amber)}
+  .unit-card .next{font-size:13px;color:var(--gray4);margin-top:8px}
+  .unit-card .next strong{color:var(--paper);font-weight:600}
+  .unit-meta{display:flex;gap:14px;margin-top:14px;flex-wrap:wrap}
+
+  /* ---------- unit workspace ---------- */
+  .crumbs{font-family:var(--mono);font-size:12px;color:var(--gray5);margin-bottom:14px}
+  .crumbs a{color:var(--gray4)}
+  .unit-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:22px}
+  .unit-head .facts{display:flex;gap:22px;margin-top:10px;flex-wrap:wrap}
+  .fact .label{display:block;margin-bottom:1px}
+  .fact .v{font-family:var(--mono);font-size:13px}
+
+  /* stepper */
+  .stepper{display:flex;border:1px solid var(--g700);border-radius:6px;overflow:hidden;margin-bottom:24px;background:var(--g800)}
+  .step{flex:1;padding:12px 14px;border-right:1px solid var(--g700);background:transparent;border-top:none;border-bottom:none;border-left:none;text-align:left;color:var(--gray4)}
+  .step:last-child{border-right:none}
+  .step .n{font-family:var(--mono);font-size:10px;letter-spacing:.1em;display:flex;align-items:center;gap:6px;color:var(--gray5)}
+  .step .t{font-size:13px;font-weight:600;margin-top:3px;color:var(--gray4)}
+  .step.done .n::after{content:"✓";color:var(--lime)}
+  .step.done .t{color:var(--gray4)}
+  .step.current{background:var(--g700)}
+  .step.current .t{color:var(--paper)}
+  .step.current .n{color:var(--lime)}
+  .step:hover{background:var(--g700)}
+
+  .stage-pane{display:none}
+  .stage-pane.active{display:block;animation:fade .18s ease}
+  .pane-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin:26px 0 6px}
+  .pane-head .hint{font-size:13px;color:var(--gray5);max-width:420px;text-align:right}
+  .pane-sub{color:var(--gray4);font-size:14px;max-width:680px;margin-bottom:20px}
+
+  /* checklist */
+  .chk{margin-bottom:12px}
+  .chk-row{display:flex;align-items:center;gap:14px;padding:14px 18px;cursor:pointer}
+  .chk-row .st{width:88px;flex-shrink:0}
+  .chk-row .what{flex:1}
+  .chk-row .what .t{font-weight:600;font-size:14px;display:block}
+  .chk-row .what .s{font-size:12.5px;color:var(--gray5);margin-top:1px;display:block}
+  .chk-row .ref{font-family:var(--mono);font-size:11.5px;color:var(--gray4);text-align:right}
+  .chk-row .chev{color:var(--gray5);font-size:12px;transition:transform .15s}
+  .chk.open .chev{transform:rotate(90deg)}
+  .chk-body{display:none;border-top:1px solid var(--g700);padding:16px 18px 18px;font-size:13.5px;color:var(--gray4)}
+  .chk.open .chk-body{display:block}
+  .howto{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px}
+  .howto .cell{background:var(--g900);border:1px solid var(--g700);border-radius:6px;padding:12px 14px}
+  .howto .cell .label{margin-bottom:6px;display:block}
+  .howto .cell p{font-size:13px;color:var(--gray4)}
+  .howto .cell .mono{font-size:12px;color:var(--paper)}
+  .why{border-left:2px solid var(--lime);padding:2px 0 2px 12px;margin-top:12px;font-size:13px;color:var(--gray4)}
+  .why strong{color:var(--paper)}
+
+  /* drop zone */
+  .drop{border:1.5px dashed var(--g650);border-radius:6px;padding:34px;text-align:center;color:var(--gray4);margin-bottom:20px}
+  .drop .big{font-size:16px;font-weight:600;color:var(--paper)}
+  .drop p{font-size:13px;margin-top:6px;color:var(--gray5)}
+  .intake{margin-bottom:10px;overflow:hidden}
+  .intake-row{display:flex;align-items:center;gap:14px;padding:13px 18px}
+  .intake .file{font-family:var(--mono);font-size:12.5px;flex-basis:290px;flex-shrink:0;color:var(--paper);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .intake .guess{flex:1;font-size:13.5px}
+  .intake .guess .as{font-weight:600}
+  .intake .guess .ev{display:block;font-size:12.5px;color:var(--gray5);margin-top:2px}
+  .intake .conf{font-family:var(--mono);font-size:11px;color:var(--gray4);width:56px;text-align:right}
+  .intake .acts{display:flex;gap:8px}
+  .intake.confirmed{border-color:var(--g700)}
+  .intake.confirmed .acts{display:none}
+  .intake .okmark{display:none;font-family:var(--mono);font-size:11px;color:var(--lime)}
+  .intake.confirmed .okmark{display:inline}
+
+  /* run stage */
+  .runline{display:flex;align-items:center;gap:14px;padding:13px 18px;border-top:1px solid var(--g700);font-size:14px}
+  .runline:first-child{border-top:none}
+  .runline .nm{flex:1}
+  .runline .desc{color:var(--gray5);font-size:12.5px}
+  .runline .res{font-family:var(--mono);font-size:12px}
+  .gate{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
+  .gate .card{padding:18px 20px}
+  .gate .big{font-family:var(--mono);font-size:30px;margin:6px 0 2px}
+  .gate .big.ok{color:var(--lime)}
+  .gate .sub{font-size:12.5px;color:var(--gray5)}
+
+  /* review */
+  .review-grid{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;align-items:start}
+  .sheet{overflow-x:auto}
+  table.ddr{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12.5px}
+  table.ddr th{background:var(--g700);color:var(--gray4);text-align:left;padding:8px 12px;font-weight:500;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;font-family:var(--body)}
+  table.ddr td{padding:8px 12px;border-top:1px solid var(--g700);cursor:pointer}
+  table.ddr td.num{text-align:right}
+  table.ddr td:hover{background:var(--g700)}
+  table.ddr td.sel{box-shadow:inset 0 0 0 1.5px var(--lime)}
+  .v-CONFIRMED{color:var(--lime)} .v-UNVERIFIABLE{color:var(--gray5)} .v-ANCHORED{color:var(--lime)}
+  .trace .label{display:block;margin-bottom:8px}
+  .trace{padding:18px 20px;position:sticky;top:76px}
+  .trace .path{font-family:var(--mono);font-size:11.5px;color:var(--gray4);word-break:break-all}
+  .trace .snippet{background:var(--g900);border:1px solid var(--g700);border-radius:6px;padding:12px 14px;font-family:var(--mono);font-size:12px;color:var(--paper);margin:12px 0;line-height:1.7}
+  .trace .snippet mark{background:transparent;color:var(--lime)}
+  .trace .verdict{display:flex;gap:8px;margin-top:14px}
+  .kv{display:grid;grid-template-columns:110px 1fr;gap:4px 12px;font-size:13px;margin-top:10px}
+  .kv .k{color:var(--gray5)}
+  .kv .v{font-family:var(--mono);font-size:12px}
+
+  /* ship */
+  .tree{font-family:var(--mono);font-size:12.5px;line-height:2;padding:18px 22px}
+  .tree .d{color:var(--paper)}
+  .tree .cnt{color:var(--gray5)}
+  .tree .miss{color:var(--amber)}
+  .decisions{margin-top:16px}
+  .dec-row{display:flex;gap:14px;padding:10px 18px;border-top:1px solid var(--g700);font-size:13px}
+  .dec-row:first-child{border-top:none}
+  .dec-row .act{font-family:var(--mono);font-size:11px;width:84px;flex-shrink:0;letter-spacing:.06em}
+  .dec-row .act.exc{color:var(--gray5)} .dec-row .act.inc{color:var(--lime)} .dec-row .act.mis{color:var(--amber)}
+  .dec-row .why2{color:var(--gray4)}
+  .dec-row .f{color:var(--paper);font-family:var(--mono);font-size:12px}
+
+  /* lessons */
+  .lesson{display:flex;gap:14px;padding:13px 18px;border-top:1px solid var(--g700);font-size:13.5px;align-items:baseline}
+  .lesson:first-child{border-top:none}
+  .lesson .scope{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;color:var(--gray5);width:74px;flex-shrink:0;text-transform:uppercase}
+  .lesson .txt{flex:1;color:var(--gray4)}
+  .lesson .txt strong{color:var(--paper);font-weight:600}
+  .lesson .src{font-family:var(--mono);font-size:11px;color:var(--gray5)}
+
+  .footer-note{margin-top:48px;font-family:var(--mono);font-size:11px;color:var(--gray5);display:flex;justify-content:space-between;border-top:1px solid var(--g700);padding-top:18px}
+  @media(max-width:900px){.review-grid,.howto,.gate{grid-template-columns:1fr}.stepper{flex-wrap:wrap}.step{min-width:32%}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="wordmark">minorh<span class="dot">.</span></span>
+  <span class="proj">TITLE DUE DILIGENCE · ACQUISITION REVIEW</span>
+  <span class="spacer"></span>
+  <span class="proto-tag">Prototype</span>
+  <span class="who">Renato G.</span>
+</div>
+
+<div class="shell">
+
+<!-- ============================ SCREEN 1 · UNITS BOARD ============================ -->
+<div class="screen active" id="scr-board">
+  <div class="board-head">
+    <div>
+      <div class="h-display">Every unit knows its next step.</div>
+      <p>The system carries the method. Open a unit and it tells you exactly what it needs, where to find it, and what it has already proven.</p>
+    </div>
+    <button class="btn primary" onclick="alert('In the real app: pick any unit from the Project Log — the manifest is built automatically from the reference workbooks.')">Open a unit</button>
+  </div>
+
+  <div class="unit-grid">
+    <div class="unit-card card" onclick="go('scr-unit')">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div><div class="name">MAXWELL A UNIT</div><div class="geo">DPU K1400813 · 160.00 AC · A-122 LEAGUE 12</div></div>
+        <span class="pill"><span class="dot ok"></span>REVIEW</span>
+      </div>
+      <div class="stagebar"><span class="done"></span><span class="done"></span><span class="done"></span><span class="done"></span><span class="now"></span><span></span></div>
+      <div class="next">Next step: <strong>4 cells await your verdict</strong> — then package for submission.</div>
+      <div class="unit-meta">
+        <span class="pill"><span class="dot ok"></span>0 MISMATCH</span>
+        <span class="pill"><span class="dot ok"></span>0 FAIL</span>
+        <span class="pill">2271/2271 checked</span>
+      </div>
+    </div>
+
+    <div class="unit-card card" onclick="go('scr-unit')">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div><div class="name">BOWEN A UNIT</div><div class="geo">DPU K1400725 · VOL 479 PG 590 · A-64/A-682/A-227</div></div>
+        <span class="pill"><span class="dot warn"></span>ON HOLD</span>
+      </div>
+      <div class="stagebar"><span class="done"></span><span class="now"></span><span></span><span></span><span></span><span></span></div>
+      <div class="next">Blocked: <strong>scope question with client</strong> — the 9 XREF opinions cover the neighboring BOWEN UNIT, not this one.</div>
+      <div class="unit-meta">
+        <span class="pill"><span class="dot warn"></span>Awaiting Trevor</span>
+        <span class="pill">0 own title opinions</span>
+      </div>
+    </div>
+
+    <div class="unit-card card" onclick="go('scr-unit')">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div><div class="name">CARNEGIE UNIT</div><div class="geo">2 PDP WELLBORES</div></div>
+        <span class="pill"><span class="dot idle"></span>GATHER</span>
+      </div>
+      <div class="stagebar"><span class="done"></span><span class="now"></span><span></span><span></span><span></span><span></span></div>
+      <div class="next">Next step: <strong>7 of 11 evidence items still to fetch</strong> — the checklist shows where each one lives.</div>
+      <div class="unit-meta">
+        <span class="pill">4/11 evidence in</span>
+      </div>
+    </div>
+
+    <div class="unit-card card" onclick="go('scr-unit')">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div><div class="name">ALAMO UNIT B</div><div class="geo">1 PDP WELLBORE</div></div>
+        <span class="pill"><span class="dot idle"></span>NOT STARTED</span>
+      </div>
+      <div class="stagebar"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="next">Next step: <strong>open the unit</strong> — the manifest builds itself from the Project Log, XREF and Well List.</div>
+      <div class="unit-meta">
+        <span class="pill">assigned 07/21</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer-note"><span>minorh. title workbench — navigable prototype</span><span>click MAXWELL A UNIT to walk the flow</span></div>
+</div>
+
+<!-- ============================ SCREEN 2 · UNIT WORKSPACE ============================ -->
+<div class="screen" id="scr-unit">
+  <div class="crumbs"><a href="#" onclick="go('scr-board');return false">UNITS</a> / MAXWELL A UNIT</div>
+
+  <div class="unit-head">
+    <div>
+      <div class="h-display">Maxwell A Unit</div>
+      <div class="facts">
+        <div class="fact"><span class="label">Well</span><span class="v">#1H · API 42-337-34216</span></div>
+        <div class="fact"><span class="label">Target WI / NRI</span><span class="v">0.99248600 / 0.74861000</span></div>
+        <div class="fact"><span class="label">Unit designation</span><span class="v">DPU K1400813 · 160.00 AC</span></div>
+        <div class="fact"><span class="label">Leases</span><span class="v">30 · book/page 30/30</span></div>
+      </div>
+    </div>
+    <button class="btn secondary" onclick="showStage(5)">View submission package</button>
+  </div>
+
+  <div class="stepper" role="tablist">
+    <button class="step done" onclick="showStage(0)"><span class="n">1 · OPEN </span><span class="t">Case opened</span></button>
+    <button class="step done" onclick="showStage(1)"><span class="n">2 · GATHER </span><span class="t">Evidence checklist</span></button>
+    <button class="step done" onclick="showStage(2)"><span class="n">3 · DROP </span><span class="t">Intake &amp; classify</span></button>
+    <button class="step done" onclick="showStage(3)"><span class="n">4 · RUN </span><span class="t">Build &amp; prove</span></button>
+    <button class="step current" onclick="showStage(4)"><span class="n">5 · REVIEW</span><span class="t">Your verdicts</span></button>
+    <button class="step" onclick="showStage(5)"><span class="n">6 · SHIP</span><span class="t">Package</span></button>
+  </div>
+
+  <!-- ················ STAGE 0 · OPEN ················ -->
+  <div class="stage-pane" id="stage-0">
+    <div class="pane-head"><div class="h2">What the record says</div><div class="hint">Built automatically from the Project Log, Lease-to-Well XREF and Well List. You typed one thing: the unit name.</div></div>
+    <p class="pane-sub">This is the unit's opening picture — before any document is read. Everything below becomes an item on the evidence checklist.</p>
+    <div class="card" style="padding:20px 22px">
+      <div class="kv" style="grid-template-columns:200px 1fr;margin-top:0">
+        <span class="k">Seller</span><span class="v">EOG RESOURCES INC</span>
+        <span class="k">County / State</span><span class="v">— from Project Log, TX</span>
+        <span class="k">Expected title opinions</span><span class="v">T0140249 · T0140422 · T0140253 · T0140555 · T0140319 · T0130363</span>
+        <span class="k">Unit designation</span><span class="v">DPU K1400813 (+ Amendment)</span>
+        <span class="k">Reference contracts</span><span class="v">K1400170 (Farmout/JOA EnCana↔EOG, 12/20/2007)</span>
+        <span class="k">Leases in unit</span><span class="v">30 (per XREF — to be confirmed against DPU Exhibit A)</span>
+        <span class="k">Declared interest</span><span class="v">WI 0.99248600 · NRI 0.74861000 (Well List, wellbore)</span>
+      </div>
+    </div>
+    <div class="why" style="margin-top:16px"><strong>Why the DPU cross-check is mandatory:</strong> file names lie and leases feed multiple units. The unit is what the recorded Designation of Pooled Unit says it is — Exhibit A is the ground truth for the lease list. (Lesson learned on Bowen A.)</div>
+  </div>
+
+  <!-- ················ STAGE 1 · GATHER ················ -->
+  <div class="stage-pane" id="stage-1">
+    <div class="pane-head"><div class="h2">Evidence checklist — 9 of 11 in</div><div class="hint">Each item explains what it is, where it lives, and why it matters. Click a row to open the field guide.</div></div>
+    <p class="pane-sub">You never memorize the method — the checklist is the method. Fetch what's missing, drop it in the intake, and the row closes itself.</p>
+
+    <div class="chk card">
+      <div class="chk-row" onclick="this.parentElement.classList.toggle('open')">
+        <span class="st"><span class="pill"><span class="dot ok"></span>IN</span></span>
+        <span class="what"><span class="t">Title opinions — Cox tract</span><span class="s">Revised Original + Supplement · cert 06/18/2009 controls</span></span>
+        <span class="ref">T0140249 · T0140422</span><span class="chev">▶</span>
+      </div>
+      <div class="chk-body">
+        Both opinions received and confirmed. The Supplement's certification date controls the supplemental-title window for this tract.
+      </div>
+    </div>
+
+    <div class="chk card">
+      <div class="chk-row" onclick="this.parentElement.classList.toggle('open')">
+        <span class="st"><span class="pill"><span class="dot warn"></span>FETCH</span></span>
+        <span class="what"><span class="t">Title opinion — Brumbaugh tract (original)</span><span class="s">Supplement T0140555 is in; the original was not located as a separate document</span></span>
+        <span class="ref">T0140319</span><span class="chev">▶</span>
+      </div>
+      <div class="chk-body">
+        <div class="howto">
+          <div class="cell"><span class="label">What it looks like</span><p>A PDF whose first pages say <span class="mono">“TITLE OPINION”</span> with a legal description of the Brumbaugh 45.62-acre tract and a certification date <em>earlier</em> than 06/01/2010.</p></div>
+          <div class="cell"><span class="label">Where to look</span><p>Drive → lease folder <span class="mono">0220345-001</span> → files starting <span class="mono">“T-O”</span>. Note: folder <span class="mono">T0130363</span> exists but is empty — flag it, don't wait on it.</p></div>
+        </div>
+        <div class="why"><strong>Why it matters:</strong> the Supplement controls anyway (latest cert date wins), so this item is wanted-not-blocking. If it never appears, the report says so instead of pretending.</div>
+        <div style="margin-top:14px;display:flex;gap:10px"><button class="btn small secondary" onclick="event.stopPropagation()">Mark as not locatable</button><button class="btn small ghost" onclick="event.stopPropagation()">Copy Drive search</button></div>
+      </div>
+    </div>
+
+    <div class="chk card">
+      <div class="chk-row" onclick="this.parentElement.classList.toggle('open')">
+        <span class="st"><span class="pill"><span class="dot ok"></span>IN</span></span>
+        <span class="what"><span class="t">Unit designation + amendment, with Exhibit A</span><span class="s">Recorded DPU — the ground truth for the 30-lease list</span></span>
+        <span class="ref">K1400813</span><span class="chev">▶</span>
+      </div>
+      <div class="chk-body">Exhibit A read and reconciled: 30/30 leases matched to the XREF list with book/page. No orphans, no strays.</div>
+    </div>
+
+    <div class="chk card">
+      <div class="chk-row" onclick="this.parentElement.classList.toggle('open')">
+        <span class="st"><span class="pill"><span class="dot ok"></span>IN</span></span>
+        <span class="what"><span class="t">County supplemental search — 3 name windows</span><span class="s">Grantor/grantee by name + date window, from each tract's cert date to today</span></span>
+        <span class="ref">197 instruments</span><span class="chev">▶</span>
+      </div>
+      <div class="chk-body">
+        <div class="howto">
+          <div class="cell"><span class="label">How to search</span><p>TexasFile → search by <strong>name</strong> (EOG RESOURCES INC as grantor and grantee) + <strong>date window</strong> per tract. Sift by survey/block on the reduced list, by eye.</p></div>
+          <div class="cell"><span class="label">Never</span><p>Never search by abstract number — the abstract filter drops recorded instruments silently. This is a recorded project lesson, enforced here.</p></div>
+        </div>
+        <div class="why"><strong>Result:</strong> 197 post-certification instruments reviewed one by one — none adverse to EOG. Every exclusion carries its reason into the packaging manifest.</div>
+      </div>
+    </div>
+
+    <div class="chk card">
+      <div class="chk-row" onclick="this.parentElement.classList.toggle('open')">
+        <span class="st"><span class="pill"><span class="dot warn"></span>FETCH</span></span>
+        <span class="what"><span class="t">RRC production report — well #1H</span><span class="s">Goes in Well Files. Not found in the client's FILES (~1,389 archive members swept)</span></span>
+        <span class="ref">42-337-34216</span><span class="chev">▶</span>
+      </div>
+      <div class="chk-body">
+        <div class="howto">
+          <div class="cell"><span class="label">Where to look</span><p>RRC public GIS/production query by API <span class="mono">42-337-34216</span>, lease name MAXWELL A UNIT. Export the production summary PDF.</p></div>
+          <div class="cell"><span class="label">If not found</span><p>The submission ships with Well Files empty and a visible MISSING note — never a silent gap, never an invented file.</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ················ STAGE 2 · DROP ················ -->
+  <div class="stage-pane" id="stage-2">
+    <div class="pane-head"><div class="h2">Intake — drop anything</div><div class="hint">No naming rules. The system reads each file's content, matches it to the checklist, and shows its evidence. You confirm or correct — one click.</div></div>
+    <div class="drop">
+      <div class="big">Drop files, folders or zips here</div>
+      <p>PDFs, spreadsheets, screenshots, archives — file names are treated as hints, never as rules.</p>
+    </div>
+
+    <div class="intake card" id="in1">
+      <div class="intake-row">
+        <span class="file">Scan_0071 (3).pdf</span>
+        <span class="guess"><span class="as">Title opinion — Kramer tract <span class="mono dim">→ T0140253</span></span>
+        <span class="ev">Read p.1: “SUPPLEMENTAL TITLE OPINION … 22.33 acres … KRAMER” · cert 08/03/2009 · matches expected tract</span></span>
+        <span class="conf">98%</span>
+        <span class="okmark">CONFIRMED ✓</span>
+        <span class="acts"><button class="btn small confirm" onclick="confirmRow('in1')">Confirm</button><button class="btn small ghost">Reclassify</button></span>
+      </div>
+    </div>
+
+    <div class="intake card" id="in2">
+      <div class="intake-row">
+        <span class="file">ENCANA TO EOG FARMOUT pkg.zip</span>
+        <span class="guess"><span class="as">Seller's file — Farmout/JOA <span class="mono dim">→ K1400170</span></span>
+        <span class="ev">Content says farmout dated 12/20/2007, AAPL 610-1989 — “TO” in the name is the word “to”, not a Title Opinion (learned rule)</span></span>
+        <span class="conf">96%</span>
+        <span class="okmark">CONFIRMED ✓</span>
+        <span class="acts"><button class="btn small confirm" onclick="confirmRow('in2')">Confirm</button><button class="btn small ghost">Reclassify</button></span>
+      </div>
+    </div>
+
+    <div class="intake card" id="in3">
+      <div class="intake-row">
+        <span class="file">IMG_2204.png</span>
+        <span class="guess"><span class="as">County record screenshot — needs your eyes</span>
+        <span class="ev">OCR is unreliable on UI screenshots. Looks like TexasFile results for KRAMER — please confirm the doc# visually before it's cited.</span></span>
+        <span class="conf">61%</span>
+        <span class="okmark">CONFIRMED ✓</span>
+        <span class="acts"><button class="btn small confirm" onclick="confirmRow('in3')">View &amp; confirm</button><button class="btn small ghost">Reclassify</button></span>
+      </div>
+    </div>
+
+    <div class="why" style="margin-top:18px"><strong>Every correction teaches the system.</strong> Reclassify a file once and the rule is recorded to the lessons ledger — scoped to this project or promoted to global. Nothing is ever discarded silently: unmatched files go to a visible “unplaced” list with a reason.</div>
+
+    <div class="pane-head" style="margin-top:34px"><div class="h2">Lessons ledger</div><div class="hint">What the system has learned from human corrections. Rules, not code.</div></div>
+    <div class="card">
+      <div class="lesson"><span class="scope">GLOBAL</span><span class="txt"><strong>“TO” in a file name only means Title Opinion with a separator</strong> (T-O / T O) — otherwise it's the English word “to”.</span><span class="src">from ENCANA TO EOG, 07/16</span></div>
+      <div class="lesson"><span class="scope">GLOBAL</span><span class="txt"><strong>Identity decisions on screenshots require visual confirmation</strong> — OCR alone is never sufficient.</span><span class="src">from Kramer doc# 96546</span></div>
+      <div class="lesson"><span class="scope">PROJECT</span><span class="txt"><strong>County search by name + date window, never by abstract</strong> — the abstract filter silently drops instruments.</span><span class="src">from Maxwell supplemental</span></div>
+      <div class="lesson"><span class="scope">PROJECT</span><span class="txt"><strong>Wellbore vs. leasehold WI gap is expected where a JOA exists</strong> — explain the non-consent uplift, don't flag a defect.</span><span class="src">from K1400170 review</span></div>
+    </div>
+  </div>
+
+  <!-- ················ STAGE 3 · RUN ················ -->
+  <div class="stage-pane" id="stage-3">
+    <div class="pane-head"><div class="h2">Build &amp; prove</div><div class="hint">One click. The allowlist is derived from your confirmed evidence — never typed by hand, never stale.</div></div>
+    <p class="pane-sub">The report is only as good as its proof, so the gates are not optional: every written cell is structurally checked, then re-read against its source document.</p>
+
+    <div class="card">
+      <div class="runline"><span class="res" style="color:var(--lime)">✓</span><span class="nm">Parse title opinions <span class="desc">— 6 opinions, controlling cert date per tract resolved</span></span><span class="res dim">14s</span></div>
+      <div class="runline"><span class="res" style="color:var(--lime)">✓</span><span class="nm">Reconcile unit composition against DPU Exhibit A <span class="desc">— 30/30 leases, book/page complete</span></span><span class="res dim">3s</span></div>
+      <div class="runline"><span class="res" style="color:var(--lime)">✓</span><span class="nm">Compute interests in exact fractions <span class="desc">— leasehold WI 0.816596 · wellbore 0.992486 · gap explained by JOA uplift</span></span><span class="res dim">&lt;1s</span></div>
+      <div class="runline"><span class="res" style="color:var(--lime)">✓</span><span class="nm">Write DDR from template <span class="desc">— all tabs, template untouched, audit trail per cell</span></span><span class="res dim">6s</span></div>
+      <div class="runline"><span class="res" style="color:var(--lime)">✓</span><span class="nm">Structural gate <span class="desc">— 2,271 of 2,271 cells checked · report kept as sidecar, never a tab</span></span><span class="res dim">41s</span></div>
+      <div class="runline"><span class="res" style="color:var(--lime)">✓</span><span class="nm">Source-truth gate <span class="desc">— every cited cell re-read from its document (OCR) · runs in background, no rush</span></span><span class="res dim">8m 12s</span></div>
+    </div>
+
+    <div class="gate">
+      <div class="card"><span class="label">Structural gate</span><div class="big ok">0 FAIL</div><div class="sub">2,271/2,271 cells · sheet set matches template · no formula breakage</div></div>
+      <div class="card"><span class="label">Source-truth gate</span><div class="big ok">0 MISMATCH</div><div class="sub">101 confirmed from documents · 199 named unverifiable (documents not on file) · 0 forced</div></div>
+    </div>
+    <div class="why" style="margin-top:16px"><strong>Correct-and-fewer beats plausible-and-wrong.</strong> A cell the system cannot prove is named unverifiable — with the reason — instead of being filled with something plausible.</div>
+  </div>
+
+  <!-- ················ STAGE 4 · REVIEW ················ -->
+  <div class="stage-pane active" id="stage-4">
+    <div class="pane-head"><div class="h2">Your verdicts — 4 cells</div><div class="hint">The machine reads; you decide. Only cells that need human eyes reach this queue. Click any cell to see its full chain of proof.</div></div>
+    <div class="review-grid">
+      <div class="card sheet">
+        <table class="ddr">
+          <thead><tr><th>Tab · Cell</th><th>Field</th><th>Value</th><th>Verification</th></tr></thead>
+          <tbody>
+            <tr>
+              <td onclick="trace(this,0)">Ownership · D14</td><td onclick="trace(this,0)">Kramer NRI</td><td class="num" onclick="trace(this,0)">1.00000000</td><td onclick="trace(this,0)"><span class="v-CONFIRMED">CONFIRMED</span></td>
+            </tr>
+            <tr>
+              <td onclick="trace(this,1)">Title Review · B31</td><td onclick="trace(this,1)">Kramer curative — OPR ref</td><td class="num" onclick="trace(this,1)">495/388</td><td onclick="trace(this,1)"><span class="v-ANCHORED">NEEDS EYES</span></td>
+            </tr>
+            <tr>
+              <td onclick="trace(this,2)">Lease Review · F52</td><td onclick="trace(this,2)">Cox lease clause (21 leases)</td><td class="num" onclick="trace(this,2)">—</td><td onclick="trace(this,2)"><span class="v-UNVERIFIABLE">UNVERIFIABLE</span></td>
+            </tr>
+            <tr>
+              <td onclick="trace(this,3)">Title Review · B44</td><td onclick="trace(this,3)">4th memorandum — Jenkins</td><td class="num" onclick="trace(this,3)">492/510?</td><td onclick="trace(this,3)"><span class="v-ANCHORED">NEEDS EYES</span></td>
+            </tr>
+          </tbody>
+        </table>
+        <div style="padding:12px 16px;font-size:12.5px;color:var(--gray5);border-top:1px solid var(--g700)">Showing the review queue. The full sheet (2,271 cells) is browsable — every cell traces the same way.</div>
+      </div>
+
+      <div class="card trace" id="tracebox">
+        <span class="label">Chain of proof</span>
+        <div id="trace-content"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ················ STAGE 5 · SHIP ················ -->
+  <div class="stage-pane" id="stage-5">
+    <div class="pane-head"><div class="h2">Submission package</div><div class="hint">Assembled from confirmed evidence only. Client FILES are read-only — everything here is a copy. What's absent is said out loud.</div></div>
+    <div class="review-grid">
+      <div class="card tree">
+        <div class="d">Maxwell A Unit/1. Landman Submitted/</div>
+        <div>&nbsp;&nbsp;1. PLM Report/ <span class="cnt">— DDR v13 · gates green</span></div>
+        <div>&nbsp;&nbsp;2. Title Opinions/ <span class="cnt">— 9 files · deduped by opinion chain</span></div>
+        <div>&nbsp;&nbsp;3. Unit Designation/ <span class="cnt">— 4 files · own DPU + amendments only</span></div>
+        <div>&nbsp;&nbsp;4. Leases/ <span class="cnt">— 6 files · zips expanded</span></div>
+        <div>&nbsp;&nbsp;5. Title Documents/ <span class="cnt">— 3 files · named vol.page</span></div>
+        <div>&nbsp;&nbsp;6. Seller's Files/ <span class="cnt">— 6 files · recorded instruments only</span></div>
+        <div>&nbsp;&nbsp;7. Well Files/ <span class="miss">— empty · MISSING: RRC production report #1H</span></div>
+        <div style="margin-top:10px" class="cnt">SUBMISSION_MANIFEST.txt — every placement, exclusion and gap, with reasons</div>
+      </div>
+      <div>
+        <div class="card decisions">
+          <div class="dec-row"><span class="act inc">PLACED</span><span><span class="f">T-O SUPP KRAMER…pdf</span><br><span class="why2">controlling opinion, Kramer chain</span></span></div>
+          <div class="dec-row"><span class="act exc">EXCLUDED</span><span><span class="f">DPU — HUTSON UNIT.pdf</span><br><span class="why2">foreign unit designation (survey A-272, outside)</span></span></div>
+          <div class="dec-row"><span class="act exc">EXCLUDED</span><span><span class="f">draft assignment (unrecorded).pdf</span><br><span class="why2">not a recorded instrument — Seller's Files takes “- REC” only</span></span></div>
+          <div class="dec-row"><span class="act mis">MISSING</span><span><span class="f">RRC production report #1H</span><br><span class="why2">not in client FILES (1,389 members swept) — fetch via RRC by API</span></span></div>
+        </div>
+        <div style="margin-top:16px;display:flex;gap:12px">
+          <button class="btn primary" onclick="alert('In the real app: assembles the package in the unit folder, writes SUBMISSION_MANIFEST.txt, fills submission date at send time.')">Package for submission</button>
+          <button class="btn ghost">Open manifest</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer-note"><span>MAXWELL A UNIT · state file v13 · everything above is reproducible from the evidence ledger</span><span><a href="#" onclick="go('scr-board');return false">← all units</a></span></div>
+</div>
+
+</div><!-- /shell -->
+
+<script>
+function go(id){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  window.scrollTo({top:0});
+}
+function showStage(n){
+  document.querySelectorAll('.stage-pane').forEach(p=>p.classList.remove('active'));
+  document.getElementById('stage-'+n).classList.add('active');
+  document.querySelectorAll('.step').forEach((s,i)=>{
+    s.classList.toggle('current', i===n);
+  });
+}
+function confirmRow(id){
+  document.getElementById(id).classList.add('confirmed');
+}
+
+const TRACES = [
+  {kv:{'Value':'NRI 1.00000000','Written by':'ddr_writer · ownership basis','Source':'T0140253 — Supplemental Title Opinion (Kramer)','Page':'p. 4','Method':'CONFIRMED — value re-read from source by the source-truth gate','Math':'exact fraction: 1/1'},
+   snip:'…KRAMER tract, 22.33 acres… net revenue interest of <mark>1.00000000</mark> in and to said tract…',
+   verdict:false},
+  {kv:{'Value':'OPR 495/388','Written by':'analyst curative note','Source':'TexasFile screenshot IMG_2204.png','Page':'—','Method':'NEEDS EYES — OCR could not read the doc# on the screenshot; the citation was typed by you','Math':'—'},
+   snip:'[county index screenshot] KRAMER … OPR <mark>495 / 388</mark> … please confirm the volume/page visually against the image.',
+   verdict:true},
+  {kv:{'Value':'— (empty)','Written by':'nothing — cell intentionally blank','Source':'lease documents 0220344-xxx not located on Drive (21 Cox leases)','Page':'—','Method':'UNVERIFIABLE — document unavailable; review kept at title-opinion level','Math':'—'},
+   snip:'A blank cell means: <mark>source unavailable</mark> — (a) document not located, (b) pending third-party definition, or (c) fact absent from the record. This one is (a).',
+   verdict:false},
+  {kv:{'Value':'Vol 492 Pg 510 (candidate)','Written by':'curative reconciliation','Source':'Brashear recorded memorandum','Page':'p. 1','Method':'NEEDS EYES — Jenkins may be inside the Brashear instrument; confirm before citing as the 4th memorandum','Math':'—'},
+   snip:'…memorandum of oil and gas lease… <mark>Vol 492, Pg 510</mark>… parties include BRASHEAR… (Jenkins reference to be confirmed visually)',
+   verdict:true}
+];
+function trace(td,i){
+  document.querySelectorAll('table.ddr td').forEach(c=>c.classList.remove('sel'));
+  td.parentElement.querySelectorAll('td').forEach(c=>c.classList.add('sel'));
+  const t=TRACES[i];
+  let kv='<div class="kv">';
+  for(const k in t.kv){kv+=`<span class="k">${k}</span><span class="v">${t.kv[k]}</span>`}
+  kv+='</div>';
+  let v = t.verdict ? `<div class="verdict"><button class="btn small primary" onclick="this.closest('.verdict').innerHTML='<span class=mono style=color:var(--lime);font-size:12px>VERDICT RECORDED ✓ — added to the evidence ledger</span>'">Confirm — it matches</button><button class="btn small secondary">It does not match</button></div>` : '';
+  document.getElementById('trace-content').innerHTML =
+    kv + `<div class="snippet">${t.snip}</div>` + v +
+    `<div style="margin-top:12px;font-size:12px;color:var(--gray5)">Your verdict is stored with the cell — the next run remembers it.</div>`;
+}
+trace(document.querySelector('table.ddr td'),0);
+</script>
+</body>
+</html>

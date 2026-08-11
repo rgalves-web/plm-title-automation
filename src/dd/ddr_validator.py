@@ -1107,6 +1107,7 @@ def run_final_validation(
     source_roots=(),
     run_source_truth_check: bool = True,
     declared_sheet_exclusions: dict[str, str] | None = None,
+    as_of=None,
 ) -> "ValidationReport":
     """Validate a written DDR and drop its sidecar. The pipeline's last act.
 
@@ -1135,6 +1136,7 @@ def run_final_validation(
         client_name=client_name,
         template_workbook=template_workbook,
         declared_sheet_exclusions=declared_sheet_exclusions,
+        today=as_of,   # None = real today (send-time); a date = regression as-of
     )
     if run_source_truth_check and source_roots:
         from src.dd.source_truth_check import run_source_truth

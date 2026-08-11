@@ -11,7 +11,7 @@ A local-first title-automation system for Purple Land Management (PLM) land work
 - **MOR** — Master Ownership Report / runsheet. Mature, tested.
 - **DD** — Due Diligence. Produces a per-unit **DDR** (Excel deliverable) for **Project Emirates** (engagement `BKV122TX`; EOG Resources Inc. as Seller; ~300 units, Montague County, Texas).
 
-The authoritative description of current state is **`FULL_SYSTEM_ASSESSMENT.md`**. Read it before reasoning about architecture.
+The authoritative description of current state is **`docs/WORKBENCH_STATUS.md`** plus the specs in **`docs/`**. Read them before reasoning about architecture. `FULL_SYSTEM_ASSESSMENT.md` and `SYSTEM_ASSESSMENT.md` are historical references (their golden rules remain binding; their "current state" sections do not).
 
 ---
 
@@ -25,6 +25,13 @@ The authoritative description of current state is **`FULL_SYSTEM_ASSESSMENT.md`*
 6. **No silent learning.** A user correction is task-local until explicitly promoted. Never mutate config, prompts, Golden Set, or code as a side effect of a chat message.
 7. **Client data never leaves the machine.** Client PDFs, XREFs, Project Logs, DDRs, transcripts, and any EOG/PLM material are confidential. Never commit them, never push them to any remote, never send whole documents to an API when an extracted snippet suffices, never paste them into external services.
 8. **Least-invasive fix first.** Prefer a config / rule / Golden-Set / memory fix over a code change. Change code only when nothing safer solves it, and only with a regression test. Never change source and declare success without running tests.
+9. **AI decides what a document is and what it says — always with a citation** (file, page, quote, confidence). **Code proves** (`fractions.Fraction`, the gates, round-trip). No value enters a case or deliverable without evidence.
+10. **A filename is a weak prior, never a rule.** No triage SKIP without a first-page peek or strong metadata (duplicate hash / non-document type).
+11. **Every recorded reason (blank, SKIP, unplaced, waiver) comes from the closed vocabulary** (`knowledge/rules/exclusion_reasons.yaml`). Free prose in a reason field is a writing error.
+12. **No L2 rule classifies without content having been read.** L2 delimits and supplies vocabulary; the AI reads and proposes; the human arbitrates by risk tier.
+13. **`knowledge/` never contains a unit fact** in `global`/`project`/`ontology`/`taxonomy`/`rules` (enforced by a linter in the suite). Unit facts live in `data/units/`.
+14. **Every lesson has a fixture** (two-part format); a fixture without bytes on disk is a counted SKIP, never a silent pass.
+15. **The single source of truth for case files is the `evidence_ledger`**; `catalog.yaml`/`graph.yaml` are projections of it.
 
 ---
 

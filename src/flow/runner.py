@@ -56,8 +56,13 @@ def revalidate_from_state(
     run_source_truth: bool = False,
     persist: bool = True,
     units_dir: str | Path | None = None,
+    as_of: Any = None,
 ) -> Any:
     """Re-run the mandatory gates for a unit using ONLY its case file.
+
+    as_of: date the submission-date rule judges against. None = real today
+    (send-time semantics). Regressions over an already-shipped deliverable pin
+    it to the shipped date, so a past date is not a manufactured FAIL.
 
     Structural gate always; source-truth gate when ``run_source_truth`` is set
     (slow OCR — configure the window via config). Records a compact gate summary
@@ -99,6 +104,7 @@ def revalidate_from_state(
         source_roots=source_roots,
         run_source_truth_check=run_source_truth,
         declared_sheet_exclusions=declared_sheets or None,
+        as_of=as_of,
     )
     apply_sanctions(report, state.sanctions)
 
