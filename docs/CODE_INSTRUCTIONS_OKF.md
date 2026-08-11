@@ -106,8 +106,10 @@ Disciplina de todo PR: branch a partir de `main`; suíte inteira verde antes e d
 - Busca/fetch no Drive da PLM por nº de TO, nº de lease, book.page, nome; drop automático no S4; upload do kit com confirmação de 1 clique. O que não achar volta como item de checklist com termos de busca.
 - **Aceitação:** plano §3 Fase C, medida no perímetro de Josh B.
 
-### ★ CHECKPOINT — Ship Josh B
-S1→S8 com F1–F4+C ativos. Coletar e reportar: horas do operador/unidade · custo de IA/unidade · rodadas até convergência · % auto-confirm correto na amostragem · SLA real vs ≤2 dias Phase I. **Nenhum PR além deste ponto sem os números.**
+### ★ CHECKPOINT — duas metades (corrigido 2026-08-11)
+**Josh B foi entregue à mão** (pacote 06/08, encerrada 10/08). É o **terceiro fixture**, não o alvo vivo.
+- **A — replay de Josh B (corretude):** o sistema reprocessa a frio, em leitura, e bate item a item contra `docs/JOSH_B_*`. Achar menos que o gabarito = fase não fechou; achar mais = achado a verificar antes de celebrar.
+- **B — a próxima unidade designada pela PLM (eficiência):** S1→S8 com F1–F4+C. Coletar e reportar: horas do operador/unidade · custo de IA/unidade · rodadas até convergência · % auto-confirm correto na amostragem · SLA real vs ≤2 dias Phase I. **Nenhum PR além deste ponto sem os números.**
 
 ### PR-6+ — condicionais ao checkpoint
 F5 lições enxutas (schema OKF §5, escopos unit/project, fixtures D1, migração das 7 sementes, deleção dos regexes) · Fase A `audit.py` (5 lentes, tier pré-ship, D6) · `gap_hunter.py` (sobre o grafo; gabarito = `JOSH_B_kickoff_download_list.md`) · browser agents RRC/TexasFile (por nome+data, nunca por abstract) · board com fila/clock/WIP paralelo.
@@ -125,7 +127,7 @@ F5 lições enxutas (schema OKF §5, escopos unit/project, fixtures D1, migraç�
 
 ## 6. Definition of done da missão
 
-1. Josh B shipped: S1→S8 com OKF fatia-fina + connector, kit Phase I no formato do `PLM_PHASE1_SUBMISSION_SPEC.md`, pendências declaradas, md5 round-trip.
-2. As 5 métricas do checkpoint reportadas.
+1. **Josh B replay** reproduz o gabarito escrito a frio (perímetro, divergências, Lease Review 87,4% com os mesmos motivos, 19 pendências) — e **a próxima unidade** sai shipada pelo sistema: kit Phase I no formato do `PLM_PHASE1_SUBMISSION_SPEC.md`, pendências declaradas, md5 round-trip.
+2. As 5 métricas do Checkpoint B reportadas.
 3. Bowen A e Maxwell A revalidando 0 FAIL / 0 MISMATCH em `main`.
 4. `knowledge/` versionado, linter verde, zero conhecimento preso em regex de código no caminho DD.

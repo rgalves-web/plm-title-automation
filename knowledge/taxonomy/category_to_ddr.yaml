@@ -1,0 +1,83 @@
+# L1 — Where each category's facts are written in the deliverable.
+#
+# These are LOGICAL destinations. The real tab names come from the template
+# delivered for the job, resolved at S1 by introspection: PLM template versions
+# differ ("Ownership Report" in ours, "Ownership - Worksheet" in the Knox
+# example), so a hardcoded tab name is a defect waiting for the next client.
+# A destination that cannot be resolved against the template is a BLOCKING
+# finding at OPEN — never a surprise at RUN.
+version: 1
+
+destinations:
+
+  ownership_report:
+    resolves_to:
+      # First match against the template's actual tabs wins; the writer records
+      # which alias resolved, so the deliverable says how it was mapped.
+      - "Ownership Report"
+      - "Ownership - Worksheet"
+    writes: [tract, lease_number, lessor, royalty, mi, wi, nri, net_acres]
+
+  ownership_wells:
+    resolves_to:
+      - "Ownership - Wells"
+    writes: [total_depth, completion_date, gaps_in_production,
+             verified_wi, verified_nri]
+
+  lease_review:
+    resolves_to:
+      - "Lease Review"
+    writes: [lease_number, lessor, lease_date, recording, primary_term,
+             royalty, shut_in, pooling, continuous_drilling, extensions]
+
+  agreements:
+    resolves_to:
+      - "Agreements"
+    writes: [contract_number, instrument_form, parties, effective_date,
+             contract_area, depth_limitation, amendments]
+
+  unit_and_pooling_agreements:
+    resolves_to:
+      - "Unit and Pooling Agreements"
+    writes: [designation_recording, effective_date, unit_description,
+             formations, gross_acres]
+
+  runsheet:
+    resolves_to:
+      - "Runsheet"
+    writes: [instrument_number, instrument, effective_date, instrument_date,
+             recording_date, grantor, grantee, conveyance, comments]
+    admits_only_of_record: true      # flow spec §2 rule 5
+
+  potential_defects:
+    resolves_to:
+      - "PLM Title Review"
+    section: "Potential Defects"
+    writes: [defect_label, description, action_required, responsible_party]
+
+  outstanding_curative:
+    resolves_to:
+      - "PLM Title Review"
+    section: "Outstanding Curative"
+    writes: [requirement, status, action_required]
+
+  # Not DDR tabs — case-level outputs the flow produces.
+  perimeter:
+    resolves_to: []
+    writes_to_case: "perimeter.yaml"
+
+  cross_check:
+    resolves_to: []
+    writes_to_case: "perimeter.yaml divergences"
+
+  well_files:
+    resolves_to: []
+    writes_to_package: "Well Files/"
+
+  package_checklist:
+    resolves_to: []
+    writes_to_package: "Phase I - Checklist.xlsx"
+    writes: [component, present, notes]
+    note: >
+      Written from the case at SHIP: one line per required component, and the
+      Notes column carries every declared pendência with its reason.

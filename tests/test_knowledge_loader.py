@@ -86,15 +86,28 @@ def test_the_three_blank_reasons_are_a_subset_of_the_vocabulary():
 
 # --- a schema error breaks the boot ----------------------------------------
 
-def _write_base(tmp_path: Path, *, entities: dict, keys: dict, reasons: dict):
+_OK_TAXONOMY = {"version": 1, "categories": {"lease_ogl": {
+    "label": "L", "feeds": ["lease_review"], "relevance_test": "?",
+    "disposition_default": "read", "risk_tier": "high"}}, "feedless_allowed": []}
+_OK_CAT_TO_DDR = {"version": 1, "destinations": {
+    "lease_review": {"resolves_to": ["Lease Review"], "writes": ["x"]}}}
+
+
+def _write_base(tmp_path: Path, *, entities: dict, keys: dict, reasons: dict,
+                taxonomy: dict | None = None, cat_to_ddr: dict | None = None):
     (tmp_path / "ontology").mkdir(parents=True, exist_ok=True)
     (tmp_path / "rules").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "taxonomy").mkdir(parents=True, exist_ok=True)
     (tmp_path / "ontology" / "entities.yaml").write_text(
         yaml.safe_dump(entities), encoding="utf-8")
     (tmp_path / "ontology" / "identity_keys.yaml").write_text(
         yaml.safe_dump(keys), encoding="utf-8")
     (tmp_path / "rules" / "exclusion_reasons.yaml").write_text(
         yaml.safe_dump(reasons), encoding="utf-8")
+    (tmp_path / "taxonomy" / "categories.yaml").write_text(
+        yaml.safe_dump(taxonomy or _OK_TAXONOMY), encoding="utf-8")
+    (tmp_path / "taxonomy" / "category_to_ddr.yaml").write_text(
+        yaml.safe_dump(cat_to_ddr or _OK_CAT_TO_DDR), encoding="utf-8")
     return tmp_path
 
 

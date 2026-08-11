@@ -106,41 +106,10 @@ Princípio da v1.1: **construir o mínimo que muda o próximo ship, entregar Jos
 **Mudanças:** `checklist_builder` instancia dos categories; `ddr_writer` resolve destino via `category_to_ddr` × template-contrato; `intake_router` para de rotear por convenção própria.
 **Aceitação:** loader rejeita categoria sem `feeds`; as ~10 categorias cobrem 100% do corpus Bowen + Maxwell + Josh B; toda célula escrita rastreável a uma categoria.
 
-**+ Aceitação incorporada (achado Bowen 11/08 — memorando como instrumento of-record):**
-Na Bowen, 6 células de Lease Review (F15/F16/F17/F26, F28/F29/F30) ficaram
-`UNVERIFIABLE` com o motivo *"no recorded document on disk for lease
-0220649-007 (memorandum only)"* — **embora o memorando gravado esteja em disco e
-resolva** (`356.92.pdf`, `371.302.pdf`). O checker procura o documento da lease
-**pelo número da lease** e não sabe que o memorando gravado responde por ela.
-Isso **não se corrige na Bowen** (entregue, congelada): é **regra L2 de
-identidade/precedência**, expressa como dado —
-*"o memorando de lease gravado é o instrumento of-record da lease quando não há
-lease gravada; a chave é lease nº + Vol/Pg do memorando"*. A categoria
-`lease_memorandum` já existe na taxonomia (OKF §3); o que falta é a relação
-`lease_memorandum —é_of_record_de→ lease` no grafo (F4).
-**Como se mede:** dado um corpus com lease sem instrumento gravado + memorando
-gravado, o termo da lease resolve contra o memorando, com citação de página, em
-vez de virar pendência.
-
 ### Fase 3 — Perímetro + triagem com peek (o maior ganho de custo)
 **Entrega:** `src/knowledge/perimeter.py` (o S2 mecânico) + `src/knowledge/triage.py` com D4.
 **Mudanças:** IA lê o Exhibit "A" da DPU com prova por página, cruza XREF + Schedule + Well List → `perimeter.yaml` + divergências como achados (o `manifest_builder` vira insumo, deixa de ser autoridade — fecha o gap #1). Relevância se auto-instancia do perímetro. Triagem: inventário completo (hash) → candidato READ/SKIP → **peek de 1ª página confirma todo SKIP** → OCR profundo só nos READ.
 **Aceitação:** Josh B: perímetro emite as 4 leases do Exhibit "A" ausentes do XREF como divergência e o conflito Schmidt 427.385×685 como `confirmar_no_cartorio`; nenhum SKIP sem peek ou metadado forte (teste conta); corte de leitura logado (N inventariados / N peeks / N OCR profundo / N SKIP por motivo — sem teto silencioso); 100% dos arquivos com disposição.
-
-**+ Aceitação incorporada (achado Bowen 11/08 — divergência de perímetro):**
-Na Bowen, 8 células de Ownership (K/L das linhas 21/22/23/32/34/35/36) ficaram
-`UNVERIFIABLE` com o motivo *"lease 0220649-007 not named in the DPU Exhibit A"*.
-**Isso não é bug — é exatamente o output que o S2 SCOPE deve emitir sozinho:**
-uma lease que o DDR trata como da unidade mas que o Exhibit "A" da DPU não
-nomeia é **divergência de perímetro**, não célula não-verificável. Hoje ela
-aparece como ruído no fundo de uma lista de 498 pendências; deveria aparecer
-como **achado nomeado no topo do perímetro**, com a pergunta que o resolve
-("confirmar com Collin/Trevor" ou "confirmar no cartório").
-**Como se mede:** rodando o perímetro sobre um corpus onde uma lease citada não
-consta do Exhibit "A", o sistema emite a divergência **antes** de qualquer OCR
-profundo, com origem (XREF/Schedule/DDR) × ausência (Exhibit A) explicitadas — e
-as células dependentes herdam esse motivo do vocabulário fechado
-(`fora_do_perimetro` / `confirmar_no_cartorio`), não um texto genérico.
 
 ### Fase 4-lite — Catálogo + classifier + veredito por risco
 **Entrega:** ledger estendido (D2) + projeções + classifier content-first + fila de veredito **por risco** (D5) no Workbench.
@@ -152,8 +121,13 @@ Ataca o gargalo (a) — é a maior alavanca de SLA que existe no plano, por isso
 **Entrega:** busca/fetch no Drive da PLM por nº de TO, nº de lease, book.page, nome; drop automático no S4; upload do kit com confirmação de 1 clique (fecha o passo 19 do fluxo).
 **Aceitação:** dado o `perimeter.yaml` de Josh B, o connector localiza e baixa sem intervenção a maioria mensurável dos itens da checklist que existem no Drive; o que não achar volta como item com termos de busca (regra de ouro do GATHER); log do que foi buscado/achado/não-achado.
 
-### ★ CHECKPOINT — Ship Josh B e medir
-Josh B percorre S1→S8 com F1–F4+C ativos. Métricas coletadas (viram baseline do produto):
+### ★ CHECKPOINT — duas metades (corrigido 2026-08-11)
+
+**Josh B foi entregue à mão** (pacote Phase I em 06/08, encerrada em 10/08 com feedback do supervisor aplicado; ordem dele: "get a new unit"). Portanto Josh B **não é o alvo vivo — é o terceiro fixture**, e o melhor dos três: corpus completo (53 leases nomeadas, 4 TOs por trato, 19 title documents), perímetro conhecido, divergências conhecidas, 19 linhas de pendência conhecidas. O gabarito por escrito está em `docs/JOSH_B_*` (kickoff 2ª rodada, status 3ª rodada, submissão 06/08, encerramento 10/08).
+
+**Checkpoint A — replay de Josh B (mede corretude).** O sistema reprocessa Josh B a frio, em modo leitura, e é comparado item a item contra o que foi feito à mão. Deve reproduzir sem ajuda: o perímetro (A-669 + A-319 Blocos 5 e 6; série 0220936 fora, contribuição zero, com a prova do deed Yentes Vol. 217 Pg. 491), as 4 leases do Exhibit "A" ausentes do XREF, os 4 conflitos vol/página, a Lease Review a 87,4% com as mesmas células em branco e os mesmos motivos, e as 19 linhas de pendência. **Achar menos que o gabarito = fase não fechou. Achar mais = achado, verificar antes de celebrar** (lição do resolvedor).
+
+**Checkpoint B — a próxima unidade, pelo sistema (mede eficiência).** A unidade nova que a PLM designar percorre S1→S8 com F1–F4+C ativos, e é aqui que as métricas do produto nascem — porque é a primeira vez que ninguém já sabe a resposta. Métricas coletadas:
 - horas do operador por unidade (alvo de tendência: caminho para os ≤12 cliques do blueprint);
 - custo de IA por unidade (peeks, OCR, classificação, gates);
 - rodadas até convergência;
@@ -196,6 +170,7 @@ Aritmética de interesses (`fractions.Fraction`; IA propõe, código prova), val
 
 ## 6. Prova de fogo
 
-- **Regressão:** Bowen A e Maxwell A revalidam dos seus `state.yaml` com 0 FAIL / 0 MISMATCH após CADA fase.
-- **Ao vivo:** Josh B é o checkpoint — S1→S8 com OKF fatia-fina + connector, com as 5 métricas coletadas (§3). O kickoff de 2026-08-05 é o gabarito do que perímetro + gap-hunter devem produzir mecanicamente.
+- **Regressão:** Bowen A e Maxwell A revalidam dos seus `state.yaml` com 0 FAIL / 0 MISMATCH após CADA fase, **em modo leitura** (pacotes entregues são congelados — invariante 16).
+- **Corretude:** Josh B replay a frio contra o gabarito escrito (Checkpoint A, §3). Três unidades entregues à mão = três fixtures; Josh B é a mais rica.
+- **Eficiência:** a próxima unidade designada pela PLM, ponta a ponta pelo sistema (Checkpoint B, §3). É a única medida honesta de horas/unidade, porque é a única em que a resposta não é conhecida de antemão.
 - **Aprendizado (pós-F5):** uma correção feita em Josh B aparece como lição unit-scoped com fixture; generaliza para project por edição revisada; o YAML de projeto não contém "Josh B" (linter verde).

@@ -1,0 +1,211 @@
+# L1 — Taxonomy: the categories a document can be, and what each one feeds.
+#
+# A category that feeds nothing does not exist (OKF invariant 2). `feeds` names
+# the DDR destinations; `category_to_ddr.yaml` maps them to real tabs by
+# introspecting the template delivered for the job — never by hardcoded name.
+#
+# `risk_tier` drives D5: `high` demands a human verdict; `low` may auto-confirm
+# above the confidence floor, with QC sampling. Anything below the floor, or
+# `unplaced`, is high by definition.
+version: 1
+
+categories:
+
+  title_opinion:
+    label: Title Opinion
+    feeds: [ownership_report, ownership_wells, lease_review]
+    identity_fields: [abstract, gross_acres, cert_date]
+    relevance_test: >
+      Does the opinion's legal description fall inside the unit perimeter
+      (abstract, and block where the survey is blocked)?
+    disposition_default: read
+    risk_tier: high
+    variants: [original, supplemental, second_supplemental, division_order]
+    looks_like: >
+      First pages read TITLE OPINION or OPINION OF TITLE, name an examining
+      firm, carry a certification date and a legal description with acreage.
+    precedence: >
+      Per tract, the most recent certification date controls; earlier opinions
+      over the same description are superseded, never merged.
+
+  ownership_report:
+    label: Ownership report (AFD/MOR)
+    feeds: [ownership_report]
+    identity_fields: [lease_number]
+    relevance_test: Is the tract it reports part of the unit per the DPU?
+    disposition_default: read
+    risk_tier: high
+    looks_like: A per-lease ownership schedule produced by the seller, not an attorney.
+    precedence: Used for a tract only where no title opinion covers it.
+
+  dpu:
+    label: Declaration of Pooled Unit
+    feeds: [unit_and_pooling_agreements, perimeter]
+    identity_fields: [recording_book_page, effective_date]
+    relevance_test: Does its book.page match the unit's own designation?
+    disposition_default: read
+    risk_tier: high
+    looks_like: >
+      Recorded declaration/designation naming the unit, with an Exhibit "A"
+      listing leases and an exhibit plat.
+    authority: >
+      Exhibit "A" is the authority on which leases are in the unit. Every other
+      index (XREF, schedule) is cross-checked AGAINST it; a divergence is a
+      finding, never a silent preference.
+
+  dpu_amendment:
+    label: DPU amendment
+    feeds: [unit_and_pooling_agreements, perimeter]
+    identity_fields: [recording_book_page, effective_date]
+    relevance_test: Does it amend this unit's own designation?
+    disposition_default: read
+    risk_tier: high
+
+  lease_ogl:
+    label: Oil, gas and mineral lease
+    feeds: [lease_review, ownership_report]
+    identity_fields: [eog_lease_number, recording_book_page]
+    relevance_test: >
+      Does the pair (lease number, recording) appear in the DPU Exhibit "A"?
+      Neither field alone decides.
+    disposition_default: read
+    risk_tier: high
+    looks_like: Recorded OGML naming lessor and lessee, with term, royalty and description.
+
+  lease_memorandum:
+    label: Memorandum of lease
+    feeds: [lease_review, potential_defects]
+    identity_fields: [eog_lease_number, recording_book_page]
+    relevance_test: Same pair test as the lease it memorialises.
+    disposition_default: read
+    risk_tier: high
+    looks_like: >
+      Short-form recorded instrument that memorialises a lease: parties, date,
+      description and term, usually without royalty or the full clause set.
+    # The PLM supervisor's rule, as data. Both halves hold at once.
+    dual_disposition:
+      as_source: >
+        The recorded memorandum IS the of-record source for the terms it
+        actually states — those cells are filled and cited to it, at its page.
+      as_defect: >
+        A lease whose only record is a memorandum is ALSO reported as a MISSING
+        LEASE under Potential Defects, with the complete instrument requested
+        from the Seller.
+      terms_it_cannot_prove: >
+        Any term the memorandum does not state stays blank with a named reason
+        from the vocabulary — never inferred from the memorandum's silence.
+      reason_for_unstated_terms: doc_nao_localizado
+      defect_label: MISSING LEASE
+
+  assignment:
+    label: Assignment / conveyance
+    feeds: [runsheet, agreements]
+    identity_fields: [recording_book_page]
+    relevance_test: >
+      Of record after the controlling certification date AND touching the
+      Seller's interest or a unit tract?
+    disposition_default: read
+    risk_tier: high
+
+  deed_release_lien:
+    label: Deed, release or lien
+    feeds: [runsheet]
+    identity_fields: [recording_book_page]
+    relevance_test: Same post-cert-date and touches-the-unit test as an assignment.
+    disposition_default: read
+    risk_tier: high
+
+  probate_heirship:
+    label: Probate / affidavit of heirship
+    feeds: [runsheet, outstanding_curative]
+    identity_fields: [recording_book_page]
+    alternate_identity_fields: [cause_number, county]
+    relevance_test: Does it touch a party in the unit's chain of title?
+    disposition_default: read
+    risk_tier: high
+    looks_like: >
+      Probate proceedings, wills, or affidavits of heirship. May be filed in a
+      county other than the one the minerals sit in — the cause number and its
+      county are then the identity.
+
+  agreement:
+    label: Agreement (JOA / farmout / ratification)
+    feeds: [agreements]
+    identity_fields: [contract_number]
+    alternate_identity_fields: [recording_book_page]
+    relevance_test: Does it name the unit, the well, or a lease in the unit?
+    disposition_default: read
+    risk_tier: high
+
+  well_file:
+    label: Well file (RRC)
+    feeds: [ownership_wells, well_files]
+    identity_fields: [api]
+    relevance_test: Does the API match the unit's well?
+    disposition_default: read
+    risk_tier: low
+    looks_like: >
+      RRC output — W-1 drilling permit, W-2/G-1 completion, wellbore query,
+      production report, plat. May be PDF or CSV.
+
+  reference_workbook:
+    label: Reference workbook
+    feeds: [cross_check]
+    identity_fields: [workbook_title]
+    relevance_test: Is it this engagement's Project Log / XREF / schedule?
+    disposition_default: read
+    risk_tier: low
+    looks_like: XREF, Well List, Project Log, Lease & Mineral Schedule (.xlsx).
+    note: >
+      An index, never an authority. Its disagreement with the DPU Exhibit "A"
+      is a finding about the index.
+
+  submission_checklist:
+    label: Phase I submission checklist
+    feeds: [package_checklist]
+    identity_fields: [unit_name]
+    relevance_test: Is it this unit's Phase I checklist?
+    disposition_default: read
+    risk_tier: low
+    looks_like: >
+      The client's Phase I checklist workbook, one Yes/No line per required
+      package component, with a Notes column carrying the declared pendências.
+    note: >
+      A deliverable component, not a source: it is written FROM the case (what
+      was placed, what is missing and why), never read as evidence about title.
+      Found by counting a real delivered corpus — the taxonomy had no home for
+      the checklist that ships in every kit.
+
+  correspondence:
+    label: Correspondence / internal paperwork
+    feeds: []          # deliberately nothing — see disposition
+    identity_fields: []
+    relevance_test: Is it of record? If not, it can never enter the Runsheet.
+    disposition_default: skip
+    risk_tier: low
+    of_record: false
+    reason: nao_de_registro
+    looks_like: >
+      Letters, change-of-address, stale checks, CAF, legal approval, notes,
+      transmittals, offers, payment elections, option-exercise letters.
+    note: >
+      Kept visible in the ledger with its reason — never silently dropped, and
+      never promoted into the Runsheet. It may still be cited in a Runsheet
+      entry as context when a recorded instrument is the subject.
+
+  unplaced:
+    label: Unplaced
+    feeds: []
+    identity_fields: []
+    relevance_test: —
+    disposition_default: hold
+    risk_tier: high
+    note: >
+      Not a failure: the category that guarantees nothing disappears silently.
+      Every unplaced file carries a reason from the closed vocabulary and waits
+      for a human verdict.
+
+# Categories whose `feeds` is empty must declare why (they are dispositions,
+# not destinations). The loader enforces the rest: every other category needs
+# at least one destination.
+feedless_allowed: [correspondence, unplaced]

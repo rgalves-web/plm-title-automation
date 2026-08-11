@@ -92,6 +92,107 @@ class IdentityKeys(BaseModel):
         return v
 
 
+# --- L1 -------------------------------------------------------------------
+
+RISK_TIERS = ("high", "low")
+
+
+class DualDisposition(BaseModel):
+    """A category that is simultaneously a SOURCE and a DEFECT.
+
+    The PLM supervisor's rule for memorandum-only leases, as data: the recorded
+    memorandum proves the terms it states, AND the lease is reported missing.
+    Both halves hold at once — the terms it cannot prove stay blank with a
+    named reason, never inferred from its silence."""
+    as_source: str
+    as_defect: str
+    terms_it_cannot_prove: str
+    reason_for_unstated_terms: str
+    defect_label: str
+
+
+class Category(BaseModel):
+    label: str
+    feeds: list[str]
+    identity_fields: list[str] = Field(default_factory=list)
+    alternate_identity_fields: list[str] = Field(default_factory=list)
+    relevance_test: str
+    disposition_default: str
+    risk_tier: str
+    variants: list[str] = Field(default_factory=list)
+    looks_like: str | None = None
+    precedence: str | None = None
+    authority: str | None = None
+    note: str | None = None
+    of_record: bool | None = None
+    reason: str | None = None
+    dual_disposition: DualDisposition | None = None
+
+    @field_validator("risk_tier")
+    @classmethod
+    def _tier(cls, v: str) -> str:
+        if v not in RISK_TIERS:
+            raise ValueError(f"risk_tier must be one of {RISK_TIERS}; got {v!r}")
+        return v
+
+    @field_validator("disposition_default")
+    @classmethod
+    def _disposition(cls, v: str) -> str:
+        allowed = {"read", "skip", "hold"}
+        if v not in allowed:
+            raise ValueError(f"disposition_default must be in {sorted(allowed)}; got {v!r}")
+        return v
+
+
+class Taxonomy(BaseModel):
+    version: int
+    categories: dict[str, Category]
+    feedless_allowed: list[str] = Field(default_factory=list)
+
+    def check_every_category_feeds_something(self) -> None:
+        """OKF invariant 2: a category that feeds nothing does not exist.
+
+        The only exceptions are dispositions rather than destinations, and they
+        must say so by name in feedless_allowed."""
+        for name, cat in self.categories.items():
+            if not cat.feeds and name not in self.feedless_allowed:
+                raise ValueError(
+                    f"category {name!r} feeds nothing — either give it a "
+                    f"destination or declare it in feedless_allowed")
+
+    def high_risk(self) -> set[str]:
+        return {n for n, c in self.categories.items() if c.risk_tier == "high"}
+
+
+class Destination(BaseModel):
+    resolves_to: list[str] = Field(default_factory=list)
+    section: str | None = None
+    writes: list[str] = Field(default_factory=list)
+    writes_to_case: str | None = None
+    writes_to_package: str | None = None
+    admits_only_of_record: bool = False
+
+
+class CategoryToDDR(BaseModel):
+    version: int
+    destinations: dict[str, Destination]
+
+    def resolve_tab(self, destination: str, template_tabs: list[str]) -> str | None:
+        """The template's real tab for a logical destination, or None.
+
+        Template versions differ across PLM ("Ownership Report" here,
+        "Ownership - Worksheet" in the Knox example), so the mapping is resolved
+        by introspecting the template delivered for THIS job. None means the
+        writer cannot place the category — a blocking finding at OPEN."""
+        dest = self.destinations.get(destination)
+        if dest is None:
+            return None
+        for alias in dest.resolves_to:
+            if alias in template_tabs:
+                return alias
+        return None
+
+
 # --- L2 -------------------------------------------------------------------
 
 class ExclusionReason(BaseModel):
@@ -139,7 +240,24 @@ class Knowledge:
     ontology: Ontology
     identity_keys: IdentityKeys
     exclusion_reasons: ExclusionReasons
+    taxonomy: Taxonomy
+    category_to_ddr: CategoryToDDR
     digest: str
+
+    def category(self, name: str) -> Category:
+        try:
+            return self.taxonomy.categories[name]
+        except KeyError:
+            raise KnowledgeError(f"unknown category {name!r}")
+
+    def needs_human_verdict(self, category: str, confidence: float | None = None,
+                            floor: float = 0.0) -> bool:
+        """D5: high-risk categories always; anything below the floor always."""
+        if category not in self.taxonomy.categories:
+            return True                                   # unknown -> human
+        if confidence is not None and confidence < floor:
+            return True
+        return self.taxonomy.categories[category].risk_tier == "high"
 
     # Convenience the rest of the system asks for constantly.
     def identity_key(self, entity: str) -> IdentityKey:
@@ -196,15 +314,33 @@ def _parse(root: Path) -> Knowledge:
         identity = IdentityKeys(**_read(root, "ontology/identity_keys.yaml"))
         reasons = ExclusionReasons(**_read(root, "rules/exclusion_reasons.yaml"))
         reasons.check_blank_reasons_exist()
+        taxonomy = Taxonomy(**_read(root, "taxonomy/categories.yaml"))
+        taxonomy.check_every_category_feeds_something()
+        cat_to_ddr = CategoryToDDR(**_read(root, "taxonomy/category_to_ddr.yaml"))
     except (ValidationError, ValueError) as exc:
         raise KnowledgeError(f"knowledge/ failed validation:\n{exc}") from exc
+    # Every destination a category feeds must exist in the mapping, and every
+    # reason a category names must be in the closed vocabulary.
+    known_destinations = set(cat_to_ddr.destinations)
+    for name, cat in taxonomy.categories.items():
+        for dest in cat.feeds:
+            if dest not in known_destinations:
+                raise KnowledgeError(
+                    f"category {name!r} feeds unknown destination {dest!r}")
+        for reason in filter(None, [cat.reason,
+                                    getattr(cat.dual_disposition, "reason_for_unstated_terms", None)]):
+            if reason not in reasons.reasons:
+                raise KnowledgeError(
+                    f"category {name!r} names reason {reason!r}, which is not "
+                    "in the closed vocabulary")
     # Every entity that has an identity key must exist in the ontology.
     unknown = set(identity.keys) - set(ontology.entities)
     if unknown:
         raise KnowledgeError(
             f"identity_keys defines keys for unknown entities: {sorted(unknown)}")
     return Knowledge(root=root, ontology=ontology, identity_keys=identity,
-                     exclusion_reasons=reasons, digest=_digest_dir(root))
+                     exclusion_reasons=reasons, taxonomy=taxonomy,
+                     category_to_ddr=cat_to_ddr, digest=_digest_dir(root))
 
 
 @lru_cache(maxsize=8)
