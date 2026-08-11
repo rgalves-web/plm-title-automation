@@ -179,6 +179,54 @@ estão em `1. Landman Submitted\Leases\`), sem passar por `FILES/`. Ou seja: o
 brief está mandando fazer exatamente o trabalho que foi feito à mão — o que ele
 reconstruiu sozinho foi a lista de busca, não uma falha nova.
 
+### PR-4b — as cinco correções depois da leitura do primeiro brief (11/08)
+
+O primeiro brief passou no gate e mesmo assim estava errado em cinco pontos. Nenhum
+deles era um bug de execução; todos eram uma regra faltando.
+
+1. **A regra da capa de encaminhamento não tinha generalizado.** Ela foi corrigida
+   nos title opinions e em mais nada — isso é um conserto, não uma regra. Reabri os
+   13 arquivos `<LESSOR> LSE <número>.PDF` e li **todas** as páginas: **0 são lease,
+   13 são carta** (mala certificada da EOG ao lessor, em papel timbrado, 1–2 páginas,
+   sem instrumento atrás). A classificação estava certa; a regra é que estava
+   estreita. Agora: a arbitragem vale para **todo tipo**, roda no caminho de texto
+   além do de visão, e **continua lendo** (até `TRANSMITTAL_SCAN_PAGES = 6`) enquanto
+   as páginas lidas forem só capa — janela de 2 páginas não bastava. Fixture
+   `transmittal_cover_is_not_the_document` com um caso por tipo, mais o
+   contra-exemplo que impede a regra de **inventar** um instrumento onde só há carta.
+2. **Ausência nunca se infere de `unplaced`.** `unplaced` é "não sei o que é", e
+   ignorância não é ausência: o arquivo não identificado pode **ser** o documento.
+   Disposição nova `unidentified_documents_in_folder` → item de **veredito**
+   (`action: verdict`, "diga o que é este arquivo"), nunca item de busca. E é
+   **gate**: `validate_item` reprova qualquer `fetch`/`request` cuja evidência de
+   ausência mencione `unplaced`. Mandar alguém ao cartório atrás de um documento que
+   já está no disco é o erro mais caro que este brief sabe cometer.
+3. **`blocking` agora deriva do que a célula alimenta** (`BLOCKING_DESTINATIONS`),
+   não de "destrava uma célula" — leitura pela qual 25 de 34 itens eram blocking e a
+   flag não dizia nada. Lease Review **não** bloqueia certificação (a PLM roda o
+   runsheet antes, e branco declarado embarca); perímetro e WI/NRI verificado
+   bloqueiam. Resultado: **2 itens blocking**, ambos de escopo.
+4. **Um item por decisão.** As 7 leases da série 0220936 = **um** confirm com a prova
+   escrita **uma vez**. Os lookups de cartório = **um** item com a tabela vol/página
+   dentro. A seção de prioridade virou índice de ids, não segunda cópia dos itens.
+   O detalhe por arquivo do `already_searched` ficou no `fetch_brief.yaml` (que é o
+   que o `carry_forward` lê). **De 34 itens / 466 linhas para 5 itens / 128 linhas.**
+5. **`0221055-002` (Marlee Stewart) — verificada, não presumida.** O gabarito a
+   marca como "duas cópias ilegíveis (OCR falhou)". Li as duas por visão:
+   `LEASE.TIF` e `LEASE - REC.TIF`, ambas `lease_ogl` a 0.98, mesma citação verbatim
+   (*"PAID-UP OIL, GAS AND MINERAL LEASE … 25th day of July, 2008, between Marlee
+   McConnell Stew…"*), of-record, e **royalty = 1/5** — exatamente o campo que o OCR
+   não deu na rodada à mão. Ela **não é ilegível para este sistema**, então não gera
+   item; o mecanismo existe assim mesmo (`instrument_illegible` → `action: rescan`,
+   "abra o arquivo, não vá ao cartório"), porque ilegível é disposição própria e não
+   silêncio.
+
+Efeito colateral honesto de (2): re-lidos com a varredura profunda, 5 dos 6
+`unplaced` viraram `correspondence`; sobrou **um** (`PLAT.PDF` em `0220953-005`,
+confiança 0.4 — a lacuna de categoria `plat` do backlog #8). Por causa dele aquela
+lease saiu da lista de busca e entrou na fila de veredito, que é o comportamento
+correto.
+
 ### Limitações honestas desta rodada
 1. **Disposição é por documento, não por campo** (backlog #9). O gabarito distingue "a lease está aqui mas falta o royalty" (`0220953-008/-010/-011`) e "as duas cópias estão ilegíveis" (`0221055-002`); o sistema diz `instrument_of_record` e para aí.
 2. **Tiering declarado:** pastas com um arquivo que o classificador confirma como a lease receberam **uma** leitura; pastas sem candidato óbvio receberam **todas**. Isso custou o inventário completo de title opinions dentro das pastas já resolvidas.

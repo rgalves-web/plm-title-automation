@@ -36,6 +36,17 @@ STATUS_MEMO_ONLY = "memo_only"
 STATUS_NO_INSTRUMENT = "no_instrument_in_folder"
 STATUS_NOT_IN_CORPUS = "not_in_corpus"
 STATUS_OUTSIDE = "outside_perimeter"
+# The folder holds something nobody has identified. That is NOT absence.
+STATUS_UNIDENTIFIED = "unidentified_documents_in_folder"
+# The instrument is here and cannot be read. Also not absence — and not a fetch.
+STATUS_ILLEGIBLE = "instrument_illegible"
+
+# `unplaced` means "I do not know what this is". Concluding "the instrument is
+# not here" from it is inferring absence from ignorance: the file sitting in the
+# folder may BE the lease. An unidentified document therefore produces a VERDICT
+# item ("classify this file"), never a search item — a search sends the operator
+# to a courthouse for a document that may already be on their disk.
+UNPLACED = "unplaced"
 
 
 @dataclass
@@ -86,18 +97,51 @@ def dispose(lease: str, recording: str, classifications: list[dict[str, Any]],
     if memos:
         return _memo_only(lease, recording, memos, knowledge)
 
-    # The negative knowledge IS the product here: naming what the folder holds
-    # is what stops the next round re-reading it. "AUSTIN PRESBYTERIAN LSE
-    # 0220604-007.PDF" reads like the lease and is a letter from EOG to the
-    # lessor; only saying so, by name, keeps someone from opening it again.
+    illegible = [c for c in classifications if _is_illegible(c)]
+    if illegible:
+        return LeaseDisposition(
+            lease=lease, status=STATUS_ILLEGIBLE, recording=recording,
+            sources=[_source(c) for c in illegible],
+            note=("the instrument is in the folder and could not be read. This "
+                  "is a RE-SCAN or an open-it-by-hand, not a courthouse trip: "
+                  "the document is already here."))
+
+    unknown = [c for c in classifications if c.get("classified_as") == UNPLACED]
+    if unknown:
+        return LeaseDisposition(
+            lease=lease, status=STATUS_UNIDENTIFIED, recording=recording,
+            sources=[_source(c) for c in unknown],
+            note=(f"{len(unknown)} document(s) in the folder were not identified. "
+                  f"Absence of the instrument CANNOT be concluded while an "
+                  f"unidentified file sits in the folder — one of them may be it."))
+
+    # Only now is absence a claim the evidence supports: every document in the
+    # folder was read AND identified, and none is the instrument. The negative
+    # knowledge IS the product — "AUSTIN PRESBYTERIAN LSE 0220604-007.PDF" reads
+    # like the lease and is a letter from EOG to the lessor, and only naming it
+    # keeps someone from opening it again.
     return LeaseDisposition(
         lease=lease, status=STATUS_NO_INSTRUMENT, recording=recording,
         sources=[_source(c) for c in classifications],
-        note=(f"{len(classifications)} documents read in the folder; none is the "
-              f"lease instrument or a memorandum of it ("
+        note=(f"{len(classifications)} documents read in the folder, all "
+              f"identified; none is the lease instrument or a memorandum of it ("
               + ", ".join(f"{Path(str(c.get('file',''))).name} = "
                           f"{c.get('classified_as')}" for c in classifications[:6])
               + (", ..." if len(classifications) > 6 else "") + ")"))
+
+
+# An illegible instrument announces itself: the reader says so, or the read
+# produced nothing at all from a document that is plainly there.
+_ILLEGIBLE_MARKS = ("illegible", "ilegivel", "unreadable", "cannot be read",
+                    "too dark", "blank scan", "no text")
+
+
+def _is_illegible(c: dict[str, Any]) -> bool:
+    blob = " ".join(str(n) for n in (c.get("notes") or [])).lower()
+    if any(mark in blob for mark in _ILLEGIBLE_MARKS):
+        return True
+    quote = str((c.get("evidence") or {}).get("quote") or "").lower()
+    return any(mark in quote for mark in _ILLEGIBLE_MARKS)
 
 
 def _memo_only(lease: str, recording: str, memos: list[dict[str, Any]],

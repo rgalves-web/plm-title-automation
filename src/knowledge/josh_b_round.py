@@ -18,12 +18,16 @@ from typing import Any
 import yaml
 
 from src.knowledge.fetch_brief import (ACTION_CONFIRM, ACTION_FETCH,
-                                       ACTION_REQUEST, BriefItem, FetchBrief,
-                                       render_markdown, validate_brief, write_brief)
-from src.knowledge.lease_disposition import (STATUS_MEMO_ONLY,
+                                       ACTION_REQUEST, ACTION_RESCAN,
+                                       ACTION_VERDICT, BriefItem, FetchBrief,
+                                       blocks_certification, render_markdown,
+                                       validate_brief, write_brief)
+from src.knowledge.lease_disposition import (STATUS_ILLEGIBLE, STATUS_MEMO_ONLY,
                                              STATUS_NO_INSTRUMENT,
                                              STATUS_NOT_IN_CORPUS,
-                                             STATUS_OUTSIDE, dispose, summarise)
+                                             STATUS_OUTSIDE,
+                                             STATUS_UNIDENTIFIED, dispose,
+                                             summarise)
 from src.knowledge.loader import load_knowledge
 from src.knowledge.perimeter import Perimeter
 
@@ -63,135 +67,214 @@ def _lease_cells(lease: str) -> list[str]:
     return [f"Lease Review!{lease}"]
 
 
+# What each cell feeds — this, not "it unlocks a cell", is what decides
+# `blocking` (fetch_brief.BLOCKING_DESTINATIONS).
+LEASE_REVIEW_FEEDS = ("lease_review",)
+PERIMETER_FEEDS = ("perimeter",)
+
+
+def _grouped_fetch(disps: list[Any], item_id: str,
+                   statuses: tuple[str, ...], title: str, origin: str,
+                   already: list[str]) -> BriefItem | None:
+    """One decision, one item — with the volume/page table inside it.
+
+    Sixteen courthouse lookups are ONE sitting and ONE decision ("go pull these
+    recordings"), not sixteen items. Splitting them buried the three findings
+    that actually needed a human under twenty-five lines of the same sentence."""
+    rows = [d for d in disps if d.status in statuses]
+    if not rows:
+        return None
+    table = ["| lease | recording | what the folder already holds |",
+             "|---|---|---|"]
+    for d in sorted(rows, key=lambda x: x.lease):
+        held = ", ".join(sorted({str(s.get("classified_as")) for s in d.sources})) \
+            or "no folder in FILES/"
+        table.append(f"| {d.lease} | {d.recording or '—'} | {held} |")
+    return BriefItem(
+        id=item_id,
+        what=f"{title} — {len(rows)} lease(s), listed in the table below",
+        where=[f"County Clerk real property records, {COUNTY} — direct lookup by "
+               f"volume/page, one sitting",
+               "PLM Drive: numerically adjacent folders of the same series"],
+        how=("Pull each recording in the table directly; every one is known, so "
+             "this is a lookup, not a search. In the Drive, check the sibling "
+             "folders of the same series before the courthouse trip.\n\n"
+             + "\n".join(table)),
+        looks_like=('The recorded OGML naming EOG Resources, Inc. as lessee. '
+                    'FALSE POSITIVE: the same lessor\'s lease in a neighbouring '
+                    'unit — the pair (lease number, recording) must match '
+                    'Exhibit "A"; neither field alone decides.'),
+        unlocks=[c for d in rows for c in _lease_cells(d.lease)],
+        already_searched=already,
+        # Lease Review does not block certification: PLM works the runsheet
+        # first, and a declared blank ships.
+        blocking=blocks_certification(LEASE_REVIEW_FEEDS),
+        action=ACTION_FETCH, source="county_clerk_records",
+        effort="one courthouse sitting for the whole table",
+        origin=origin)
+
+
 def build_items(perimeter: Perimeter, disps: list[Any]) -> list[BriefItem]:
     items: list[BriefItem] = []
-    n = 0
 
-    def nid(prefix: str) -> str:
-        nonlocal n
-        n += 1
-        return f"{prefix}-{n:02d}"
+    # --- the lease instruments: grouped by DECISION, not by row -------------
+    absent = _grouped_fetch(
+        disps, "LEASE-FETCH",
+        (STATUS_NOT_IN_CORPUS, STATUS_NO_INSTRUMENT),
+        "Recorded lease instruments not present in FILES/",
+        origin=('every one is named in Exhibit "A" of ' + perimeter.authority
+                + "; for the folders that exist, every document in them was read "
+                  "AND identified, and none is the instrument"),
+        already=[f"{d.lease}: " + ("; ".join(
+            f"{Path(s['file']).name} = {s['classified_as']}" for s in d.sources)
+            or "no folder in FILES/") for d in disps
+            if d.status in (STATUS_NOT_IN_CORPUS, STATUS_NO_INSTRUMENT)])
+    if absent:
+        items.append(absent)
 
-    for d in disps:
-        if d.status == STATUS_NOT_IN_CORPUS:
-            items.append(BriefItem(
-                id=nid("LEASE"),
-                what=(f"Oil, gas and mineral lease {d.lease}"
-                      + (f", recorded {d.recording}" if d.recording else "")
-                      + f' — listed in Exhibit "A" of the unit designation'),
-                where=[f"PLM Drive: lease folder named {d.lease}",
-                       f"PLM Drive: numerically adjacent folders in the "
-                       f"{d.lease.split('-')[0]} series",
-                       f"County Clerk real property records, {COUNTY}"
-                       + (f" — direct lookup at {d.recording}" if d.recording else "")],
-                how=(f"Drive: open the folder named exactly {d.lease}; if absent, "
-                     f"open the sibling folders of the same series. Courthouse: "
-                     + (f"go straight to {d.recording}."
-                        if d.recording else
-                        "search the grantor index by lessor name with a date "
-                        "window around the lease date.")),
-                looks_like=("A recorded OGML naming EOG Resources, Inc. as lessee, "
-                            "with the lease number stamped or written on it. FALSE "
-                            "POSITIVE: the same lessor's lease in a neighbouring "
-                            "unit — the pair (lease number, recording) must match "
-                            'Exhibit "A", neither field alone.'),
-                unlocks=_lease_cells(d.lease),
-                blocking=True, action=ACTION_FETCH, source="drive_plm",
-                effort="immediate if the folder exists; otherwise one courthouse "
-                       "lookup by volume/page",
-                origin=f'Exhibit "A" of {perimeter.authority} lists it; no folder '
-                       f'for it exists in FILES/'))
+    # --- unidentified: a VERDICT, never a search (rule 2) -------------------
+    unknown = [d for d in disps if d.status == STATUS_UNIDENTIFIED]
+    if unknown:
+        table = ["| lease | file | why it is open |", "|---|---|---|"]
+        for d in sorted(unknown, key=lambda x: x.lease):
+            for s in d.sources:
+                table.append(f"| {d.lease} | {Path(s['file']).name} | "
+                             f"read, not identified |")
+        items.append(BriefItem(
+            id="VERDICT-UNPLACED",
+            what=(f"Say what {sum(len(d.sources) for d in unknown)} unidentified "
+                  f"file(s) are — they are already on disk"),
+            where=[f"PLM Drive / FILES, in the lease folder named in the table"],
+            how=("Open each file and give it a category. Do NOT fetch anything "
+                 "for these leases until this is done: one of these files may BE "
+                 "the instrument, and a courthouse trip for a document already on "
+                 "the disk is the most expensive mistake this brief can make.\n\n"
+                 + "\n".join(table)),
+            looks_like="A decision, not a document.",
+            unlocks=[c for d in unknown for c in _lease_cells(d.lease)],
+            already_searched=["the file was read; the reader could not identify it"],
+            blocking=False, action=ACTION_VERDICT, source="drive_plm",
+            effort="one look per file",
+            origin="classified_as came back unidentified — absence cannot be "
+                   "concluded while an unidentified file sits in the folder"))
 
-        elif d.status == STATUS_NO_INSTRUMENT:
-            read = len(d.sources) or "the"
-            items.append(BriefItem(
-                id=nid("LEASE"),
-                what=(f"Oil, gas and mineral lease {d.lease}"
-                      + (f", recorded {d.recording}" if d.recording else "")
-                      + " — the folder exists but holds no lease instrument"),
-                where=[f"County Clerk real property records, {COUNTY}"
-                       + (f" — direct lookup at {d.recording}" if d.recording else ""),
-                       f"PLM Drive: numerically adjacent folders in the "
-                       f"{d.lease.split('-')[0]} series"],
-                how=(f"Courthouse: "
-                     + (f"pull {d.recording} directly."
-                        if d.recording else
-                        "grantor index by lessor name, date window around the "
-                        "lease date.")
-                     + " Drive: check the sibling folders — a lease is often "
-                       "filed one folder over."),
-                looks_like=("The recorded OGML itself, not the lease data sheet, "
-                            "not the bonus receipt, not the extension letter — "
-                            f"{d.note or 'those are what the folder already holds'}."),
-                unlocks=_lease_cells(d.lease),
-                already_searched=[
-                    f"PLM Drive folder {d.lease}: every document read and "
-                    f"classified by content — " + "; ".join(
-                        f"{Path(s['file']).name} = {s['classified_as']}"
-                        for s in d.sources) or "folder empty"],
-                blocking=True, action=ACTION_FETCH, source="county_clerk_records",
-                effort="one courthouse lookup when the recording is known",
-                origin=f"{d.note}"))
+    # --- illegible: re-scan, not a fetch (rule 5) --------------------------
+    illegible = [d for d in disps if d.status == STATUS_ILLEGIBLE]
+    if illegible:
+        table = ["| lease | recording | copies on disk |", "|---|---|---|"]
+        for d in sorted(illegible, key=lambda x: x.lease):
+            table.append(f"| {d.lease} | {d.recording or '—'} | "
+                         + ", ".join(Path(s["file"]).name for s in d.sources) + " |")
+        items.append(BriefItem(
+            id="RESCAN",
+            what=(f"Re-scan or open by hand {len(illegible)} lease instrument(s) "
+                  f"that ARE on disk and could not be read"),
+            where=["PLM Drive / FILES, the copies named in the table",
+                   f"County Clerk, {COUNTY} — only if the copies prove unusable"],
+            how=("Open the copies directly (a TIF viewer, or print-and-read) "
+                 "before anything else; if both copies are genuinely unusable, "
+                 "THEN pull the recording at the courthouse.\n\n" + "\n".join(table)),
+            looks_like="The instrument is here. This is a legibility problem, "
+                       "not a missing document.",
+            unlocks=[c for d in illegible for c in _lease_cells(d.lease)],
+            already_searched=["the file was opened and the read produced nothing "
+                              "usable"],
+            blocking=False, action=ACTION_RESCAN, source="drive_plm",
+            effort="minutes per file",
+            origin="the reader reported the document illegible"))
 
-        elif d.status == STATUS_MEMO_ONLY:
-            cite = d.defect["evidence"] if d.defect else ""
-            items.append(BriefItem(
-                id=nid("MISSING-LEASE"),
-                what=(f"Complete lease instrument for {d.lease} — only the "
-                      f"recorded MEMORANDUM is of record"
-                      + (f" ({d.recording})" if d.recording else "")),
-                where=["Seller (EOG Resources, Inc.), via PLM — the memorandum is "
-                       "of record; the instrument it memorialises is not"],
-                how=("Request from the Seller through PLM by e-mail, naming the "
-                     f"lease number {d.lease} and the memorandum's recording"
-                     + (f" ({d.recording})" if d.recording else "")
-                     + ". No portal search will find it — an unrecorded "
-                       "instrument is not in any index. No cost."),
-                looks_like=("The executed OGML the memorandum refers to, with the "
-                            "clause set the memorandum omits (royalty, pooling, "
-                            "shut-in, depth limitation)."),
-                unlocks=[f"Lease Review!{d.lease}.{term}"
-                         for term in sorted(d.unproved_terms)],
-                blocking=False, action=ACTION_REQUEST, source="third_party_request",
-                effort="one e-mail; turnaround is the Seller's",
-                origin=(f"the memorandum at {cite} is of record and proves "
-                        f"{len(d.proved_terms)} term(s); it does not state "
-                        f"{', '.join(sorted(d.unproved_terms)) or 'the remaining terms'}")))
+    # --- memo-only: the supervisor's rule ----------------------------------
+    memo = [d for d in disps if d.status == STATUS_MEMO_ONLY]
+    if memo:
+        table = ["| lease | memorandum of record | terms it does not state |",
+                 "|---|---|---|"]
+        for d in sorted(memo, key=lambda x: x.lease):
+            table.append(f"| {d.lease} | {d.recording or '—'} | "
+                         + ", ".join(sorted(d.unproved_terms)) + " |")
+        items.append(BriefItem(
+            id="MISSING-LEASE",
+            what=(f"Complete lease instrument for {len(memo)} lease(s) whose ONLY "
+                  f"record is a memorandum"),
+            where=["Seller (EOG Resources, Inc.), via PLM — the memorandum is of "
+                   "record; the instrument it memorialises is not"],
+            how=("Request from the Seller through PLM by e-mail, naming each lease "
+                 "number and its memorandum recording. No portal search will find "
+                 "it: an unrecorded instrument is in no index. No cost.\n\n"
+                 + "\n".join(table)),
+            looks_like="The executed OGML the memorandum refers to, carrying the "
+                       "clause set the memorandum omits.",
+            unlocks=[f"Lease Review!{d.lease}.{t}"
+                     for d in memo for t in sorted(d.unproved_terms)],
+            already_searched=[f"{d.lease}: memorandum read and of record at "
+                              f"{d.sources[0]['file'].rsplit(chr(92), 1)[-1]}"
+                              for d in memo if d.sources],
+            blocking=False, action=ACTION_REQUEST, source="third_party_request",
+            effort="one e-mail; turnaround is the Seller's",
+            origin="the recorded memorandum proves the terms it states; the "
+                   "lease is simultaneously a MISSING LEASE under Potential "
+                   "Defects (categories.yaml lease_memorandum.dual_disposition)"))
 
-    # Divergences the indexes raised
+    # --- scope: ONE decision, the proof stated ONCE ------------------------
+    outside = [d for d in perimeter.divergences if d.kind == "outside_perimeter"
+               and re.fullmatch(r"0\d{6}-\d{3}", d.subject)]
+    if outside:
+        series = sorted({s.subject.split("-")[0] for s in outside})
+        items.append(BriefItem(
+            id="SCOPE-OUTSIDE",
+            what=(f"Confirm that the {', '.join(series)} series "
+                  f"({len(outside)} leases) contributes ZERO acres to {UNIT}"),
+            where=[f'{perimeter.authority} Exhibits "B" and "C" (held)',
+                   f"Source deed Vol. 217, Pg. 491, Deed Records, {COUNTY} (held)"],
+            how=("Read the proof below and confirm or reject it. Nothing to "
+                 "fetch — the three documents that settle it are in hand.\n\n"
+                 + outside[0].proof.replace(" || ", "\n\n")),
+            looks_like="A confirmation, not a document.",
+            unlocks=[f"Lease Review!{d.subject}" for d in outside],
+            already_searched=["the three documents were read; the proof is "
+                              "assembled"],
+            blocking=blocks_certification(PERIMETER_FEEDS),
+            action=ACTION_CONFIRM, source="drive_plm",
+            effort="minutes — reading, not searching",
+            adopted_value="outside the perimeter; zero acres",
+            conflict_with='the leases ARE listed in Exhibit "A"',
+            origin=f'Exhibit "A" lists them; Exhibits "B"/"C" and the source '
+                   f"deed put their land outside the unit surveys"))
+
+    # Non-lease scope divergences keep their own item: they are separate
+    # decisions, and this one is NOT in the hand-built kit.
     for div in perimeter.divergences:
-        if div.kind == "missing_from_index":
-            continue                       # already an item via the disposition
-        if div.kind == "outside_perimeter":
+        if div.kind == "outside_perimeter" and not re.fullmatch(
+                r"0\d{6}-\d{3}", div.subject):
             items.append(BriefItem(
-                id=nid("SCOPE"),
-                what=(f"Confirm that {div.subject} contributes ZERO acres to "
-                      f"{UNIT} and needs no further document"),
-                where=[f'{perimeter.authority} Exhibits "B" and "C"',
-                       "Source deed Vol. 217, Pg. 491, Deed Records, "
-                       f"{COUNTY} (already held)"],
-                how=("Read the proof already assembled and confirm it, or reject "
-                     "it. Nothing to fetch: the three documents that settle it "
-                     "are in hand."),
-                looks_like="A confirmation, not a document.",
-                unlocks=[f"Lease Review!{div.subject}"]
-                        if re.fullmatch(r"0\d{6}-\d{3}", div.subject) else
-                        [f"Perimeter!{div.subject}"],
-                blocking=False, action=ACTION_CONFIRM, source="drive_plm",
-                effort="minutes — reading, not searching",
-                adopted_value="outside the perimeter; zero acres",
-                conflict_with=div.authority_says,
-                origin=div.proof))
-        elif div.kind == "conflicting_recording":
+                id="SCOPE-SPLIT-DEED",
+                what=f"Confirm the split of {div.subject}",
+                where=[f'{perimeter.authority} Exhibit "B" p.5 (held)',
+                       f"Deed records, {COUNTY}"],
+                how=(f"{div.authority_says}; {div.index_says}. Read the page and "
+                     f"rule on it."),
+                looks_like="A confirmation. NOT in the hand-built kit — verify "
+                           "before relying on it.",
+                unlocks=[f"Perimeter!{div.subject}"],
+                already_searched=['Exhibit "B" p.5 was read in full'],
+                blocking=blocks_certification(PERIMETER_FEEDS),
+                action=ACTION_CONFIRM, source="county_clerk_records",
+                effort="minutes",
+                adopted_value="nothing adopted — the finding is new",
+                conflict_with=div.index_says, origin=div.proof))
+
+    for div in perimeter.divergences:
+        if div.kind == "conflicting_recording":
             items.append(BriefItem(
-                id=nid("CONFIRM"),
+                id=f"CONFIRM-{div.subject}",
                 what=f"Resolve the recording conflict for {div.subject}",
                 where=[f"County Clerk real property records, {COUNTY}"],
-                how=(f'Pull both references and see which instrument is the '
-                     f'lease: {div.authority_says} vs {div.index_says}.'),
+                how=(f"Pull both references and see which instrument is the "
+                     f"lease: {div.authority_says} vs {div.index_says}."),
                 looks_like="Two volume/page references for one lease number.",
                 unlocks=_lease_cells(div.subject),
-                blocking=False, action=ACTION_CONFIRM, source="county_clerk_records",
+                already_searched=[f"{div.index_name} was read"],
+                blocking=blocks_certification(LEASE_REVIEW_FEEDS),
+                action=ACTION_CONFIRM, source="county_clerk_records",
                 effort="one lookup per reference",
                 adopted_value=div.authority_says, conflict_with=div.index_says,
                 origin=f'{div.index_name} disagrees with Exhibit "A"'))
@@ -220,8 +303,12 @@ def run(generated: str) -> dict[str, Any]:
 
 
 def _blanks(d: Any) -> list[str]:
+    """Every blank this disposition leaves. A blank whose cause is "nobody has
+    identified the file" is still a blank, and it still owes an owner
+    (invariant 18) — it just owes a VERDICT item rather than a search."""
     if d.status == STATUS_MEMO_ONLY:
         return [f"Lease Review!{d.lease}.{t}" for t in sorted(d.unproved_terms)]
-    if d.status in (STATUS_NOT_IN_CORPUS, STATUS_NO_INSTRUMENT):
+    if d.status in (STATUS_NOT_IN_CORPUS, STATUS_NO_INSTRUMENT,
+                    STATUS_UNIDENTIFIED, STATUS_ILLEGIBLE):
         return _lease_cells(d.lease)
     return []

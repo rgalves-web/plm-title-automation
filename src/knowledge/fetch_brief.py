@@ -22,8 +22,17 @@ from typing import Any, Iterable
 ACTION_FETCH = "fetch"          # it exists somewhere; go get it
 ACTION_REQUEST = "request"      # a third party must hand it over
 ACTION_CONFIRM = "confirm"      # nothing is missing; something must be checked
+ACTION_VERDICT = "verdict"      # the file is here; say what it is
+ACTION_RESCAN = "rescan"        # the file is here and unreadable; open it by hand
 ACTION_UNFINDABLE = "unfindable"  # declared not locatable — leaves for Missing Files
-ACTIONS = (ACTION_FETCH, ACTION_REQUEST, ACTION_CONFIRM, ACTION_UNFINDABLE)
+ACTIONS = (ACTION_FETCH, ACTION_REQUEST, ACTION_CONFIRM, ACTION_VERDICT,
+           ACTION_RESCAN, ACTION_UNFINDABLE)
+
+# Actions that assert a document IS NOT HERE. Only these carry the burden of
+# proving absence, and absence is never proved by an unidentified file.
+_ABSENCE_ACTIONS = (ACTION_FETCH, ACTION_REQUEST)
+# The evidence value that can never support an absence claim.
+UNPLACED = "unplaced"
 
 # The eight fields every item owes (spec §2). Absence of any one is an invalid
 # item, and an invalid item fails the round.
@@ -33,6 +42,32 @@ REQUIRED_FIELDS = ("id", "what", "where", "how", "looks_like",
 
 class BriefError(AssertionError):
     """The brief does not satisfy its contract, so the round cannot close."""
+
+
+# --- what "blocking" means -------------------------------------------------
+#
+# Blocking = the unit CANNOT BE CERTIFIED without it. It is not "this unlocks a
+# cell" — every item unlocks a cell, so that reading makes the flag useless: a
+# brief where 25 of 34 items are blocking has told the operator nothing about
+# what to do first.
+#
+# It derives from what the missing document FEEDS. Verified WI/NRI and a tract's
+# ownership cannot be stated at all while their basis is missing, so those
+# block. An individual lease instrument does not: PLM works the runsheet before
+# the lease review, and a lease review with a declared blank is a shippable
+# deliverable (flow spec §1, step 14–15 — the exit condition is "evidenced or
+# declared", never "100% filled").
+BLOCKING_DESTINATIONS = frozenset({
+    "ownership_report",        # a tract's ownership cannot be stated at all
+    "ownership_wells",         # verified WI/NRI
+    "perimeter",               # what is even in the unit
+    "unit_and_pooling_agreements",
+})
+
+
+def blocks_certification(destinations: Iterable[str]) -> bool:
+    """Does missing this stop the unit from being certified?"""
+    return bool(BLOCKING_DESTINATIONS & {str(d) for d in destinations})
 
 
 @dataclass
@@ -199,7 +234,27 @@ def validate_item(item: BriefItem, knowledge: Any = None) -> list[str]:
     if knowledge is not None:
         for hit in _forbidden_hits(item, knowledge):
             problems.append(f"{item.id}: uses a FORBIDDEN method — {hit}")
+    problems.extend(_absence_problems(item))
     return problems
+
+
+def _absence_problems(item: BriefItem) -> list[str]:
+    """A fetch/request asserts the document is NOT here. Prove it properly.
+
+    `unplaced` means "I do not know what this is", and ignorance is not absence:
+    the unidentified file in that folder may BE the document. Sending the
+    operator to a courthouse for something already on their disk is the most
+    expensive mistake the brief can make, so it is a gate failure, not a note.
+    The right item for an unidentified file is a VERDICT ("say what this is"),
+    which costs one look."""
+    if item.action not in _ABSENCE_ACTIONS:
+        return []
+    evidence = " ".join([*item.already_searched, item.origin]).lower()
+    if re.search(rf"\b{UNPLACED}\b", evidence):
+        return [f"{item.id}: infers ABSENCE from {UNPLACED!r} — an unidentified "
+                f"file may be the document itself. Emit a {ACTION_VERDICT!r} "
+                f"item for it instead of a search."]
+    return []
 
 
 def validate_brief(brief: FetchBrief, knowledge: Any = None,
@@ -274,19 +329,39 @@ def carry_forward(previous: FetchBrief, current: FetchBrief,
 # Rendering
 # ---------------------------------------------------------------------------
 
+# The markdown is the OPERATOR's copy and has to fit on a screen; the YAML is the
+# complete record. Long lists are summarised here and complete there.
+MD_LIST_LIMIT = 4
+
+
+def _compact(values: list[str]) -> str:
+    if len(values) <= MD_LIST_LIMIT:
+        return ", ".join(values)
+    return (", ".join(values[:MD_LIST_LIMIT])
+            + f" …and {len(values) - MD_LIST_LIMIT} more (see `fetch_brief.yaml`)")
+
+
 def render_markdown(brief: FetchBrief, knowledge: Any = None) -> str:
     """The operator's copy: grouped by source, ordered by leverage."""
     lines = [f"# FETCH BRIEF — {brief.unit}",
              f"_Round {brief.round_no} · {brief.generated} · "
              f"{len(brief.ordered())} open items_", ""]
 
-    blocking = [i for i in brief.ordered() if i.blocking]
+    # An INDEX, not a second copy of the items. The brief was unreadable when
+    # every blocking item appeared here in full and again under its source: the
+    # operator scrolled past the same text twice looking for the work.
+    ordered = brief.ordered()
+    blocking = [i for i in ordered if i.blocking]
     if blocking:
-        lines += ["## Blocks certification — do these first", ""]
-        for item in blocking:
-            lines.append(f"- **{item.what}** ({item.id})")
-            lines.append(f"  - unlocks: {', '.join(item.unlocks)}")
-        lines.append("")
+        lines += [f"**Do first ({len(blocking)} block certification):** "
+                  + " · ".join(f"{i.id}" for i in blocking), ""]
+    counts: dict[str, int] = {}
+    for item in ordered:
+        counts[item.action] = counts.get(item.action, 0) + 1
+    if counts:
+        lines += ["**By action:** " + " · ".join(
+            f"{n} {action}" for action, n in sorted(counts.items(),
+                                                    key=lambda kv: -kv[1])), ""]
 
     sources_doc = (getattr(knowledge, "sources", {}) or {}).get("sources", {})
     for source, items in brief.by_source().items():
@@ -315,14 +390,21 @@ def render_markdown(brief: FetchBrief, knowledge: Any = None) -> str:
                 lines.append(f"  {n}. {place}")
             lines.append(f"- **how:** {item.how}")
             lines.append(f"- **recognise it:** {item.looks_like}")
-            lines.append(f"- **unlocks:** {', '.join(item.unlocks)}")
+            lines.append(f"- **unlocks:** {_compact(item.unlocks)}")
             if item.action == ACTION_CONFIRM:
                 lines.append(f"- **conflict:** {item.conflict_with}")
                 lines.append(f"- **DDR provisionally adopted:** {item.adopted_value}")
             if item.already_searched:
+                # The full per-file negative knowledge lives in fetch_brief.yaml,
+                # which is what carry_forward reads. Printing all 25 lines of it
+                # here pushed the three items that need a human off the screen.
                 lines.append("- **already searched (do not repeat):**")
-                for note in item.already_searched:
+                for note in item.already_searched[:MD_LIST_LIMIT]:
                     lines.append(f"  - {note}")
+                extra = len(item.already_searched) - MD_LIST_LIMIT
+                if extra > 0:
+                    lines.append(f"  - _…and {extra} more, per file, in "
+                                 f"`fetch_brief.yaml`_")
             if item.origin:
                 lines.append(f"- _origin: {item.origin}_")
             lines.append("")

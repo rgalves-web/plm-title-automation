@@ -271,7 +271,13 @@ def test_the_full_josh_b_brief_passes_the_gate_and_covers_its_blanks():
                             "third_party_request", "county_clerk_records"}
 
     md = render_markdown(brief, K)
-    assert "Blocks certification" in md
+    # The priority section is an INDEX of ids, not a second copy of the items:
+    # the first brief printed every blocking item in full here and again under
+    # its source, and the operator scrolled past the same text twice.
+    blocker = next(i for i in items if i.blocking)
+    assert "block certification" in md
+    assert blocker.id in md.split("\n\n")[1]        # named in the index…
+    assert md.count(blocker.what) == 1              # …and written out exactly once
     assert "NEVER by abstract" in md                # the prohibition is printed
     assert "NEVER by lessor_name" in md
 

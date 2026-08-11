@@ -186,11 +186,22 @@ def _parse_json(raw: str) -> dict[str, Any]:
         return {}
 
 
-# A cover page is not the document. A title opinion mailed under "Dear Mr. X:
-# Enclosed please find our Original Title Opinion" is a title opinion, and the
-# transmittal letter is page 1 of it — reading page 1 alone and stopping is how
-# an opinion gets filed as correspondence and never reaches the Ownership tabs.
+# A cover page is not the document — FOR EVERY TYPE, not just opinions.
+#
+# The rule was learned on a title opinion mailed under "Dear Mr. X: Enclosed
+# please find our Original Title Opinion", and it was fixed there and nowhere
+# else. That is a fix, not a rule. An assignment, a lease, a probate and a
+# release all arrive under transmittal letters, so the arbitration below is
+# type-agnostic by construction, runs on the text path as well as the vision
+# path, and — this is the half that was missing — keeps LOOKING when the pages
+# it has read are all transmittal. A two-page window plus "prefer the
+# substantive page" still files a lease as correspondence when the cover letter
+# is three pages long.
 _TRANSMITTAL = {"correspondence", "unplaced"}
+# How deep to keep looking when every page read so far is a cover page. Bounded,
+# because an unbounded scan of a 54-page opinion is how a round stops being
+# affordable — but 2 was never enough.
+TRANSMITTAL_SCAN_PAGES = 6
 
 
 def _best_answer(answers: list[str]) -> dict[str, Any]:
@@ -270,9 +281,9 @@ def classify_document(path: str | Path, knowledge: Any, *, cache_dir: str | Path
 
     if needs_vision and vision:
         try:
-            images = _front_images(path, scanned or [1])
-            answers = [read_page(img, instruction, cache_dir=cache_dir)
-                       for img in images]
+            answers = _scan_until_substantive(
+                path, scanned or [1], instruction, cache_dir,
+                lambda img: read_page(img, instruction, cache_dir=cache_dir))
             c.read_method = "vision"
             return _apply(c, _best_answer(answers), knowledge)
         except VisionUnavailable as exc:
@@ -289,24 +300,116 @@ def classify_document(path: str | Path, knowledge: Any, *, cache_dir: str | Path
         c.notes.append("classified from filename only — content was not read")
         return c
 
-    data = _parse_json(_ask_text(payload, instruction, cache_dir))
-    return _apply(c, data, knowledge)
+    # The text path gets the same arbitration: one read per page, then the page
+    # that names the instrument wins. Sending both pages in one prompt made a
+    # cover letter and its instrument indistinguishable to the reader.
+    answers = [_ask_text([page], instruction, cache_dir) for page in payload]
+    if all(str(_parse_json(a).get("classified_as", "unplaced")) in _TRANSMITTAL
+           for a in answers):
+        answers += _deeper_text_pages(path, len(payload), instruction, cache_dir,
+                                      ocr_fn)
+    return _apply(c, _best_answer(answers), knowledge)
+
+
+def _scan_until_substantive(path: Path, first: list[int], instruction: str,
+                            cache_dir: str | Path,
+                            ask: Callable[[PageImage], str]) -> list[str]:
+    """Read the front pages; if they are all cover pages, keep going.
+
+    Bounded by TRANSMITTAL_SCAN_PAGES. Stops the moment a page names an
+    instrument, so the common case still costs two reads."""
+    answers = [ask(img) for img in _front_images(path, first)]
+    if not _all_transmittal(answers):
+        return answers
+
+    seen = set(first[:2]) | {1, 2}
+    total = _page_count(path)
+    for page_no in range(1, min(total, TRANSMITTAL_SCAN_PAGES) + 1):
+        if page_no in seen:
+            continue
+        seen.add(page_no)
+        try:
+            more = [ask(img) for img in _front_images(path, [page_no])]
+        except Exception:                       # noqa: BLE001 — partial is honest
+            break
+        answers += more
+        if not _all_transmittal(more):
+            break
+    return answers
+
+
+def _deeper_text_pages(path: Path, already: int, instruction: str,
+                       cache_dir: str | Path,
+                       ocr_fn: Callable[[Any], str] | None) -> list[str]:
+    import fitz
+    out: list[str] = []
+    try:
+        doc = fitz.open(str(path))
+    except Exception:                           # noqa: BLE001
+        return out
+    try:
+        for i in range(already, min(doc.page_count, TRANSMITTAL_SCAN_PAGES)):
+            text = doc[i].get_text().strip()
+            if len(text) < TEXT_PAGE_MIN_CHARS:
+                continue
+            answer = _ask_text([text], instruction, cache_dir)
+            out.append(answer)
+            if str(_parse_json(answer).get("classified_as", "unplaced")) \
+                    not in _TRANSMITTAL:
+                break
+    finally:
+        doc.close()
+    return out
+
+
+def _all_transmittal(answers: list[str]) -> bool:
+    parsed = [_parse_json(a) for a in answers]
+    return all(str(p.get("classified_as", "unplaced")) in _TRANSMITTAL
+               for p in parsed)
+
+
+def _page_count(path: Path) -> int:
+    if path.suffix.lower() in IMAGE_SUFFIXES:
+        try:
+            from PIL import Image
+            Image.MAX_IMAGE_PIXELS = None
+            return getattr(Image.open(path), "n_frames", 1)
+        except Exception:                       # noqa: BLE001
+            return 1
+    try:
+        import fitz
+        doc = fitz.open(str(path))
+        try:
+            return doc.page_count
+        finally:
+            doc.close()
+    except Exception:                           # noqa: BLE001
+        return 1
 
 
 def _front_images(path: Path, pages: list[int]) -> list[PageImage]:
-    """Front pages as PNG. TIFs are the corpus's native scan format and are not
-    a wire format the API accepts — they are converted here, page 1 only."""
+    """The requested pages as PNG. TIFs are the corpus's native scan format and
+    are not a wire format the API accepts, so they are converted here — and
+    multi-page TIFs are seeked, because a cover page happens on TIFs too."""
     if path.suffix.lower() in IMAGE_SUFFIXES:
         import io
 
         from PIL import Image
+
+        from src.knowledge.vision import _fit
         Image.MAX_IMAGE_PIXELS = None
         img = Image.open(path)
-        img.seek(0)
-        buf = io.BytesIO()
-        img.convert("RGB").save(buf, format="PNG")
-        from src.knowledge.vision import _fit
-        return [PageImage(png=_fit(buf.getvalue()), page_no=1, source=path.name)]
+        frames = getattr(img, "n_frames", 1)
+        out: list[PageImage] = []
+        for page_no in pages[:2]:
+            if page_no > frames:
+                continue
+            img.seek(page_no - 1)
+            buf = io.BytesIO()
+            img.convert("RGB").save(buf, format="PNG")
+            out.append(PageImage(png=_fit(buf.getvalue()), page_no=page_no,
+                                 source=path.name))
+        return out
     return render_pages(path, pages[:2], dpi=200)
 
 
