@@ -51,6 +51,36 @@ Pré-requisito das fases OKF; nada de arquitetura nova. Suíte 548 → **549**.
 
 **Bloqueio removido no mesmo dia:** os specs 2–4 chegaram (zip do Cowork) — **PR-1 (F0 + F1-mínima) liberado**.
 
+## ★ BASELINE OFICIAL — 2026-08-11 (substitui os números de 28/07)
+Toda aceitação de PR daqui em diante compara contra **estes** valores. Medidos com
+`as_of` = data de envio de cada deliverable (replay), a partir do `state.yaml`.
+
+| | BOWEN A UNIT | MAXWELL A UNIT |
+|---|---|---|
+| Estrutural | **READY · 0 FAIL** · 7.339/7.339 células · 4 PENDING · 1 DECLARED · 2 SANCTIONED | **READY · 0 FAIL** · 2.271/2.271 |
+| Source-truth | **0 MISMATCH** · **249 verificadas** / 498 unverifiable (747 findings) | **0 MISMATCH** · **101 verificadas** / 199 unverifiable (300 findings) |
+| Trilha `DD_Audit_Trail` | **1.099** entradas | — |
+| Deliverable | `BOWEN A UNIT\SUBMISSION PLM\Bowen A Unit\1. Landman Submitted\PLM Report\DDR - Bowen A Unit.xlsx` · 428.339 bytes | `MAXWELL A UNIT\…\DDR - MAXWELL A UNIT (PLM) (v13).xlsx` |
+
+### Reconciliação 28/07 → 11/08: causa de cada delta (com evidência)
+
+| Delta | Valor | Causa provada |
+|---|---|---|
+| Células | 7.321 → **7.339** (+18) | **3 linhas novas de trilha × 6 colunas populadas.** Escritas pelo **Renato em 28/07 21:41** (`CORRECTED`, capturas CourthouseDirect 7/28) limpando as notas stale de "memo não está no pacote" em Lease Review F15/F29 e Ownership Report A2. **Anterior ao repacote de 31/07** — logo o registro "conteúdo intocado" de 31/07 permanece verdadeiro (428.339 bytes antes e depois; round-trip íntegro em abas, frações S15:S38, datas e contagem de trilha). **Não é finding.** |
+| Trilha | 1.096 → **1.099** (+3) | As mesmas 3 linhas. |
+| Verificadas | 204 → **249** (+45, 0 perdidas) | Quatro TOs novos entraram em **FILES em 31/07 11:11–11:12** + reorganização do pacote por Unit Tract, **e** a correção do resolvedor (abaixo). Fontes das ganhas: 31× `T-O SUPP Bowen A-227 141.5 ac.pdf`, 13× `T-O FIRST SUPP … A-682`, 1× `T-O ORIG … A-227 (cert 02-04-2008)`. |
+
+**Por que `células` e `findings` não somam entre si:** são populações diferentes. O gate estrutural conta **toda célula populada, inclusive `DD_Audit_Trail`**; o source-truth **não emite finding para célula de trilha**. Os +18 caíram inteiramente na trilha → **+0 findings**. `verificadas + unverifiable` = **747 nas duas datas** (204+543 e 249+498). Não comparar as duas contas como se fossem a mesma.
+
+### Lição permanente — o resolvedor de citação nomeava o documento errado
+Descoberto **nesta reconciliação**, não em produção. Um número de cobertura que sobe pode estar subindo por motivo errado: 8 células estavam `CONFIRMED` contra `T-O FIRST SUPP … **A-682**` quando a citação dizia `T-O SUPP Bowen **A-227** 141.5 ac (T0140210), cert. 10/18/2008`. Valores de MI (1/2, 1/4) não são distintivos, então o texto do documento errado "confirmava".
+
+Duas causas de raiz, ambas corrigidas (`1a4d749`, `48655b4`):
+1. **Citação mutilada** — `Path(citação).stem` lia a data `10/18/2008` como separadores de caminho e reduzia a citação a `"2008"`; o containment então casava por ano. Citação é prosa, não caminho.
+2. **Escolha arbitrária** — o containment devolvia o primeiro hit da varredura, tornando a resolução **dependente do layout de pastas**: o repacote de 31/07 mudou silenciosamente qual documento uma citação resolvia.
+
+Regras que ficaram: o **abstract é o discriminador** quando a citação o nomeia (ontologia OKF §2); a citação **lidera com o nome do documento** e o nome indexado mais longo com que ela começa vence; **cópias byte-a-byte são uma identidade** (`(2)` normalizado), com desempate por nome ordenado — nunca por ordem de varredura; ambiguidade real resolve para `None`. Maxwell serviu de controle: **inalterada**, provando ausência de efeito colateral.
+
 ### Branches arquivadas — o que cada tag preserva
 Tag guarda commit, não conhecimento. Duas estavam integralmente mergeadas; duas tinham trabalho próprio, resumido aqui:
 
