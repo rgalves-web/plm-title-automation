@@ -34,9 +34,38 @@ class FrozenArtifactError(PermissionError):
 # refresh. Reading is always fine.
 FROZEN_MARKERS: tuple[str, ...] = ("SUBMISSION PLM",)
 
+# Delivered trees that the marker alone does not catch. Josh B was shipped as
+# "<unit>/1. Landman Submitted/" with no SUBMISSION PLM wrapper, so the folder
+# name proves nothing — the unit has to be named. Populated from config
+# (`frozen_paths`), which is gitignored because it holds client paths.
+_FROZEN_PATHS: list[Path] = []
+
+
+def register_frozen_paths(paths) -> list[Path]:
+    """Declare additional delivered trees as read-only. Idempotent."""
+    for raw in paths or ():
+        p = Path(raw).resolve()
+        if p not in _FROZEN_PATHS:
+            _FROZEN_PATHS.append(p)
+    return list(_FROZEN_PATHS)
+
+
+def frozen_paths() -> list[Path]:
+    return list(_FROZEN_PATHS)
+
+
+def clear_frozen_paths() -> None:
+    """Test seam only — production never un-freezes a delivered tree."""
+    _FROZEN_PATHS.clear()
+
 
 def assert_not_frozen(path: str | Path) -> Path:
     """Raise FrozenArtifactError if `path` lies inside a delivered package.
+
+    Two fences: a folder MARKER ("SUBMISSION PLM") and an explicit list of
+    delivered trees registered from config. The second exists because Josh B
+    shipped without the marker — a delivered unit must be protected by what it
+    IS, not by what its folder happens to be called.
 
     Called by every write path this repo owns (deliverable saves, validation
     sidecars, submission staging). A replay reads shipped work; it never
@@ -49,6 +78,13 @@ def assert_not_frozen(path: str | Path) -> Path:
                 f"refusing to write inside a delivered package: {p}\n"
                 f"'{marker}' folders are frozen — shipped work is read-only "
                 f"(CLAUDE.md invariant 16). Write elsewhere, or read instead.")
+    resolved = p.resolve() if p.is_absolute() else (Path.cwd() / p).resolve()
+    for frozen in _FROZEN_PATHS:
+        if resolved == frozen or frozen in resolved.parents:
+            raise FrozenArtifactError(
+                f"refusing to write inside a delivered unit: {p}\n"
+                f"{frozen} is registered as delivered (config frozen_paths) — "
+                f"shipped work is read-only (CLAUDE.md invariant 16).")
     return p
 
 

@@ -1,0 +1,105 @@
+# L2 — Source recipes: how each place is actually searched, and how it is NOT.
+#
+# The system does not fetch documents; it instructs the fetch (FETCH_BRIEF_SPEC
+# §5). An instruction is only worth the operator's time if it carries the real
+# navigation path, the literal search terms, and the method that WASTES a
+# session. `forbidden_methods` is the expensive half: each entry cost someone a
+# round of fruitless searching.
+version: 1
+
+sources:
+
+  rrc:
+    label: Texas Railroad Commission
+    kind: portal
+    action: fetch
+    base_url: webapps.rrc.texas.gov
+    search_by: [api, permit_number]
+    navigation:
+      wellbore: "ewaMain.do → Wellbore Query → API"
+      drilling_permit: "ewaMain.do → Drilling Permit (W-1) Query → API → permit no."
+      completion: "ewaMain.do → Completion Query → API"
+      production: "Production Data Query → lease number"
+      plat: "attachment of the W-1, or gis.rrc.texas.gov GIS Viewer"
+    forbidden_methods: []
+    known_failure_modes:
+      - "The site answers 'application error' for stretches. That is a state of
+         the world, not a failed item: record the attempt with its date and keep
+         the item open — never convert it to unfindable."
+    typical_effort: "4 documents in roughly one 30-minute sitting"
+
+  county_records_portal:
+    label: TexasFile / CourthouseDirect
+    kind: portal
+    action: fetch
+    search_by: [grantor_name, grantee_name, date_window, book_page]
+    navigation: "county → grantor/grantee index → name + date window → document"
+    forbidden_methods:
+      - method: abstract
+        why: >
+          The abstract filter silently drops recorded instruments. Searching by
+          abstract returns a short, confident, WRONG list.
+    method_note: >
+      Search by NAME plus a date window, then sift the reduced list by
+      survey/block by eye. A known volume/page makes it a direct lookup.
+    typical_effort: "leases with a known Vol/Pg come out in one sitting"
+
+  drive_plm:
+    label: PLM Drive
+    kind: repository
+    action: fetch
+    search_by: [eog_lease_number, contract_number, title_opinion_number]
+    navigation:
+      primary: "lease folder named by the EOG lease number"
+      fallback_siblings: >
+        numerically adjacent lease folders — a document is often filed in a
+        sibling folder of the same series
+      fallback_neighbouring_units: >
+        folders of NEIGHBOURING UNITS that touch the same tract: a title opinion
+        for a shared tract is commonly filed under whichever unit ordered it
+    forbidden_methods:
+      - method: lessor_name
+        why: >
+          Lessors hold leases in many units. A name search returns other units'
+          leases that look right and are not; the key is the pair EOG lease
+          number + recording (volume/page).
+    typical_effort: "immediate when the folder exists; otherwise the siblings and
+      neighbouring units are the productive path"
+
+  county_clerk_records:
+    label: County Clerk — real property records
+    kind: courthouse
+    action: fetch
+    search_by: [book_page, instrument_number]
+    navigation: "real property records of the county where the land sits, by volume/page"
+    forbidden_methods: []
+    method_note: >
+      Direct lookup by recording reference. Note that MINERALS and PROBATE can
+      sit in different counties — see third_party_request.
+
+  third_party_request:
+    label: Third party (Clerk, Seller, examining attorney)
+    kind: request
+    action: request          # NOT a search — somebody has to send it
+    search_by: []
+    navigation: "identify the holder, the channel, the cost and the turnaround"
+    forbidden_methods:
+      - method: portal_search
+        why: >
+          Treating a request as if it were findable in a portal burns sessions
+          and leaves the item open forever. Nobody can search their way to a
+          document that only a person can hand over.
+    requires_for_each_item: [who, channel, cost, expected_turnaround]
+    method_note: >
+      Probate is filed where the DECEDENT's estate was administered, which is
+      often NOT the county the minerals sit in. The identity is the cause number
+      plus its county.
+
+# What a brief item's `how` must never contain, whatever the source.
+globally_forbidden:
+  - method: abstract
+    applies_to: [county_records_portal]
+    why: the abstract filter drops recorded instruments
+  - method: lessor_name
+    applies_to: [drive_plm]
+    why: returns other units' leases under the same lessor

@@ -33,7 +33,8 @@ The authoritative description of current state is **`docs/WORKBENCH_STATUS.md`**
 14. **Every lesson has a fixture** (two-part format); a fixture without bytes on disk is a counted SKIP, never a silent pass.
 15. **The single source of truth for case files is the `evidence_ledger`**; `catalog.yaml`/`graph.yaml` are projections of it.
 16. **Delivered packages are frozen.** Nothing writes a byte inside `<UNIT>/SUBMISSION PLM/` — not a regenerated sidecar, not a re-packaged tree, not a "harmless" refresh. Bowen A and Maxwell A are shipped; they live on **only as read-mode regression fixtures**. Enforced by `assert_not_frozen()` on every write path this repo owns, and by `tests/test_flow_frozen_packages.py`.
-17. **A finding that does not change the current target's deliverable does not become a commit.** It becomes a line in `docs/BACKLOG.md`. Until the Josh B checkpoint, the target is Josh B's Phase I kit; every PR reports what it moved closer to shipping it.
+17. **A finding that does not change the current target's deliverable does not become a commit.** It becomes a line in `docs/BACKLOG.md`. Every PR reports what it moved closer to the current target (Checkpoint A: the cold Josh B replay; Checkpoint B: the next unit PLM assigns).
+18. **Every blank DDR cell points to exactly one FETCH BRIEF item, or carries a terminal reason** (absent from the record / declared unfindable). An orphan blank cell is a FAIL — a hole nobody is accountable for. The system does not fetch documents; it instructs the fetch, so the instruction is a gated deliverable: a round carrying an incomplete brief item does not close (`docs/FETCH_BRIEF_SPEC.md`).
 
 ---
 

@@ -33,6 +33,9 @@ _DEFAULTS: dict[str, Any] = {
     "template_path": None,
     "project_root": None,               # acquisition folder holding <UNIT>/ project dirs
     "manifests_dir": "data/output/dd",  # where per-unit manifest.yaml files live
+    # Delivered unit trees that are read-only regardless of folder name
+    # (invariant 16). Client paths, so they live here and not in knowledge/.
+    "frozen_paths": [],
 }
 
 
@@ -46,6 +49,7 @@ class Config:
     template_path: str | None = None
     project_root: str | None = None
     manifests_dir: str = "data/output/dd"
+    frozen_paths: list[str] = field(default_factory=list)
     source_path: str | None = None      # where this config was loaded from (provenance)
 
     def tesseract_available(self) -> bool:
@@ -72,6 +76,7 @@ class Config:
             "template_path": self.template_path,
             "project_root": self.project_root,
             "manifests_dir": self.manifests_dir,
+            "frozen_paths": list(self.frozen_paths),
         }
 
 
@@ -99,7 +104,12 @@ def load_config(path: str | Path | None = None) -> Config:
             if key in loaded:
                 merged[key] = loaded[key]
         source = str(file)
-    return Config(source_path=source, **merged)
+    config = Config(source_path=source, **merged)
+    # Freezing delivered trees is not optional and must not depend on a caller
+    # remembering: loading the config registers them.
+    from src.flow.deliverable_io import register_frozen_paths
+    register_frozen_paths(config.frozen_paths)
+    return config
 
 
 def configure_tesseract(config: Config) -> bool:

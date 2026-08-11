@@ -242,6 +242,10 @@ class Knowledge:
     exclusion_reasons: ExclusionReasons
     taxonomy: Taxonomy
     category_to_ddr: CategoryToDDR
+    # Source recipes stay a plain mapping: they are read by the brief renderer
+    # and the forbidden-method gate, and they grow a key per new source without
+    # a schema change every time.
+    sources: dict
     digest: str
 
     def category(self, name: str) -> Category:
@@ -317,6 +321,10 @@ def _parse(root: Path) -> Knowledge:
         taxonomy = Taxonomy(**_read(root, "taxonomy/categories.yaml"))
         taxonomy.check_every_category_feeds_something()
         cat_to_ddr = CategoryToDDR(**_read(root, "taxonomy/category_to_ddr.yaml"))
+        sources = _read(root, "rules/sources.yaml")
+        for name, recipe in (sources.get("sources") or {}).items():
+            if not recipe.get("action"):
+                raise ValueError(f"source {name!r} declares no action (fetch/request)")
     except (ValidationError, ValueError) as exc:
         raise KnowledgeError(f"knowledge/ failed validation:\n{exc}") from exc
     # Every destination a category feeds must exist in the mapping, and every
@@ -340,7 +348,8 @@ def _parse(root: Path) -> Knowledge:
             f"identity_keys defines keys for unknown entities: {sorted(unknown)}")
     return Knowledge(root=root, ontology=ontology, identity_keys=identity,
                      exclusion_reasons=reasons, taxonomy=taxonomy,
-                     category_to_ddr=cat_to_ddr, digest=_digest_dir(root))
+                     category_to_ddr=cat_to_ddr, sources=sources,
+                     digest=_digest_dir(root))
 
 
 @lru_cache(maxsize=8)

@@ -19,3 +19,8 @@ tesseract_cmd: "C:/Program Files/Tesseract-OCR/tesseract.exe"
 
 # Default OCR window (seconds). Long by default — the gate runs in the background.
 ocr_window_seconds: 600
+
+# Delivered unit trees that no PR may write into (invariant 16). Josh B shipped
+# without a SUBMISSION PLM wrapper, so it has to be named explicitly.
+frozen_paths:
+  - "C:/Users/Renato/PURPLE LAND MGMT/BKV122TX - Project Emirates/JOSH B UNIT/1. Landman Submitted"

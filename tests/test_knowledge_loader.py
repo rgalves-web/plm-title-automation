@@ -91,6 +91,8 @@ _OK_TAXONOMY = {"version": 1, "categories": {"lease_ogl": {
     "disposition_default": "read", "risk_tier": "high"}}, "feedless_allowed": []}
 _OK_CAT_TO_DDR = {"version": 1, "destinations": {
     "lease_review": {"resolves_to": ["Lease Review"], "writes": ["x"]}}}
+_OK_SOURCES = {"version": 1, "sources": {
+    "drive_plm": {"label": "Drive", "kind": "repository", "action": "fetch"}}}
 
 
 def _write_base(tmp_path: Path, *, entities: dict, keys: dict, reasons: dict,
@@ -108,6 +110,8 @@ def _write_base(tmp_path: Path, *, entities: dict, keys: dict, reasons: dict,
         yaml.safe_dump(taxonomy or _OK_TAXONOMY), encoding="utf-8")
     (tmp_path / "taxonomy" / "category_to_ddr.yaml").write_text(
         yaml.safe_dump(cat_to_ddr or _OK_CAT_TO_DDR), encoding="utf-8")
+    (tmp_path / "rules" / "sources.yaml").write_text(
+        yaml.safe_dump(_OK_SOURCES), encoding="utf-8")
     return tmp_path
 
 

@@ -78,3 +78,51 @@ def test_every_write_path_this_repo_owns_consults_the_guard():
 
 def test_the_marker_is_the_shipped_package_folder():
     assert "SUBMISSION PLM" in FROZEN_MARKERS
+
+
+# --- delivered trees the marker cannot see ---------------------------------
+
+def test_a_delivered_tree_without_the_marker_is_frozen_by_registration(tmp_path):
+    # Josh B shipped as "<unit>/1. Landman Submitted/" with no SUBMISSION PLM
+    # wrapper: the folder name proves nothing, so the unit must be named.
+    from src.flow.deliverable_io import (clear_frozen_paths, frozen_paths,
+                                         register_frozen_paths)
+    delivered = tmp_path / "JOSH B UNIT" / "1. Landman Submitted"
+    delivered.mkdir(parents=True)
+    clear_frozen_paths()
+    try:
+        assert_not_frozen(delivered / "x.txt")          # not yet declared
+        register_frozen_paths([delivered])
+        assert delivered.resolve() in frozen_paths()
+        with pytest.raises(FrozenArtifactError, match="delivered unit"):
+            assert_not_frozen(delivered / "x.txt")
+        with pytest.raises(FrozenArtifactError):
+            assert_not_frozen(delivered / "PLM Report" / "DDR.xlsx")
+        # A different unit is untouched.
+        other = tmp_path / "NEXT UNIT" / "1. Landman Submitted"
+        other.mkdir(parents=True)
+        assert assert_not_frozen(other / "x.txt")
+    finally:
+        clear_frozen_paths()
+
+
+def test_loading_the_config_registers_the_frozen_trees(tmp_path):
+    # Freezing must not depend on a caller remembering to call it.
+    import yaml
+    from src.flow.config import load_config
+    from src.flow.deliverable_io import clear_frozen_paths, frozen_paths
+
+    delivered = tmp_path / "JOSH B UNIT" / "1. Landman Submitted"
+    delivered.mkdir(parents=True)
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.safe_dump({"frozen_paths": [str(delivered)]}),
+                        encoding="utf-8")
+    clear_frozen_paths()
+    try:
+        cfg = load_config(cfg_file)
+        assert cfg.frozen_paths == [str(delivered)]
+        assert delivered.resolve() in frozen_paths()
+        with pytest.raises(FrozenArtifactError):
+            assert_not_frozen(delivered / "anything.txt")
+    finally:
+        clear_frozen_paths()

@@ -23,7 +23,7 @@ Uma frase por peça, para ninguém reconstruir o que já está de pé:
 O entregável cobrado é o kit Phase I por unidade (árvore carbon-copy, DDR data-entry, checklist, naming), **SLA ≤2 dias Phase I / ≤5 dias relatório completo**, universo ~300 unidades, **um operador**. Consequências arquiteturais:
 
 1. O tempo do Renato é o recurso mais escasso do sistema — toda decisão de design que o coloca no caminho crítico de tarefas de baixo risco é um bug de eficiência.
-2. O gargalo histórico por unidade é: (a) aquisição de documentos ≫ (b) rodadas de auditoria > (c) leitura/classificação. A ordem de implementação respeita essa ordem de dor.
+2. O gargalo histórico por unidade é: (a) aquisição de documentos ≫ (b) rodadas de auditoria > (c) leitura/classificação. **Decisão do Renato (11/08): (a) fica FORA de escopo por ora — ele busca e sobe em `FILES/` à mão.** Em troca, o sistema tem obrigação absoluta de dizer **o que buscar, onde e como** (FETCH BRIEF, §3.1). Removida a aquisição, o gargalo restante é **classificação + gap-hunt** — juntos ~45% do peso e hoje quase zero feito. É onde vai o esforço.
 3. Phase I é *data entry* na definição da PLM — o rigor máximo (auditoria adversarial completa) é cobrado no fechamento, não em toda rodada intermediária. Rigor tem custo; paga-se onde é cobrado.
 4. Custo de IA por unidade é uma métrica de primeira classe (medida no checkpoint Josh B, §3), não uma externalidade.
 
@@ -116,10 +116,10 @@ Princípio da v1.1: **construir o mínimo que muda o próximo ship, entregar Jos
 **Mudanças:** classifier roda sobre os READ com o schema do flow spec §2; abaixo do piso → `unplaced` proposto, nunca palpite. UI: fila ordenada por confiança com citação inline, 1 clique; risco baixo auto-confirma com amostragem de QC; piso calibrado por categoria a partir do histórico assim que ele existir. Efeitos: veredito → relação no grafo com prova; allowlist e nomes de pacote citam o grafo.
 **Aceitação:** re-drop frio do corpus Bowen A reproduz classificações, cert dates e o flag A-226 sem dependência de filename; memo interno pós-cert-date → `of_record: internal`, jamais no Runsheet; allowlist idêntica à atual para Bowen/Maxwell (regressão); erro plantado numa categoria auto-confirm é pego pela amostragem e rebaixa a categoria.
 
-### Fase C — Drive connector (ADIANTADO; em paralelo à Fase 4)
-Ataca o gargalo (a) — é a maior alavanca de SLA que existe no plano, por isso não espera o OKF terminar.
-**Entrega:** busca/fetch no Drive da PLM por nº de TO, nº de lease, book.page, nome; drop automático no S4; upload do kit com confirmação de 1 clique (fecha o passo 19 do fluxo).
-**Aceitação:** dado o `perimeter.yaml` de Josh B, o connector localiza e baixa sem intervenção a maioria mensurável dos itens da checklist que existem no Drive; o que não achar volta como item com termos de busca (regra de ouro do GATHER); log do que foi buscado/achado/não-achado.
+### Fase C — Drive connector · **ADIADA, fora do caminho crítico (decisão do Renato, 2026-08-11)**
+O operador busca e sobe os documentos à mão em `FILES/`. O sistema **não busca — instrui**. Em troca, a instrução passa a ser entregável de primeira classe com gate próprio: o **FETCH BRIEF** (contrato completo em `docs/FETCH_BRIEF_SPEC.md`), regenerado a cada rodada, sem o qual nenhuma rodada fecha.
+
+Consequência de escopo: `P3` (Drive connector) e `P4` (browser agents RRC/TexasFile) saem da sequência até o Renato reabrir. **100% do sistema passa a significar 100% do trabalho excluído o bloco de aquisição** — ver §3.1.
 
 ### ★ CHECKPOINT — duas metades (corrigido 2026-08-11)
 
@@ -146,11 +146,45 @@ As 5 lentes + ataque de achados, wired a verdicts/sanções e DD_Audit_Trail —
 
 ---
 
+## 3.1 Escopo redefinido: 100% sem o bloco de aquisição (decisão de 2026-08-11)
+
+**O que o sistema NÃO faz (por ora):** buscar documento em Drive, cartório, TexasFile, RRC. O Renato busca e sobe em `FILES/`.
+
+**O que o sistema PASSA A DEVER, como obrigação dura:** a cada rodada, um **FETCH BRIEF** que diz, para cada documento que falta — *o que é · onde está (locais ranqueados) · como procurar (termos exatos, portal, caminho de query) · como reconhecer quando achar · que células do DDR ele destrava · onde já se procurou e não estava*. Contrato completo em `docs/FETCH_BRIEF_SPEC.md`. **Sem brief válido a rodada não fecha** — é gate, não relatório.
+
+### Peso do trabalho restante e posição atual (base honesta para o %)
+
+Excluída a aquisição, os pesos por horas de operador e o estado de hoje:
+
+| Etapa | Peso | Hoje | Ponderado |
+|---|---|---|---|
+| S2 Perímetro | 10 | 0% | 0,0 |
+| S3 **Fetch brief** | 15 | ~25% (módulo existe, conteúdo não) | 3,8 |
+| S4 Classificação | 25 | ~20% | 5,0 |
+| S5 Gap-hunt | 20 | 0% | 0,0 |
+| S6 Preencher + gates | 15 | ~85% | 12,8 |
+| S7 Auditoria | 10 | ~30% | 3,0 |
+| S8 Kit Phase I | 5 | ~90% | 4,5 |
+| **Total** | 100 | | **≈ 30%** |
+
+Excluir a aquisição **não move a posição atual** — move o **teto alcançável**. O que domina agora é classificação + gap-hunt (45 de peso, ~5 feito). Caminho até 100%:
+
+| PR | Entrega | Chega a |
+|---|---|---|
+| **PR-3** | F3 perímetro + triagem + **fetch brief v1** | **~48%** |
+| **PR-4** | F4 classifier content-first + veredito por risco | **~68%** |
+| **PR-5** | S5 `gap_hunter.py` (+ brief v2: itens que só a leitura descobre) | **~86%** |
+| **PR-6** | S7 `audit.py` (tier pré-ship) + loop de convergência + F5 lições | **100%** |
+
+**100% significa:** o operador só (a) busca o que o brief manda, (b) arbitra vereditos de risco alto, (c) sobe o kit. Todo o resto — perímetro, triagem, classificação, extração, gap-hunt, preenchimento, prova, auditoria, empacotamento e a própria decisão de que a rodada convergiu — é sistema.
+
 ## 4. Sequência líquida × roadmap P0–P5 do flow spec
 
 ```
-F0+F1min → F2 → F3 → (F4-lite ∥ Fase C: Drive connector) → ★ SHIP JOSH B + métricas
-        → então, guiado pelos números: F5 (lições) · Fase A (audit) · gap_hunter (P1) · browser agents (P4)
+F0+F1min ✓ → F2 ✓ → F3 + FETCH BRIEF v1 → F4 (classifier + veredito por risco)
+        → S5 gap_hunter + brief v2 → S7 audit + loop de convergência + F5 lições
+        → ★ Checkpoint A (replay Josh B) e ★ Checkpoint B (próxima unidade)
+ADIADO por decisão do Renato: Fase C (Drive connector) · P4 (browser agents)
 ```
 
 - **P0** = F1min + F2 + F4-lite (+ F5 depois). Não começa pelo classifier: sem vocabulário e taxonomia, o classifier não tem cardápio nem respostas válidas.
