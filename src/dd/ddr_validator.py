@@ -103,6 +103,13 @@ class SheetCoverage:
 
 @dataclass
 class ValidationReport:
+    # Set ONLY when the gate was replayed against a pinned date (regression over
+    # an already-shipped deliverable). Never set on the ship path — a shipping
+    # run always judges against the real today, so a stale submission date is a
+    # structural FAIL (flow spec S8 freshness gate). When set, every rendering of
+    # this report announces REPLAY so a replayed verdict can never be mistaken
+    # for a ship-time one.
+    replay_as_of: Any = None
     coverage: list[SheetCoverage] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
     # Source-truth result (src/dd/source_truth_check). Structural rules verify
@@ -141,6 +148,7 @@ class ValidationReport:
         return self.reconciled and not self.failures and not self.source_mismatches
 
     def summary(self) -> str:
+        prefix = f"REPLAY — as_of={self.replay_as_of} · " if self.replay_as_of else ""
         head = (f"{self.checked_cells} of {self.total_cells} cells checked "
                 f"({len(self.failures)} FAIL, {len(self.pending)} pending)")
         if self.truth is not None:
@@ -148,8 +156,8 @@ class ValidationReport:
         if not self.reconciled:
             short = [f"{c.sheet}: {c.visited}/{c.populated}" for c in self.coverage
                      if not c.reconciled]
-            return f"COVERAGE DID NOT RECONCILE — {head}. Unaccounted: {'; '.join(short)}"
-        return ("READY — " if self.ready else "NOT READY — ") + head
+            return f"{prefix}COVERAGE DID NOT RECONCILE — {head}. Unaccounted: {'; '.join(short)}"
+        return prefix + ("READY — " if self.ready else "NOT READY — ") + head
 
 
 # ---------------------------------------------------------------------------
@@ -1109,6 +1117,11 @@ def run_final_validation(
     declared_sheet_exclusions: dict[str, str] | None = None,
     as_of=None,
 ) -> "ValidationReport":
+    # as_of is REPLAY-ONLY: it pins the date the submission-date rule judges
+    # against, so re-validating an already-shipped deliverable months later does
+    # not manufacture a FAIL. It is never plumbed into the ship path (packager,
+    # writer, UI) and never read from config — a shipping run judges against the
+    # real today, which is what makes a stale "Date Submitted" a structural FAIL.
     """Validate a written DDR and drop its sidecar. The pipeline's last act.
 
     Called for EVERY unit, always: a gate that runs when someone remembers is a
@@ -1138,6 +1151,7 @@ def run_final_validation(
         declared_sheet_exclusions=declared_sheet_exclusions,
         today=as_of,   # None = real today (send-time); a date = regression as-of
     )
+    report.replay_as_of = as_of        # marks every rendering as REPLAY
     if run_source_truth_check and source_roots:
         from src.dd.source_truth_check import run_source_truth
         report.truth = run_source_truth(workbook, list(source_roots),

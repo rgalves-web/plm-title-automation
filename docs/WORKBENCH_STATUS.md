@@ -50,3 +50,13 @@ Pré-requisito das fases OKF; nada de arquitetura nova. Suíte 548 → **549**.
 - **Segurança:** `.env` não rastreado e ausente de todo o histórico (verificado). **Ação do operador: rotacionar a chave da API Anthropic exposta em anexos de conversa** e atualizar o `.env` local.
 
 **Bloqueio removido no mesmo dia:** os specs 2–4 chegaram (zip do Cowork) — **PR-1 (F0 + F1-mínima) liberado**.
+
+### Branches arquivadas — o que cada tag preserva
+Tag guarda commit, não conhecimento. Duas estavam integralmente mergeadas; duas tinham trabalho próprio, resumido aqui:
+
+| Tag `archive/…` | Status vs `main` | Conhecimento |
+|---|---|---|
+| `collin-corrections-lease-detail` | **0 à frente** — integralmente mergeada | nada a preservar |
+| `maxwell-lessons-hardening` | **0 à frente** — mergeada em 23/07 (`f416900`) | nada a preservar |
+| `maxwell-operational-minorh` | 1 commit (`0f49ad2`) | Reescrita do `app.py` Streamlit (±583 linhas): marca Minorh e **entrada por caminho de pasta** em vez de upload arquivo-a-arquivo. **Superada** pelo workbench FastAPI (`src/webapp`), que implementa a marca a partir do protótipo aprovado e opera por pasta de unidade. `app.py` segue congelado como fallback; não reintegrar. |
+| `phase1-conversational-shell` | 2 commits (`81691ce`, `be0f530`) | Pacote `src/agent/` completo (~1.188 linhas + 4 arquivos de teste): `cli`, `orchestrator`, `router`, `registry`, `progress`, `workspace` e `tools/{dd_tool,mor_tool}` — a "casca conversacional" que chama os pipelines existentes como ferramentas (a direção de produto do CLAUDE.md §Product direction). **Não descartado por estar errado**, e sim porque o workbench entregou a operação por UI primeiro. Se a camada conversacional voltar à pauta, **partir deste commit**, não do zero: o padrão tool-wrapper (pipeline determinístico exposto como ferramenta, nunca reescrito) é exatamente o que o OKF pede no S4/S6. |
