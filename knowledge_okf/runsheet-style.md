@@ -1,0 +1,40 @@
+---
+concept: runsheet_style
+type: regra
+sources:
+- knowledge/rules/runsheet_style.yaml
+links: []
+unit: ''
+confidence: herdado da base escrita a mao
+---
+
+- **version**: 1
+- **scope**:
+  - **what_enters**: Instruments OF RECORD, recorded after the controlling opinion's certification date, that touch the Seller's interest or a unit tract. An instrument that is not of record never enters — internal paperwork stays in the ledger, visible, and out of the runsheet.
+
+  - **never_enters**:
+    - - **reason**: nao_de_registro
+      - **why**: A memo, a letter, a change-of-address form or a stale check is not an instrument. This is the leak that polluted a delivered runsheet once.
+    - - **reason**: pre_cert_date
+      - **why**: Of record before the certification date, so the opinion already examined it. The runsheet's whole purpose is what came after.
+    - - **reason**: nao_adverso_a_eog
+      - **why**: Reviewed and found not to touch the Seller's title or a unit tract.
+- **dates**:
+  - **required**:
+    - effective_date
+    - instrument_date
+    - recorded_date
+  - **rule**: Each is transcribed from the instrument as printed. When one is genuinely not shown, the cell says so in the same words the examiner would use ("not shown on copy") rather than repeating another date in its place.
+
+- **entry**:
+  - **conveyance**: ONE sentence. What moved, from whom to whom, with the portion. Name the parties and their relationship where the instrument states it (heirs, executor, trustee, spouse), and the tract or parcel where the nuance matters.
+
+  - **reservation**: ONE sentence, separate from the conveyance. What was held back and by whom. Omit the sentence entirely when nothing was reserved — never write "none".
+
+  - **forbidden**:
+    - pasting the instrument's own recital text into the cell
+    - a paragraph where a sentence does the work
+    - unedited extraction output
+  - **parties**: Grantor and grantee named as the instrument names them, each with the relationship that explains the conveyance and the portion received.
+
+- **verdicts**: A runsheet entry is a drafted cell like any other: it enters the review queue with its evidence, and a human confirms or corrects it. Nothing reaches the deliverable on the strength of having been generated.

@@ -32,6 +32,11 @@ from typing import Any, Iterator
 QUARANTINED_PATTERNS: tuple[str, ...] = (
     r"docs[/\\]JOSH_B_.*",
     r".*[/\\]gabarito.*",
+    # The delivered kit itself — the workbook a human filled in and submitted.
+    # It is the answer sheet the cell-by-cell comparison measures against, and
+    # it sits in the project folder beside the corpus the run legitimately
+    # reads. Only the comparison harness opens it, from outside the run.
+    r".*1\. Landman Submitted.*",
 )
 _PATTERNS = tuple(re.compile(p, re.IGNORECASE) for p in QUARANTINED_PATTERNS)
 

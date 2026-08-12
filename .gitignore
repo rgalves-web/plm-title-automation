@@ -59,3 +59,8 @@ Thumbs.db
 # (invariant 14); client data never leaves the machine (invariant 7).
 data/_attic/
 tests/fixtures/*.xlsx
+
+# Round 1: the global page cache holds the text, OCR and pixels of client
+# documents, keyed by page hash. It is a cache — re-derivable from FILES/ —
+# and it is client material (invariant 7): never commit.
+data/_page_cache/

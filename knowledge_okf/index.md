@@ -1,0 +1,79 @@
+# index
+
+Uma ficha por conceito. Lida uma vez, consultada sempre.
+
+- [categories: agreement](categories-agreement.md) `regra` — - **label**: Agreement (JOA / farmout / ratification)
+- [categories: assignment](categories-assignment.md) `regra` — - **label**: Assignment / conveyance
+- [categories: correspondence](categories-correspondence.md) `regra` — - **label**: Correspondence / internal paperwork
+- [categories: deed_release_lien](categories-deed-release-lien.md) `regra` — - **label**: Deed, release or lien
+- [categories: dpu_amendment](categories-dpu-amendment.md) `regra` — - **label**: DPU amendment
+- [categories: dpu](categories-dpu.md) `regra` — - **label**: Declaration of Pooled Unit
+- [categories: lease_memorandum](categories-lease-memorandum.md) `regra` — - **label**: Memorandum of lease
+- [categories: lease_ogl](categories-lease-ogl.md) `regra` — - **label**: Oil, gas and mineral lease
+- [categories: ownership_report](categories-ownership-report.md) `regra` — - **label**: Ownership report (AFD/MOR)
+- [categories: probate_heirship](categories-probate-heirship.md) `regra` — - **label**: Probate / affidavit of heirship
+- [categories: reference_workbook](categories-reference-workbook.md) `regra` — - **label**: Reference workbook
+- [categories: submission_checklist](categories-submission-checklist.md) `regra` — - **label**: Phase I submission checklist
+- [categories: title_opinion](categories-title-opinion.md) `regra` — - **label**: Title Opinion
+- [categories: unplaced](categories-unplaced.md) `regra` — - **label**: Unplaced
+- [categories: well_file](categories-well-file.md) `regra` — - **label**: Well file (RRC)
+- [category_to_ddr: agreements](category-to-ddr-agreements.md) `regra` — - **resolves_to**:
+- [category_to_ddr: cross_check](category-to-ddr-cross-check.md) `regra` — - **resolves_to**:
+- [category_to_ddr: lease_review](category-to-ddr-lease-review.md) `regra` — - **resolves_to**:
+- [category_to_ddr: outstanding_curative](category-to-ddr-outstanding-curative.md) `regra` — - **resolves_to**:
+- [category_to_ddr: ownership_report](category-to-ddr-ownership-report.md) `regra` — - **resolves_to**:
+- [category_to_ddr: ownership_wells](category-to-ddr-ownership-wells.md) `regra` — - **resolves_to**:
+- [category_to_ddr: package_checklist](category-to-ddr-package-checklist.md) `regra` — - **resolves_to**:
+- [category_to_ddr: perimeter](category-to-ddr-perimeter.md) `regra` — - **resolves_to**:
+- [category_to_ddr: potential_defects](category-to-ddr-potential-defects.md) `regra` — - **resolves_to**:
+- [category_to_ddr: runsheet](category-to-ddr-runsheet.md) `regra` — - **resolves_to**:
+- [category_to_ddr: unit_and_pooling_agreements](category-to-ddr-unit-and-pooling-agreements.md) `regra` — - **resolves_to**:
+- [category_to_ddr: well_files](category-to-ddr-well-files.md) `regra` — - **resolves_to**:
+- [ddr_template_structure: Agreements](ddr-template-structure-agreements.md) `layout` — - **sample_stripped**: 36
+- [ddr_template_structure: Disclaimer](ddr-template-structure-disclaimer.md) `layout` — - **sample_stripped**: 0
+- [ddr_template_structure: Lease Review](ddr-template-structure-lease-review.md) `layout` — - **sample_stripped**: 288
+- [ddr_template_structure: Ownership - Wells](ddr-template-structure-ownership-wells.md) `layout` — - **sample_stripped**: 110
+- [ddr_template_structure: Ownership - Worksheet](ddr-template-structure-ownership-worksheet.md) `layout` — - **sample_stripped**: 416
+- [ddr_template_structure: PLM Title Review](ddr-template-structure-plm-title-review.md) `layout` — - **sample_stripped**: 10
+- [ddr_template_structure: Runsheet](ddr-template-structure-runsheet.md) `layout` — - **sample_stripped**: 63
+- [ddr_template_structure: Summary](ddr-template-structure-summary.md) `layout` — - **sample_stripped**: 12
+- [ddr_template_structure: Unit and Pooling Agreements](ddr-template-structure-unit-and-pooling-agreements.md) `layout` — - **sample_stripped**: 7
+- [engagement](engagement.md) `unidade` — - **version**: 1
+- [entities: instrument](entities-instrument.md) `entidade` — - **label**: Recorded Instrument
+- [entities: lease](entities-lease.md) `entidade` — - **label**: Lease
+- [entities: party](entities-party.md) `entidade` — - **label**: Party
+- [entities: survey](entities-survey.md) `entidade` — - **label**: Survey / Abstract
+- [entities: title_opinion](entities-title-opinion.md) `entidade` — - **label**: Title Opinion
+- [entities: unit_tract](entities-unit-tract.md) `entidade` — - **label**: Unit Tract
+- [entities: unit](entities-unit.md) `entidade` — - **label**: Unit
+- [entities: well](entities-well.md) `entidade` — - **label**: Well
+- [exclusion_reasons: captura_de_tela](exclusion-reasons-captura-de-tela.md) `regra` — - **label**: Screen capture — evidence of a document, not the document
+- [exclusion_reasons: confirmar_no_cartorio](exclusion-reasons-confirmar-no-cartorio.md) `regra` — - **label**: Confirm at the courthouse
+- [exclusion_reasons: doc_nao_localizado](exclusion-reasons-doc-nao-localizado.md) `regra` — - **label**: Document not located
+- [exclusion_reasons: duplicata](exclusion-reasons-duplicata.md) `regra` — - **label**: Duplicate of a document already placed
+- [exclusion_reasons: fato_inexistente_no_registro](exclusion-reasons-fato-inexistente-no-registro.md) `regra` — - **label**: Absent from the record
+- [exclusion_reasons: fora_do_perimetro](exclusion-reasons-fora-do-perimetro.md) `regra` — - **label**: Outside the unit perimeter
+- [exclusion_reasons: fora_do_tipo](exclusion-reasons-fora-do-tipo.md) `regra` — - **label**: Not a document
+- [exclusion_reasons: identidade_ambigua](exclusion-reasons-identidade-ambigua.md) `regra` — - **label**: Ambiguous identity
+- [exclusion_reasons: nao_adverso_a_eog](exclusion-reasons-nao-adverso-a-eog.md) `regra` — - **label**: Not adverse to the Seller
+- [exclusion_reasons: nao_computavel](exclusion-reasons-nao-computavel.md) `regra` — - **label**: Not computable from the row's inputs
+- [exclusion_reasons: nao_de_registro](exclusion-reasons-nao-de-registro.md) `regra` — - **label**: Not of record (internal paperwork)
+- [exclusion_reasons: pendente_de_terceiro](exclusion-reasons-pendente-de-terceiro.md) `regra` — - **label**: Pending a third party
+- [exclusion_reasons: pre_cert_date](exclusion-reasons-pre-cert-date.md) `regra` — - **label**: Predates the controlling certification date
+- [exclusion_reasons: trade_de_terceiro](exclusion-reasons-trade-de-terceiro.md) `regra` — - **label**: Third-party trade
+- [identity_keys: instrument](identity-keys-instrument.md) `entidade` — - **required**:
+- [identity_keys: lease](identity-keys-lease.md) `entidade` — - **required**:
+- [identity_keys: party](identity-keys-party.md) `entidade` — - **required**:
+- [identity_keys: survey](identity-keys-survey.md) `entidade` — - **required**:
+- [identity_keys: title_opinion](identity-keys-title-opinion.md) `entidade` — - **required**:
+- [identity_keys: unit_tract](identity-keys-unit-tract.md) `entidade` — - **required**:
+- [identity_keys: unit](identity-keys-unit.md) `entidade` — - **required**:
+- [identity_keys: well](identity-keys-well.md) `entidade` — - **required**:
+- [resolver_identity_by_key/fixture](resolver-identity-by-key-fixture.md) `regra` — - **lesson_id**: resolver_identity_by_key
+- [runsheet_style](runsheet-style.md) `regra` — - **version**: 1
+- [sources: county_clerk_records](sources-county-clerk-records.md) `regra` — - **label**: County Clerk — real property records
+- [sources: county_records_portal](sources-county-records-portal.md) `regra` — - **label**: TexasFile / CourthouseDirect
+- [sources: drive_plm](sources-drive-plm.md) `regra` — - **label**: PLM Drive
+- [sources: rrc](sources-rrc.md) `regra` — - **label**: Texas Railroad Commission
+- [sources: third_party_request](sources-third-party-request.md) `regra` — - **label**: Third party (Clerk, Seller, examining attorney)
+- [transmittal_cover_is_not_the_document/fixture](transmittal-cover-is-not-the-document-fixture.md) `regra` — - **lesson_id**: transmittal_cover_is_not_the_document
