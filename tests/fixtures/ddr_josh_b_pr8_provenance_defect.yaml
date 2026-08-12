@@ -1,0 +1,37 @@
+# Fixture D1 — two parts. This claim is in git; the bytes stay outside
+# (invariant 7: the workbook carries client data; invariant 14: a fixture
+# without bytes on disk is a counted SKIP, never a silent pass).
+lesson_id: ddr_pr8_provenance_defect
+type: gate
+scope: project
+created: 2026-08-12
+
+source_event: >
+  External byte verification of the PR-8 artefact (mtime 2026-08-12 08:12)
+  found 759 non-empty cells with NO audit-trail entry, seven tabs with zero
+  trail coverage, and the template's sample unit throughout: Dorothy Holder
+  Roberts, Willard Kath, ~30x "Top of Bone Spring"/"below top of Wolfcamp",
+  wells "Two Georges (Bone Spring)" and "Phantom (Wolfcamp)", WI/NRI 0.9896248,
+  Unit Size 636.16, a JOA effective 2011-01-28 with 300%/300% non-consent, and a
+  PLM Title Review signed "Ma Chona Adaya" dated 2024. None of those strings is
+  in the marker blacklist — which is the lesson.
+
+statement: >
+  A marker blacklist cannot prove an artefact clean; only a provenance
+  whitelist can. Every non-empty cell is either declared template STRUCTURE
+  with its expected value, or a value with a DD_Audit_Trail entry. Anything
+  else fails the gate. The blacklist may stay as defence; it is never again
+  the criterion.
+
+files:
+  - path: tests/fixtures/ddr_josh_b_pr8_provenance_defect.xlsx
+    sha256: "1a497b154e543820551eddc2c37282a1805da64fcc4ef24eff4b2343f44bccf4"
+    role: must_fail_the_whitelist_gate
+
+cases:
+  - name: the frozen artefact fails the whitelist gate
+    expect: about 759 orphan cells, naming "Bone Spring" and "Ma Chona Adaya"
+  - name: the rebuilt artefact passes
+    expect: zero orphan cells
+
+synthetic_ok: false

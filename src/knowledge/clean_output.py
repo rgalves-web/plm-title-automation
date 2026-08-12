@@ -49,6 +49,7 @@ class CleanReport:
     findings: list[CleanFinding] = field(default_factory=list)
     sheets: list[str] = field(default_factory=list)
     cells_checked: int = 0
+    orphans: int = 0
 
     @property
     def failed(self) -> bool:

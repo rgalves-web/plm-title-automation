@@ -123,8 +123,17 @@ def state_file(units_dir: str | Path, unit_name: str) -> Path:
     return state_dir(units_dir, unit_name) / STATE_FILENAME
 
 
+VERSIONS_DIRNAME = "versions"
+
+
 def _next_version(directory: Path) -> int:
-    versions = [int(m.group(1)) for p in directory.glob("state.v*.yaml")
+    # Snapshots live under versions/; the unit root keeps only state.yaml.
+    # Twenty-six state.v*.yaml beside the current one is how a unit's folder
+    # stops being readable. Both locations are scanned so numbering survives
+    # the migration of old snapshots.
+    candidates = list(directory.glob("state.v*.yaml")) + \
+        list((directory / VERSIONS_DIRNAME).glob("state.v*.yaml"))
+    versions = [int(m.group(1)) for p in candidates
                 if (m := _VERSION_RE.search(p.name))]
     return (max(versions) + 1) if versions else 1
 
@@ -143,7 +152,9 @@ def save_state(state: UnitState, units_dir: str | Path) -> Path:
     text = yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
     latest = directory / STATE_FILENAME
     latest.write_text(text, encoding="utf-8")
-    (directory / f"state.v{state.version}.yaml").write_text(text, encoding="utf-8")
+    versions = directory / VERSIONS_DIRNAME
+    versions.mkdir(exist_ok=True)
+    (versions / f"state.v{state.version}.yaml").write_text(text, encoding="utf-8")
     return latest
 
 

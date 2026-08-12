@@ -85,6 +85,11 @@ def assert_not_frozen(path: str | Path) -> Path:
                 f"refusing to write inside a delivered unit: {p}\n"
                 f"{frozen} is registered as delivered (config frozen_paths) — "
                 f"shipped work is read-only (CLAUDE.md invariant 16).")
+    # The write-roots fence (invariant 26) shares this chokepoint: every write
+    # path already consults the frozen guard, so declaring it here means a new
+    # writer cannot forget the manifest any more than it can forget the freeze.
+    from src.knowledge.write_roots import record_write
+    record_write(resolved)
     return p
 
 

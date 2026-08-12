@@ -35,6 +35,12 @@ from src.knowledge.loader import load_knowledge
 from src.knowledge.perimeter import Perimeter
 
 CASE = Path("data/units/_josh_b_replay")
+# Round state is regenerable scratch (invariant 26): it lives under _work/,
+# deletable whole, re-derived from the corpus at vision cost. The corpus itself
+# is the original zips in FILES/, read in place -- the standing duplicate under
+# corpus/ was deleted in PR-9.
+WORK = CASE / "_work"
+FILES_DIR = Path("C:/Users/Renato/PURPLE LAND MGMT/BKV122TX - Project Emirates/JOSH B UNIT/FILES")
 UNIT = "JOSH B UNIT"
 COUNTY = "Montague County, Texas"
 
@@ -51,12 +57,12 @@ def load_round() -> tuple[Perimeter, dict[str, list[dict[str, Any]]], Any]:
     # answers merge into the same record, so a consumer never has to know which
     # pass produced a field.
     deeper: dict[str, dict[str, Any]] = {}
-    path = CASE / EXTRACTIONS
+    path = WORK / EXTRACTIONS
     if path.exists():
         deeper = json.loads(path.read_text(encoding="utf-8"))
 
     by_lease: dict[str, list[dict[str, Any]]] = {}
-    for rec in json.loads((CASE / "classifications.json").read_text(encoding="utf-8")):
+    for rec in json.loads((WORK / "classifications.json").read_text(encoding="utf-8")):
         more = (deeper.get(rec.get("file", "")) or {}).get("extracted") or {}
         pages = more.pop("_pages", {}) if isinstance(more, dict) else {}
         for term, value in more.items():
@@ -75,7 +81,7 @@ OPINIONS = (
 )
 
 
-DPU_EXHIBIT_A = Path("data/units/_josh_b_exhibitA.json")
+DPU_EXHIBIT_A = WORK / "_josh_b_exhibitA.json"
 DPU_NAME = '611.526.pdf (DPU JOSH B UNIT, Exhibit "A")'
 
 
@@ -85,14 +91,14 @@ def term_sources(knowledge: Any) -> list[dict[str, Any]]:
 
     out: list[dict[str, Any]] = []
     for filename, key, opinion, cert in OPINIONS:
-        path = CASE / filename
+        path = WORK / filename
         if not path.exists():
             continue
         blocks = json.loads(path.read_text(encoding="utf-8"))[key]
-        ocr_path = CASE / filename.replace("_read.json", "_ocr.json")
+        ocr_path = WORK / filename.replace("_read.json", "_ocr.json")
         pages = (json.loads(ocr_path.read_text(encoding="utf-8"))
                  if ocr_path.exists() else None)
-        clause_path = CASE / filename.replace("_read.json", "_clauses.json")
+        clause_path = WORK / filename.replace("_read.json", "_clauses.json")
         extra = ([json.loads(clause_path.read_text(encoding="utf-8"))]
                  if clause_path.exists() else None)
         out.append(as_document(opinion, blocks, cert_date=cert, ocr_pages=pages,
@@ -212,7 +218,7 @@ def live_requirements() -> list[Any]:
 
     gaps: list[Any] = []
     for filename, key, opinion, tag in CURATIVE_SOURCES:
-        path = CASE / filename
+        path = WORK / filename
         if not path.exists():
             continue
         blocks = json.loads(path.read_text(encoding="utf-8"))[key]
@@ -554,7 +560,7 @@ def run(generated: str) -> dict[str, Any]:
     blank_cells = [c for d in disps for c in _blanks(d)]
     problems = validate_brief(brief, knowledge, blank_cells=blank_cells)
 
-    (CASE / "dispositions.json").write_text(
+    (WORK / "dispositions.json").write_text(
         json.dumps([d.to_dict() for d in disps], indent=1, ensure_ascii=False),
         encoding="utf-8")
     yaml_path, md_path = write_brief(brief, CASE, knowledge=knowledge)

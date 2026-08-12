@@ -27,6 +27,7 @@ from typing import Any
 import openpyxl
 
 from src.flow.deliverable_io import assert_not_frozen, save_and_verify
+from src.knowledge.write_roots import record_write
 from src.knowledge.clean_output import (AUDIT_TRAIL_SHEET, DELETE_TAB_PREFIX,
                                         PLACEHOLDER_MARKERS, assert_clean)
 
@@ -122,6 +123,18 @@ TERM_TO_HEADER = {
 }
 
 
+# "--" in a cell is not a blank: it asserts NOTHING EXISTS. The PR-8 artefact
+# said "--" for Potential Defects while the gap-hunter held four blocking items.
+# An absence token may be written only when the round COMPUTED the empty set,
+# and the citation must say so.
+ABSENCE_TOKENS = {"--", "-", "none", "n/a", "nenhum"}
+DERIVED_EMPTY = "derived: computed empty set"
+
+
+class AbsenceNotDerived(AssertionError):
+    """An absence token was written without a computed empty set behind it."""
+
+
 @dataclass
 class CellWrite:
     sheet: str
@@ -131,6 +144,16 @@ class CellWrite:
     value: Any
     citation: str = ""
     reason: str = ""
+
+    def __post_init__(self) -> None:
+        text = " ".join(str(self.value or "").split()).lower()
+        if text in ABSENCE_TOKENS and DERIVED_EMPTY not in self.citation:
+            raise AbsenceNotDerived(
+                f"{self.sheet}!{self.column}{self.row}: {self.value!r} asserts "
+                f"absence, and this round did not compute the empty set. An "
+                f"unknown state never becomes a negative conclusion — leave the "
+                f"cell blank with a reason, or derive the emptiness and cite it "
+                f"({DERIVED_EMPTY!r}).")
 
     @property
     def declared_blank(self) -> bool:
@@ -198,8 +221,11 @@ def write_ddr(template: str | Path, out_path: str | Path,
     """Fill Lease Review from the dispositions. Value+citation, or blank+reason."""
     out_path = Path(assert_not_frozen(out_path))
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    wb = openpyxl.load_workbook(template)
-    removed = _prepare_workbook(wb)
+    # The artefact is BORN as template-minus-sample (PR-9 item 3). Stripping at
+    # origin, not scrubbing at the end: the only way a cell becomes non-empty
+    # from here on is a recorded write.
+    from src.knowledge.template_structure import build_skeleton
+    wb = build_skeleton(template)
     ws = wb["Lease Review"]
     headers = _header_map(ws)
     writes: list[CellWrite] = []
@@ -210,6 +236,9 @@ def write_ddr(template: str | Path, out_path: str | Path,
         id_col = _column_for(headers, "lease_id")
         if id_col:
             ws[f"{id_col}{i}"] = f"L{i - 1}  ({d['lease']})"
+            writes.append(CellWrite(
+                "Lease Review", i, id_col, "lease_id", f"L{i - 1}  ({d['lease']})",
+                'unit designation, Exhibit "A" — row order of the Lease Review'))
         for term in ("lessor", "lessee", "instrument_date", "recording",
                      "legal_description", "term", "royalty", "shut_in",
                      "depth_limitation"):
@@ -254,10 +283,18 @@ def write_ddr(template: str | Path, out_path: str | Path,
             if str(cell.value or "").strip().lower().startswith("date submitted"):
                 summary.cell(row=cell.row, column=cell.column + 1,
                              value=submitted)
-    _scrub_sample_cells(wb)
+                writes.append(CellWrite(
+                    "Summary", cell.row,
+                    summary.cell(row=cell.row, column=cell.column + 1)
+                    .column_letter, "date_submitted", submitted,
+                    "ship-time field, filled at packaging"))
+    _scrub_sample_cells(wb)          # the blacklist stays as DEFENCE
     write_audit_trail(wb, writes)
     save_and_verify(wb, out_path)
-    # The gate runs on the BYTES, not on the workbook that produced them.
+    # The gates run on the BYTES, not on the workbook that produced them.
+    # Whitelist first (invariant 25): structure or provenance, nothing else.
+    from src.knowledge.template_structure import assert_provenance
+    assert_provenance(out_path)
     assert_clean(out_path, expected_sheets=EXPECTED_SHEETS)
     return out_path, writes
 
@@ -281,9 +318,26 @@ def _lease_filename(n: int, recording: str, lessor: str) -> str:
 def build_tree(root: str | Path, *, unit_title: str,
                dispositions: list[dict[str, Any]],
                classifications: list[dict[str, Any]],
-               ddr_path: Path, extras: dict[str, list[Path]] | None = None
+               ddr_path: Path, extras: dict[str, list[Path]] | None = None,
+               corpus: Any = None
                ) -> tuple[dict[str, list[str]], list[dict[str, str]]]:
-    """Assemble `1. Landman Submitted/`. COPIES only — nothing is moved."""
+    """Assemble `1. Landman Submitted/`. COPIES only — nothing is moved.
+
+    `corpus` is a CorpusIndex: sources are read straight out of the original
+    zips (in place, read-only). Plain paths still work for files that exist."""
+
+    def _copy(source: Any, dest: Path) -> bool:
+        src_path = Path(str(source))
+        if src_path.exists():
+            shutil.copy2(src_path, dest)
+            record_write(dest)
+            return True
+        if corpus is not None and corpus.exists(source):
+            dest.write_bytes(corpus.read_bytes(source))
+            record_write(dest)
+            return True
+        return False
+
     root = Path(assert_not_frozen(root)) / "1. Landman Submitted"
     if root.exists():
         shutil.rmtree(root)
@@ -302,18 +356,23 @@ def build_tree(root: str | Path, *, unit_title: str,
         if d["status"] == "outside_perimeter":
             continue
         n += 1
-        src = next((Path(c["file"]) for c in by_lease.get(d["lease"], [])
+        src = next((c["file"] for c in by_lease.get(d["lease"], [])
                     if c.get("classified_as") in ("lease_ogl", "lease_memorandum")
-                    and Path(c["file"]).exists()), None)
+                    and (Path(c["file"]).exists()
+                         or (corpus is not None and corpus.exists(c["file"])))),
+                   None)
         lessor = ((d.get("proved_terms") or {}).get("lessor") or {}).get("value", "")
         if src is None:
             missing.append({"folder": "Leases", "lease": d["lease"],
                             "reason": d.get("note", "instrument not held")})
             continue
         dest = root / "Leases" / (_lease_filename(n, d.get("recording", ""), lessor)
-                                  + src.suffix.lower())
-        shutil.copy2(src, dest)
-        placed["Leases"].append(dest.name)
+                                  + Path(str(src)).suffix.lower())
+        if _copy(src, dest):
+            placed["Leases"].append(dest.name)
+        else:
+            missing.append({"folder": "Leases", "lease": d["lease"],
+                            "reason": f"source unreadable: {Path(str(src)).name}"})
 
     shutil.copy2(ddr_path, root / "PLM Report" / ddr_path.name)
     placed["PLM Report"].append(ddr_path.name)
@@ -328,21 +387,31 @@ def build_tree(root: str | Path, *, unit_title: str,
         target = root / folder
         target.mkdir(parents=True, exist_ok=True)
         for p in paths:
-            p = Path(p)
-            if not p.exists():
+            # A source is a real path OR a member of the original zips read in
+            # place through the corpus index. The bytes come first either way,
+            # because dedup is by CONTENT: the same opinion filed in fourteen
+            # lease folders ships once.
+            name = Path(str(p)).name
+            real = Path(str(p))
+            if real.exists():
+                blob = real.read_bytes()
+            elif corpus is not None and corpus.exists(p):
+                blob = corpus.read_bytes(p)
+            else:
                 missing.append({"folder": folder, "lease": "",
-                                "reason": f"not held: {p.name}"})
+                                "reason": f"not held: {name}"})
                 continue
-            digest = hashlib.sha256(p.read_bytes()).hexdigest()
+            digest = hashlib.sha256(blob).hexdigest()
             if digest in seen:
                 continue
             seen.add(digest)
-            dest = target / p.name
+            dest = target / name
             n = 1
             while dest.exists():
                 n += 1
-                dest = target / f"{p.stem} ({n}){p.suffix}"
-            shutil.copy2(p, dest)
+                dest = target / f"{Path(name).stem} ({n}){Path(name).suffix}"
+            dest.write_bytes(blob)
+            record_write(dest)
             placed.setdefault(folder, []).append(dest.name)
 
     for name in SUBFOLDERS:

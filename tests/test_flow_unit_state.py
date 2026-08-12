@@ -38,8 +38,22 @@ def test_versioning_retains_prior_snapshots(tmp_path):
     assert st.version == 2
     d = tmp_path / "MAXWELL A UNIT"
     assert (d / "state.yaml").exists()
-    assert (d / "state.v1.yaml").exists()    # prior version retained
-    assert (d / "state.v2.yaml").exists()
+    # Snapshots live under versions/ — twenty-six state.v*.yaml beside the
+    # current one is how a unit folder stops being readable (PR-9 item 0).
+    assert (d / "versions" / "state.v1.yaml").exists()
+    assert (d / "versions" / "state.v2.yaml").exists()
+    assert not (d / "state.v1.yaml").exists()
+
+
+def test_numbering_survives_the_migration_of_old_snapshots(tmp_path):
+    # Old rounds left snapshots in the unit root; the migration moved them to
+    # versions/. The next save must continue the count, not restart it.
+    st = _state()
+    d = tmp_path / "MAXWELL A UNIT"
+    (d / "versions").mkdir(parents=True)
+    (d / "versions" / "state.v7.yaml").write_text("legacy", encoding="utf-8")
+    save_state(st, tmp_path)
+    assert st.version == 8
 
 
 def test_derive_allowlist_delegates_to_ledger(tmp_path):

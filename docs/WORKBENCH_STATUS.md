@@ -557,3 +557,75 @@ O item 5 — escrever Summary com a curativa, Ownership - Worksheet e Wells com 
 aritmética, PLM Title Review e Agreements — **não foi feito**. Você disse "só
 depois", e os quatro gates consumiram o PR. As abas seguem vazias e a checklist
 diz "No" nelas, com a pendência declarada em Notes.
+
+---
+
+## PR-9 — contenção de escrita + gate de WHITELIST de proveniência · **2026-08-12**
+
+Ordem executada na íntegra (`docs/CODE_INSTRUCTIONS_PR9_WHITELIST.md`). Branch
+`pr9-whitelist-provenance`; rede `pre-pr9-cleanup` (tag).
+
+### Item 0 — contenção e limpeza
+
+- **Invariante 26 (write-roots):** `write_roots.write_scope` — a rodada declara
+  os roots antes de escrever; escrita fora = exceção; `write_manifest.json`
+  emitido ao final, inclusive em falha. Gancho em `assert_not_frozen`, o
+  chokepoint que todo caminho de escrita já consulta.
+- **Rodada promovida para o repo:** o script de kit vivia em `/tmp` — escrita
+  não declarada por definição. Agora `src/knowledge/kit_round.py`.
+- **Limpeza:** scratch pontual → `data/_attic/2026-08-12/` (fora do git);
+  estado de rodada regenerável → `_josh_b_replay/_work/` (descartável por
+  inteiro); `state.v*.yaml` (26 Bowen + 14 Maxwell) → `<UNIT>/versions/` com
+  numeração sobrevivendo à migração (teste).
+- **`corpus/` apagado** (1.105 arquivos duplicados de cliente). O replay lê os
+  zips originais **in-place** via `corpus_reader.CorpusIndex` (read-only
+  enforçado; `materialise` recusa destino fora de `_work/`). Índice validado
+  contra 100% dos registros de classificação antes da deleção.
+- **Aceitação 0.3:** replay novo ponta a ponta com 46 escritas, todas dentro do
+  root declarado; quarentena 0; `git status` sem strays; suíte verde.
+
+### O defeito, medido — e a fixture congelada (item 1)
+
+A fixture `tests/fixtures/ddr_josh_b_pr8_provenance_defect.xlsx` (bytes fora do
+git, claim com sha256) é o artefato PR-8 intocado. O gate novo reporta:
+**FAIL — 525 órfãs de 1.094 células não vazias**, citando "Bone Spring" e
+"Ma Chona Adaya". As ~759 do Cowork = 525 órfãs + ~234 células de estrutura que
+a baseline agora legitima com valor esperado. Entre as órfãs estão o
+`Date Submitted` do PR-8 (escrito sem trilha) e os quatro `--` do Summary —
+asserções de ausência que a rodada contradizia.
+
+### Itens 2–4 — baseline, esqueleto, whitelist
+
+- **Baseline** (`knowledge/templates/ddr_template_structure.yaml`): 144 células
+  de estrutura, 942 de amostra, contagens por aba anexadas. O validador do
+  item 2 pegou meu primeiro erro de regra: `Agreements!A22` ("*** 3-11 A
+  601H…") ia ser abençoado como estrutura — a regra por coordenada virou regra
+  por princípio (rótulo termina em dois-pontos; título de bloco é dado).
+- **Esqueleto** (`build_skeleton`): o artefato NASCE template-menos-amostra.
+  Strip na origem; o scrub por marcador continua como defesa, nunca critério.
+- **Whitelist** (`assert_provenance`, dentro de `write_ddr`, sobre bytes
+  relidos): célula não vazia = estrutura declarada com valor esperado, ou valor
+  com entrada na `DD_Audit_Trail`. Duas escritas sem trilha apareceram na hora
+  (id da lease, Date Submitted) e ganharam trilha. Reconstruído: **CLEAN,
+  0 órfãs de 598**.
+
+### Itens 5–7
+
+- **Checklist derivada dos bytes** (`tabs_populated` +
+  `check_checklist_vs_artifact`): "populated" = ≥1 célula não-estrutura com
+  trilha na aba; Summary exige os 8 campos nomeados. Resultado honesto:
+  **7 Yes / 7 No** — o Summary caiu para "No" porque só Date Submitted está
+  preenchido, exatamente a contradição que o Cowork apontou.
+- **Ausência derivada** (`AbsenceNotDerived`): escrever "--"/"None" exige
+  citação `derived: computed empty set`. Estado desconhecido nunca vira
+  conclusão negativa.
+- **Runsheet 8–9 e órfãs da Lease Review:** eram linhas/colunas de amostra do
+  template sem origem documental na Josh B — **removidas** pelo strip na
+  origem. Verificado no reconstruído: Runsheet linhas 4–7 apenas; B/M/N/O/P da
+  Lease Review vazias.
+
+### Invariantes e regressão
+
+CLAUDE.md ganha os invariantes **25 (whitelist de proveniência + ausência
+derivada)** e **26 (write-roots)**; o contrato do brief permanece no 24.
+Suíte: **806 verdes** (24 novos). Bowen/Maxwell em leitura, inalteradas.

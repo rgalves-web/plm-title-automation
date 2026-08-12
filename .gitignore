@@ -53,3 +53,9 @@ Thumbs.db
 
 # Claude Code local tooling config (launch profiles, local permissions)
 .claude/
+
+# PR-9: the attic (parked client-adjacent scratch) and fixture BYTES
+# never enter git — a fixture is a claim in git plus bytes outside
+# (invariant 14); client data never leaves the machine (invariant 7).
+data/_attic/
+tests/fixtures/*.xlsx
