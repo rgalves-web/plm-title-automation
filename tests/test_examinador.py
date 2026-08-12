@@ -326,6 +326,24 @@ def test_every_model_the_round_uses_has_a_declared_rate():
     assert usage.cost("um-modelo-sem-tarifa") is None
 
 
+def test_a_turn_line_counts_the_cache_tokens_it_actually_paid_for():
+    """In a long loop the cache columns ARE the bill. A per-turn line without
+    them reads an order of magnitude cheaper than the run is."""
+    class _Cached(_Usage):
+        pass
+
+    usage = _Cached(input_tokens=3, output_tokens=4,
+                    cache_creation_input_tokens=1000,
+                    cache_read_input_tokens=20_000)
+    client = _FakeClient([[_Text("fim")]])
+    client.create = lambda **kw: _Message(content=[_Text("fim")], usage=usage)
+    log, _ = run_loop(system="s", task="t", tools=[], dispatch={},
+                      model="claude-opus-5", client=client)
+    assert log.turns[0].usage["cache_leitura"] == 20_000
+    assert log.turns[0].usage["cache_escrita"] == 1000
+    assert log.turns[0].usage["custo_usd"] == log.usage.cost("claude-opus-5")
+
+
 # --- the tools ---------------------------------------------------------------
 
 def test_the_nine_tools_are_exactly_the_ones_the_order_names():

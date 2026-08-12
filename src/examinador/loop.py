@@ -157,11 +157,12 @@ def run_loop(*, system: str, task: str, tools: list[dict[str, Any]],
         text = "".join(b.text for b in message.content
                        if getattr(b, "type", "") == "text")
         uses = [b for b in message.content if getattr(b, "type", "") == "tool_use"]
+        # The cache columns are most of the bill in a long loop; a per-turn line
+        # without them reads as an order of magnitude cheaper than the run is.
+        turn_usage = Usage()
+        turn_usage.add(message.usage)
         record = TurnRecord(turn=turn, text=text,
-                            usage=Usage(
-                                input=int(message.usage.input_tokens or 0),
-                                output=int(message.usage.output_tokens or 0),
-                            ).to_dict(model))
+                            usage=turn_usage.to_dict(model))
         messages.append({"role": "assistant", "content": message.content})
 
         if not uses:
