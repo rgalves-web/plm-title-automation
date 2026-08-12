@@ -27,6 +27,83 @@ from typing import Any
 import openpyxl
 
 from src.flow.deliverable_io import assert_not_frozen, save_and_verify
+from src.knowledge.clean_output import (AUDIT_TRAIL_SHEET, DELETE_TAB_PREFIX,
+                                        PLACEHOLDER_MARKERS, assert_clean)
+
+# The tabs a Josh B DDR must have, and only those. Taken from the template minus
+# the sample unit's leftovers, which is exactly what the old pipeline did with
+# `_drop_delete_tab`. Loading the template and typing over one tab ships the
+# other nine as the sample unit.
+EXPECTED_SHEETS = {
+    "Summary", "Ownership - Worksheet", "Ownership - Wells", "Lease Review",
+    "Agreements", "Unit and Pooling Agreements", "Runsheet",
+    "PLM Title Review", "Disclaimer", AUDIT_TRAIL_SHEET,
+}
+# Tabs the template carries for its own sample unit. They are not ours.
+SAMPLE_TABS = ("delete - ", "Ownership - 1H")
+# The template's Ownership tab is named for the sample unit in some versions;
+# PLM's instruction sheet names it "Ownership - Worksheet". Template-as-contract
+# means renaming by introspection, never assuming either name.
+OWNERSHIP_ALIASES = ("Ownership Report", "Ownership - Worksheet")
+
+
+def _prepare_workbook(wb) -> list[str]:
+    """Strip the template's sample unit before a single value is written.
+
+    Returns what was removed, so the manifest can say it rather than the change
+    being invisible."""
+    removed: list[str] = []
+    for name in list(wb.sheetnames):
+        if any(name.lower().startswith(t.lower()) for t in SAMPLE_TABS):
+            del wb[name]
+            removed.append(name)
+    for alias in OWNERSHIP_ALIASES:
+        if alias in wb.sheetnames and alias != "Ownership - Worksheet":
+            wb[alias].title = "Ownership - Worksheet"
+            removed.append(f"{alias} -> Ownership - Worksheet")
+    return removed
+
+
+def _scrub_sample_cells(wb) -> int:
+    """Blank every cell still carrying the template's sample unit.
+
+    A cell we did not write and that names another operator's unit is not
+    "leftover formatting" — it is a false statement about this unit."""
+    scrubbed = 0
+    for name in wb.sheetnames:
+        for row in wb[name].iter_rows():
+            for cell in row:
+                if cell.value is None:
+                    continue
+                text = str(cell.value)
+                if any(marker.lower() in text.lower()
+                       for marker in PLACEHOLDER_MARKERS):
+                    cell.value = None
+                    scrubbed += 1
+    return scrubbed
+
+
+def write_audit_trail(wb, writes: list["CellWrite"]) -> int:
+    """The evidence, IN the artefact. Bowen shipped with 1,099 entries; a DDR
+    whose citations live only in a case file is not traceable on its own."""
+    if AUDIT_TRAIL_SHEET in wb.sheetnames:
+        del wb[AUDIT_TRAIL_SHEET]
+    ws = wb.create_sheet(AUDIT_TRAIL_SHEET)
+    ws.append(["SHEET", "CELL", "FIELD", "VALUE", "CITED TO", "REASON IF BLANK"])
+    for c in writes:
+        ws.append([c.sheet, f"{c.column}{c.row}", c.term,
+                   str(c.value)[:500] if c.value else "",
+                   c.citation, c.reason])
+    return len(writes)
+
+DPU_AUTHORITY = 'unit designation, Exhibit "A"'
+
+
+def _norm_vp(value: Any) -> str:
+    import re as _re
+    digits = _re.findall(r"\d+", str(value or ""))
+    return ".".join(digits[:2])
+
 
 # The Lease Review columns, in the template's own order. Read from the template
 # header at write time; this is the mapping from our term names onto it.
@@ -122,6 +199,7 @@ def write_ddr(template: str | Path, out_path: str | Path,
     out_path = Path(assert_not_frozen(out_path))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     wb = openpyxl.load_workbook(template)
+    removed = _prepare_workbook(wb)
     ws = wb["Lease Review"]
     headers = _header_map(ws)
     writes: list[CellWrite] = []
@@ -139,6 +217,22 @@ def write_ddr(template: str | Path, out_path: str | Path,
             if not col:
                 continue
             proved = (d.get("proved_terms") or {}).get(term)
+            if term == "recording" and d.get("recording"):
+                # Exhibit "A" is the AUTHORITY on which leases are in the unit
+                # and at what recording (categories.yaml dpu.authority). An
+                # extraction that scraped a volume/page off the page is not
+                # allowed to overrule it: five rows carried the land
+                # description's own deed reference as the lease's recording,
+                # which is a wrong value where a blank would have been honest.
+                extracted = str((proved or {}).get("value") or "")
+                if extracted and _norm_vp(extracted) != _norm_vp(d["recording"]):
+                    writes.append(CellWrite(
+                        "Lease Review", i, col, term, d["recording"],
+                        f'{DPU_AUTHORITY} (extraction read {extracted[:40]!r} — '
+                        f'not adopted; Exhibit "A" is the authority)'))
+                    ws[f"{col}{i}"] = d["recording"]
+                    continue
+                proved = {"value": d["recording"], "cited_to": DPU_AUTHORITY}
             if proved and proved.get("value"):
                 ws[f"{col}{i}"] = str(proved["value"])
                 writes.append(CellWrite("Lease Review", i, col, term,
@@ -160,7 +254,11 @@ def write_ddr(template: str | Path, out_path: str | Path,
             if str(cell.value or "").strip().lower().startswith("date submitted"):
                 summary.cell(row=cell.row, column=cell.column + 1,
                              value=submitted)
+    _scrub_sample_cells(wb)
+    write_audit_trail(wb, writes)
     save_and_verify(wb, out_path)
+    # The gate runs on the BYTES, not on the workbook that produced them.
+    assert_clean(out_path, expected_sheets=EXPECTED_SHEETS)
     return out_path, writes
 
 
@@ -347,8 +445,16 @@ def fill_checklist(template: str | Path, out_path: str | Path, *,
     out_path.parent.mkdir(parents=True, exist_ok=True)
     wb = openpyxl.load_workbook(template)
     ws = wb[wb.sheetnames[0]]
-    if not str(ws.cell(row=1, column=5).value or "").strip():
-        ws.cell(row=1, column=5, value="Notes")
+    # The only checklist on disk is the one the operator filled by hand, so it
+    # arrives carrying THEIR answers and THEIR numbers. Inheriting those is how
+    # a generated checklist ends up asserting "94%" and "67 leases" about a kit
+    # holding neither. Clear the answers before writing our own.
+    for row in range(2, 16):
+        # NOT ws.cell(..., value=None): openpyxl ignores a None value argument,
+        # so that form reads as "clear this cell" and silently clears nothing.
+        ws.cell(row=row, column=4).value = None
+        ws.cell(row=row, column=5).value = None
+    ws.cell(row=1, column=5).value = "Notes"
 
     tally = {"Yes": 0, "No": 0}
     for row in range(2, 16):

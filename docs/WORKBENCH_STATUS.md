@@ -516,3 +516,44 @@ declaradas no manifesto, cada uma numa das duas caixas exigidas.
 2. Os instrumentos pós-certificação de 2010–2012 (as 15 OGLs da lista à mão) não estão no corpus.
 3. Ownership - Worksheet e Ownership - Wells: a aritmética de interesse, nunca tentada.
 4. RRC para Well Files.
+
+
+---
+
+## PR-8 — os gates que deviam existir antes de qualquer escrita · **2026-08-11**
+
+Nenhuma capacidade nova. O DDR que entreguei no PR-7 era o template com a Lease
+Review escrita por cima: **247 células com a unidade de amostra** (*** Energy,
+Reeves, Forest Oil, 636.13, Section **), a aba `delete - A.E. Carroll 4H`,
+`Ownership Report` onde a instrução da PLM diz `Ownership - Worksheet`, e
+**nenhuma DD_Audit_Trail**. O pipeline antigo já tinha as defesas
+(`PLACEHOLDER_MARKERS`, `_drop_delete_tab`, `_scrub_placeholders`,
+`check_sheet_set`) — eu simplesmente não as chamei.
+
+| gate | estado |
+|---|---|
+| **1. Saída limpa**, sobre bytes relidos do disco | **CLEAN** · 3.819 células · 0 achados |
+| **2. Asserção da checklist** | **CLEAN** — pegou "62", "67", "94%" herdados do Notes da checklist à mão |
+| **3. Quarentena do gabarito** | **0 tentativas** de ler `docs/JOSH_B_*` durante a rodada |
+| **4. DD_Audit_Trail no artefato** | **581 entradas** (célula, valor, citação, motivo do branco) |
+
+### Três defeitos reais encontrados no caminho
+
+- **`ws.cell(..., value=None)` não limpa nada.** O openpyxl ignora um `value`
+  None, então a forma que eu escrevi lia como "limpe esta célula" e limpava
+  zero. Era por isso que o Notes da checklist à mão sobrevivia a duas tentativas
+  de limpeza.
+- **`Volume 199, Page 336` repetido em cinco linhas** da coluna RECORDING: a
+  extração capturou a referência de deed da *descrição da terra* como registro
+  da lease. Corrigido pela ontologia — o Exhibit "A" é a **autoridade** sobre o
+  registro (`categories.yaml dpu.authority`), e uma extração que discorda dele
+  não é adotada; a divergência vai para a trilha. Valor errado é pior que branco.
+- **`.pyc` obsoleto mais novo que o fonte** mascarou a correção por duas
+  rodadas. Cache limpo.
+
+### O que este PR NÃO fez
+
+O item 5 — escrever Summary com a curativa, Ownership - Worksheet e Wells com a
+aritmética, PLM Title Review e Agreements — **não foi feito**. Você disse "só
+depois", e os quatro gates consumiram o PR. As abas seguem vazias e a checklist
+diz "No" nelas, com a pendência declarada em Notes.
