@@ -79,6 +79,22 @@ def test_a_mode_that_yields_nothing_never_falls_through_to_a_costlier_one(
     assert got["kind"] == "text"
 
 
+def test_a_text_file_is_readable_as_text(tmp_path: Path):
+    """A CSV is text. Round 1 returned nothing for one because only PDFs were
+    handled, and the model wrote a knowledge card telling all 300 units not to
+    waste a call on them. A tool that lies about what it cannot read teaches
+    the wrong lesson at scale."""
+    files = tmp_path / "FILES"
+    files.mkdir()
+    (files / "wells.csv").write_text("API,NOME\n42-337-34773,JOSH B 1H\n",
+                                     encoding="utf-8")
+    c = Corpus(files, cache=PageCache(tmp_path / "cache"))
+    got = c.read_page("wells.csv", 1, "texto")
+    assert "42-337-34773" in got["text"]
+    assert c.search("34773")["no_texto"] == [{"documento": "wells.csv",
+                                              "paginas": [1]}]
+
+
 def test_the_image_mode_returns_pixels(corpus: Corpus):
     got = corpus.read_page("0220604-024 (walker)/lease.pdf", 1, "imagem")
     assert got["kind"] == "image"

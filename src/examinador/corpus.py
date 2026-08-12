@@ -27,6 +27,8 @@ from src.examinador.cache import PageCache, digest, key_for
 from src.knowledge.corpus_reader import CorpusIndex
 
 IMAGE_SUFFIXES = {".tif", ".tiff", ".png", ".jpg", ".jpeg", ".bmp"}
+# Files that ARE text. They have no pages: the whole file is page 1.
+TEXT_SUFFIXES = {".csv", ".txt", ".html", ".htm", ".json", ".xml", ".md"}
 RENDER_DPI = 200
 MAX_EDGE_PX = 7800
 
@@ -129,7 +131,13 @@ class Corpus:
         for name in self.names():
             if needle in name.lower():
                 in_names.append(name)
-            if Path(name).suffix.lower() != ".pdf":
+            suffix = Path(name).suffix.lower()
+            if suffix in TEXT_SUFFIXES:
+                body = self.read_bytes(name).decode("utf-8", errors="replace")
+                if needle in body.lower():
+                    in_text.append({"documento": name, "paginas": [1]})
+                continue
+            if suffix != ".pdf":
                 unsearchable.append(name)
                 continue
             try:
@@ -157,7 +165,15 @@ class Corpus:
 
     # --- the dumb transformations -----------------------------------------
     def _text_layer(self, data: bytes, name: str, page: int) -> str:
-        if Path(name).suffix.lower() != ".pdf":
+        suffix = Path(name).suffix.lower()
+        if suffix in TEXT_SUFFIXES:
+            # A CSV is text. The first round's `texto` mode returned nothing for
+            # one because only PDFs were handled, and the model — correctly,
+            # from what it could see — wrote a knowledge card telling every
+            # future unit not to waste a call on them. A tool that lies about
+            # what it cannot read teaches the wrong lesson to 300 units.
+            return data.decode("utf-8", errors="replace").strip()
+        if suffix != ".pdf":
             return ""
         import fitz
         with fitz.open(stream=data, filetype="pdf") as doc:
