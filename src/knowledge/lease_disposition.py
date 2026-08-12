@@ -62,12 +62,30 @@ class LeaseDisposition:
     unproved_terms: dict[str, str] = field(default_factory=dict)
     defect: dict[str, Any] | None = None
     note: str = ""
+    # What the FOLDER holds, kept separate from what the cells know. A lease can
+    # have most of its terms of record and still have no instrument anywhere.
+    folder_state: str = ""
+    pointers: dict[str, Any] = field(default_factory=dict)
+
+    def route(self) -> str:
+        """Where the missing instrument is chased from.
+
+        A lease whose FORM terms (royalty, term) are already of record teaches
+        nobody anything at the courthouse — only the paper is owed, and the
+        Seller owes paper. A lease with only its identity known still has facts
+        to learn from the recording, so it is a lookup."""
+        if self.status != STATUS_TERMS_SOURCED:
+            return "fetch"
+        form = {"royalty", "term"}
+        return "seller" if form & set(self.proved_terms) else "fetch"
 
     def to_dict(self) -> dict[str, Any]:
         return {"lease": self.lease, "status": self.status,
+                "folder_state": self.folder_state, "route": self.route(),
                 "recording": self.recording, "sources": self.sources,
                 "proved_terms": self.proved_terms,
                 "unproved_terms": self.unproved_terms,
+                "pointers": self.pointers,
                 "defect": self.defect, "note": self.note}
 
 
@@ -99,12 +117,25 @@ def dispose(lease: str, recording: str, classifications: list[dict[str, Any]],
              if c.get("classified_as") == "lease_memorandum"]
 
     if leases:
-        return LeaseDisposition(
-            lease=lease, status=STATUS_OF_RECORD, recording=recording,
-            sources=[_source(c) for c in leases])
+        # The instrument being present is not the end of the question. WHICH
+        # terms it states is the rest of it, and skipping that is what made a
+        # missing royalty on a present lease indistinguishable from a missing
+        # lease — a row of blanks nobody owned.
+        from src.knowledge.term_source import resolve
+
+        d = LeaseDisposition(lease=lease, status=STATUS_OF_RECORD,
+                             recording=recording,
+                             sources=[_source(c) for c in leases])
+        sourcing = resolve({"recording_book_page": recording,
+                            "eog_lease_number": lease},
+                           [*leases, *(extra_sources or [])], knowledge)
+        d.proved_terms = {t: p.to_dict() for t, p in sourcing.proved.items()}
+        d.unproved_terms = dict(sourcing.unproved)
+        d.pointers = dict(sourcing.pointers)
+        return d
 
     if memos:
-        return _memo_only(lease, recording, memos, knowledge)
+        return _memo_only(lease, recording, memos, knowledge, extra_sources)
 
     illegible = [c for c in classifications if _is_illegible(c)]
     if illegible:
@@ -126,10 +157,16 @@ def dispose(lease: str, recording: str, classifications: list[dict[str, Any]],
 
     # The instrument is not here. That does NOT mean its terms are unknown: an
     # of-record document elsewhere in the corpus may state them (rule
-    # `proves_terms`). Ask before declaring the row blank.
+    # `proves_terms`). Sourcing fills CELLS; it does not make the document
+    # present, and conflating the two made the fetch table vanish while every
+    # instrument was still missing.
     sourced = _from_other_sources(lease, recording, extra_sources or [], knowledge)
     if sourced:
         sourced.sources.extend(_source(c) for c in classifications)
+        sourced.status = (STATUS_TERMS_SOURCED if not classifications
+                          else STATUS_TERMS_SOURCED)
+        sourced.folder_state = (STATUS_NOT_IN_CORPUS if not classifications
+                                else STATUS_NO_INSTRUMENT)
         return sourced
 
     # Only now is absence a claim the evidence supports: every document in the
@@ -166,6 +203,7 @@ def _from_other_sources(lease: str, recording: str,
                          sources=list(sourcing.sources_used))
     d.proved_terms = {t: p.to_dict() for t, p in sourcing.proved.items()}
     d.unproved_terms = dict(sourcing.unproved)
+    d.pointers = dict(sourcing.pointers)
     cite = next(iter(sourcing.proved.values())).citation()
     d.defect = {
         "label": "MISSING LEASE",
@@ -198,28 +236,34 @@ def _is_illegible(c: dict[str, Any]) -> bool:
 
 
 def _memo_only(lease: str, recording: str, memos: list[dict[str, Any]],
-               knowledge: Any) -> LeaseDisposition:
+               knowledge: Any, extra_sources: list[dict[str, Any]] | None = None
+               ) -> LeaseDisposition:
+    """The memorandum case, resolved through the SAME machinery as every other
+    source. It had its own copy of the logic, which is how the pointer rule and
+    the frame rule reached every category except the one they were written for."""
+    from src.knowledge.term_source import resolve
+
     rule = _rule(knowledge)
-    # Prefer a recorded memorandum: only an of-record instrument may prove terms.
-    recorded = [m for m in memos
-                if str((m.get("of_record") or {}).get("status")) == "recorded"]
-    best = (recorded or memos)[0]
     d = LeaseDisposition(lease=lease, status=STATUS_MEMO_ONLY,
                          recording=recording, sources=[_source(m) for m in memos])
 
-    extracted = best.get("extracted") or {}
+    sourcing = resolve({"recording_book_page": recording,
+                        "eog_lease_number": lease},
+                       [*memos, *(extra_sources or [])], knowledge)
+    d.proved_terms = {t: p.to_dict() for t, p in sourcing.proved.items()}
+    d.unproved_terms = dict(sourcing.unproved)
+    d.pointers = dict(sourcing.pointers)
+    for term in MEMO_UNPROVABLE_TERMS:
+        d.unproved_terms.setdefault(
+            term, getattr(rule, "reason_for_unstated_terms", "doc_nao_localizado"))
+
+    best = next((m for m in memos
+                 if str((m.get("of_record") or {}).get("status")) == "recorded"),
+                memos[0])
     page = (best.get("evidence") or {}).get("page", 1)
     cite = f"{Path(str(best.get('file', ''))).name} p.{page}"
-    for term in MEMO_PROVABLE_TERMS:
-        value = extracted.get(term)
-        if value:
-            d.proved_terms[term] = {"value": value, "cited_to": cite,
-                                    "of_record": (best.get("of_record") or {})
-                                    .get("status", "unknown")}
-    for term in MEMO_UNPROVABLE_TERMS:
-        if not extracted.get(term):
-            d.unproved_terms[term] = getattr(rule, "reason_for_unstated_terms",
-                                             "doc_nao_localizado")
+    if sourcing.proved:
+        cite = next(iter(sourcing.proved.values())).citation()
 
     d.defect = {
         "label": getattr(rule, "defect_label", "MISSING LEASE"),

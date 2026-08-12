@@ -45,15 +45,26 @@ class ProvedTerm:
     source_page: Any
     source_category: str
     quote: str = ""
+    # Set when the value came from a lease the source says shares this one's
+    # form. The citation then carries BOTH pages: the borrowed value and the
+    # sentence that authorises borrowing it.
+    inherited_from: dict[str, Any] | None = None
 
     def citation(self) -> str:
         page = f" p.{self.source_page}" if self.source_page else ""
-        return f"{Path(str(self.source_file)).name}{page}"
+        base = f"{Path(str(self.source_file)).name}{page}"
+        if self.inherited_from:
+            base += (f" (form of Lease {self.inherited_from['from_lease']}, "
+                     f"p.{self.inherited_from['from_page']}; authorised at "
+                     f"p.{self.inherited_from['authority_page']}: "
+                     f"\"{self.inherited_from['quote']}\")")
+        return base
 
     def to_dict(self) -> dict[str, Any]:
         return {"term": self.term, "value": self.value,
                 "cited_to": self.citation(),
-                "source_category": self.source_category, "quote": self.quote}
+                "source_category": self.source_category, "quote": self.quote,
+                "inherited_from": self.inherited_from}
 
 
 @dataclass
@@ -62,11 +73,15 @@ class TermSourcing:
     unproved: dict[str, str] = field(default_factory=dict)
     conflicts: list[dict[str, Any]] = field(default_factory=list)
     sources_used: list[dict[str, Any]] = field(default_factory=list)
+    # Values read faithfully but expressed in the source's own frame. Kept as
+    # pointers; never adopted as a cell value.
+    pointers: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {"proved": {k: v.to_dict() for k, v in self.proved.items()},
                 "unproved": dict(self.unproved),
                 "conflicts": list(self.conflicts),
+                "pointers": dict(self.pointers),
                 "sources_used": list(self.sources_used)}
 
 
@@ -123,17 +138,42 @@ def resolve(key: dict[str, Any], documents: list[dict[str, Any]],
 
     candidates.sort(key=lambda c: c[0])
     for rank, category, doc, entry, rule in candidates:
+        # Same key name the classification records use, so a consumer never has
+        # to know whether a source spoke about itself or about someone else.
         out.sources_used.append({"file": str(doc.get("file", "")),
-                                 "category": category, "page": entry.get("page")})
+                                 "classified_as": category,
+                                 "page": entry.get("page")})
+        for term in getattr(rule, "frame_local", []) or []:
+            value = (entry.get("terms") or {}).get(term)
+            if value and term not in out.pointers:
+                out.pointers[term] = {
+                    "value": value, "source": str(doc.get("file", "")),
+                    "page": entry.get("page"),
+                    "why_not_adopted": (f"stated in the {category}'s own frame; "
+                                        f"needs translation before it can be a "
+                                        f"cell value")}
+
         for term in rule.proves:
             value = (entry.get("terms") or {}).get(term)
             if not value:
                 continue
+            if _is_pointer(value):
+                # "SEE EXHIBIT 'A' ATTACHED HERETO FOR DESCRIPTION OF LANDS
+                # COVERED" is a cross-reference, not a description. Transcribing
+                # it faithfully still puts a signpost where a value belongs.
+                out.pointers.setdefault(term, {
+                    "value": value, "source": str(doc.get("file", "")),
+                    "page": entry.get("page"),
+                    "why_not_adopted": "the field cross-references another "
+                                       "document instead of stating the value"})
+                continue
+            inherited = (entry.get("inherited") or {}).get(term)
             proved = ProvedTerm(term=term, value=value,
                                 source_file=str(doc.get("file", "")),
                                 source_page=entry.get("page"),
                                 source_category=category,
-                                quote=str(entry.get("quote") or "")[:200])
+                                quote=str(entry.get("quote") or "")[:200],
+                                inherited_from=inherited)
             existing = out.proved.get(term)
             if existing is None:
                 out.proved[term] = proved
@@ -180,3 +220,16 @@ def _differs(a: Any, b: Any) -> bool:
         return na != nb
     clean = lambda v: re.sub(r"[^a-z0-9]", "", str(v).lower())  # noqa: E731
     return clean(a) != clean(b)
+
+
+# A field that points somewhere else is not a value. These are the forms the
+# corpus actually uses; each one was found sitting in a cell that needed a fact.
+_POINTER_RE = re.compile(
+    r"\bsee\s+(exhibit|attached|schedule|above|below)\b"
+    r"|\battached\s+hereto\b"
+    r"|\bas\s+(?:more\s+fully\s+)?described\s+in\b"
+    r"|^\s*(?:same\s+as|per)\b", re.IGNORECASE)
+
+
+def _is_pointer(value: Any) -> bool:
+    return bool(_POINTER_RE.search(str(value or "")))

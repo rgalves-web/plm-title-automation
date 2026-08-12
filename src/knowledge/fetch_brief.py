@@ -24,9 +24,14 @@ ACTION_REQUEST = "request"      # a third party must hand it over
 ACTION_CONFIRM = "confirm"      # nothing is missing; something must be checked
 ACTION_VERDICT = "verdict"      # the file is here; say what it is
 ACTION_RESCAN = "rescan"        # the file is here and unreadable; open it by hand
+ACTION_EXTRACT = "extract"      # the file is here and readable; WE have not read
+                                # these fields off it yet. The work is the
+                                # system's, not the operator's, and saying so is
+                                # the difference between "a document is missing"
+                                # and "I owe you a second pass".
 ACTION_UNFINDABLE = "unfindable"  # declared not locatable — leaves for Missing Files
 ACTIONS = (ACTION_FETCH, ACTION_REQUEST, ACTION_CONFIRM, ACTION_VERDICT,
-           ACTION_RESCAN, ACTION_UNFINDABLE)
+           ACTION_RESCAN, ACTION_EXTRACT, ACTION_UNFINDABLE)
 
 # Actions that assert a document IS NOT HERE. Only these carry the burden of
 # proving absence, and absence is never proved by an unidentified file.

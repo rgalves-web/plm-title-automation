@@ -327,3 +327,112 @@ fato numa réplica fria — então o contrato ganhou uma terceira forma aceita,
 | 11 | RRC W-1 / P-12 / plat | ❌ | ❌ — não tentado |
 | 12 | Tract 1: 1/2 não arrendado, EOG WI 0,50 / NRI 0,40 | ❌ | ⚠️ — a **curativa** que determina esses números é emitida; a aritmética não foi tentada |
 | 13 | Runsheet com 23 instrumentos pós-certificação | ❌ | ❌ — não tentado |
+
+---
+
+## PR-6 — o kit, a frio · **2026-08-11**
+
+### 1. A verificação grátis: célula a célula contra o DDR feito à mão
+
+As duas leituras vêm do **mesmo** title opinion. É a evidência de corretude mais
+forte que o projeto produziu até aqui.
+
+| | |
+|---|---|
+| **iguais** | **117** |
+| divergentes | **3** |
+| só-no-sistema | **0** |
+| só-à-mão | 62 |
+
+**Zero cells em que o sistema inventou um valor que a mão não tem.** As 3
+divergências restantes são de estilo, ambas as leituras fiéis à sua fonte: o
+lessor pelo instrumento (*"The Marvin Brashear Trust and The Bess Brashear
+Trust, by Bobbie Brashear, Jr., as Trustee"*) contra a abreviação do Exhibit "A"
+(*"Marvin Brashear & B Brashear Tst"*); o termo literal contra o termo mais a
+conclusão sobre a opção de extensão; e um nome de lessor enriquecido à mão com o
+nome alternativo.
+
+A primeira passada tinha **6 divergências e 44 iguais**. O que as fechou:
+
+- **Frame local.** `LAND: Tract 2.` é a numeração de tratos **da opinião**, não a
+  do unit. Transcrever aquilo para a coluna LEGAL DESCRIPTION é verbatim-correto
+  e errado onde cai. Virou `frame_local` em L1: o valor é guardado como
+  **ponteiro** e nunca vira célula.
+- **Ponteiro não é valor.** *"SEE EXHIBIT 'A' ATTACHED HERETO FOR DESCRIPTION OF
+  LANDS COVERED"* é uma remissão. Estava sendo escrita como se fosse a descrição.
+- **Incorporação por referência.** A opinião diz, em palavras: *"Leases 26 - 32
+  use the same form as Lease 10, and only those provisions differing from Lease
+  10 are included below"*, e a 10 herda da 9. Não é inferência convidada por um
+  campo vazio — é o documento declarando que as provisões não repetidas **são**
+  as da lease base. A herança segue a cadeia (26 → 10 → 9), só termos de FORMA
+  (identidade nunca herda, senão duas leases se fundem), e a citação carrega as
+  **duas** páginas mais a frase que autoriza.
+- **Exhibit "A" como fonte.** A DPU é instrumento gravado que imprime lessor,
+  lessee, data e recording de cada lease. Passou a ser fonte desses quatro.
+
+### 2. Disposição em nível de campo (backlog #9 — fechado)
+
+`route()` separa o que o **documento** é do que as **células** sabem: uma lease
+pode ter os termos de registro e não ter instrumento nenhum. E `_blanks()` passou
+a reportar por campo em toda disposição, inclusive nas leases cujo instrumento
+**está** presente — o que expôs 315 células órfãs que antes não existiam porque
+ninguém perguntava.
+
+Elas ganharam dono próprio: `EXTRACT-FIELDS`, ação nova `extract`. É a única
+ação do brief cujo trabalho é **do sistema, não seu** — "o documento está aqui,
+eu não li estes campos dele". Antes disso, uma royalty faltando numa lease
+presente e uma lease inteira faltando contavam igual.
+
+### 3. S6 → S7 → S8 a frio
+
+| | |
+|---|---|
+| células com valor **e citação** | **279** |
+| células em branco **com motivo do vocabulário** | **261** |
+| células órfãs | **0** |
+| **convergiu** | **sim** |
+
+A rodada declara sozinha que acabou — não por estar cheia, mas porque toda
+célula está evidenciada ou declarada. Gate estrutural e brief: 0 problemas.
+
+Três defeitos meus que o próprio pipeline pegou no caminho: o kit colocando
+**capturas de tela** como title opinions e well files (uma foto de um documento
+não é o documento — regra nova, e nenhuma captura embarca); o mesmo TO copiado
+23 vezes por estar arquivado em toda pasta de lease (dedupe por hash: 23 → 3); e
+uma regra de shippability cega demais que zerou Seller Files, porque eu tinha
+escrito "só embarca o que é de registro" quando um ownership report do seller
+nunca é gravado e é justamente um arquivo do seller.
+
+### 4. Kit gerado × kit à mão
+
+| pasta | gerado a frio | gabarito 06/08 | pasta hoje |
+|---|---|---|---|
+| Leases | 35 | 53 | 67 |
+| PLM Report | 1 | 1 | 1 |
+| Seller Files | 1 | 6 | 6 |
+| Title Documents | 1 | 19 | 32 |
+| Title Opinions | 3 | 4 | 4 |
+| Unit Designations | 1 | 1 | 1 |
+| Well Files | 0 | 1 | 4 |
+| Phase I - Checklist | 0 | 1 | 1 |
+| **TOTAL** | **42** | **86** | **116** |
+
+**42 de 86.** O que falta não está escondido: as 26 lacunas estão declaradas no
+`SUBMISSION_MANIFEST.txt`, cada uma com o motivo e, onde há, os termos já
+provados com citação. Os Title Documents são a maior distância — 1 contra 19 —
+porque o Runsheet (S6 completo) não foi construído, e é dele que sai a lista dos
+documentos de título. Well Files continua vazio porque o RRC nunca foi buscado.
+
+### 5. Placar final
+
+**Das 13 conclusões verificáveis do gabarito: 8 sozinho, 3 parciais, 2 abertas.**
+
+| # | Conclusão | PR-5 | PR-6 |
+|---|---|---|---|
+| 1–7 | DPU, surveys, tratos, Exhibit "A", série 0220936, divergências, TOs | ✅ | ✅ |
+| 8 | Pastas sem o instrumento | ⚠️ | ⚠️ — agora é por **campo**: 279 células com citação, 261 declaradas, 0 órfãs |
+| 9 | 5 leases memo-only | ⚠️ | ⚠️ — mecanismo geral; os 5 memorandos seguem fora do corpus |
+| 10 | Probates de Ector com causa | ✅ | ✅ |
+| 11 | RRC W-1 / P-12 / plat | ❌ | ❌ — não tentado |
+| 12 | Tract 1: EOG WI 0,50 / NRI 0,40 | ⚠️ | ⚠️ — curativa emitida; aritmética não tentada |
+| 13 | Runsheet com 23 instrumentos | ❌ | ❌ — não tentado; é o que trava Title Documents |

@@ -114,6 +114,13 @@ class ProvesTerms(BaseModel):
     match_on: list[str]
     proves: list[str]
     cannot_prove: list[str] = Field(default_factory=list)
+    # Terms whose value is only meaningful INSIDE the source document. A title
+    # opinion's lease summary says `LAND: Tract 2` — its own tract numbering,
+    # not the unit's. Transcribing it into the DDR's LEGAL DESCRIPTION column is
+    # verbatim-correct and wrong where it lands. Such a term is recorded as a
+    # POINTER and never adopted as the cell value: the cell stays blank with its
+    # named reason until someone translates the frame.
+    frame_local: list[str] = Field(default_factory=list)
     reason_for_unstated_terms: str
     # A source may also be a defect: a lease whose ONLY record is a memorandum
     # is reported missing at the same time as its terms are filled in.

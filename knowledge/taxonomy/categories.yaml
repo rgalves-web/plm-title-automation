@@ -34,8 +34,13 @@ categories:
     proves_terms:
       for_entity: lease
       match_on: [recording_book_page]
-      proves: [lessor, lessee, instrument_date, recording, legal_description,
-               term, royalty, interest_covered]
+      proves: [lessor, lessee, instrument_date, recording, term, royalty,
+               interest_covered]
+      # An opinion's LAND field carries the OPINION's own tract numbering, not
+      # the unit's. Copying it into the DDR's legal-description cell is
+      # verbatim-correct and wrong where it lands, so it is kept as a pointer
+      # and never adopted as a value until someone translates the frame.
+      frame_local: [legal_description]
       cannot_prove: [bonus, depth_limitation]
       reason_for_unstated_terms: doc_nao_localizado
       also_a_defect: false
@@ -69,6 +74,17 @@ categories:
       Exhibit "A" is the authority on which leases are in the unit. Every other
       index (XREF, schedule) is cross-checked AGAINST it; a divergence is a
       finding, never a silent preference.
+    # Exhibit "A" is a recorded instrument that prints, per lease, the lessor,
+    # the lessee, the date and the recording. That is of-record and stated —
+    # so it is a source of exactly those four, and of nothing else.
+    proves_terms:
+      for_entity: lease
+      match_on: [recording_book_page, eog_lease_number]
+      proves: [lessor, lessee, instrument_date, recording]
+      cannot_prove: [royalty, term, bonus, pooling_clause, shut_in,
+                     depth_limitation, legal_description]
+      reason_for_unstated_terms: doc_nao_localizado
+      also_a_defect: false
 
   dpu_amendment:
     label: DPU amendment

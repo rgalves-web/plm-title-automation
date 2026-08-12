@@ -17,12 +17,14 @@ from typing import Any
 
 import yaml
 
-from src.knowledge.fetch_brief import (ACTION_CONFIRM, ACTION_FETCH,
+from src.knowledge.fetch_brief import (ACTION_CONFIRM, ACTION_EXTRACT,
+                                       ACTION_FETCH,
                                        ACTION_REQUEST, ACTION_RESCAN,
                                        ACTION_VERDICT, BriefItem, FetchBrief,
                                        blocks_certification, render_markdown,
                                        validate_brief, write_brief)
 from src.knowledge.lease_disposition import (STATUS_ILLEGIBLE, STATUS_MEMO_ONLY,
+                                             STATUS_OF_RECORD,
                                              STATUS_TERMS_SOURCED,
                                              STATUS_NO_INSTRUMENT,
                                              STATUS_NOT_IN_CORPUS,
@@ -52,8 +54,12 @@ OPINIONS = (
 )
 
 
+DPU_EXHIBIT_A = Path("data/units/_josh_b_exhibitA.json")
+DPU_NAME = '611.526.pdf (DPU JOSH B UNIT, Exhibit "A")'
+
+
 def term_sources(knowledge: Any) -> list[dict[str, Any]]:
-    """Documents that state OTHER entities' terms — today, the opinions."""
+    """Every document that states OTHER entities' terms."""
     from src.knowledge.to_schedule import as_document
 
     out: list[dict[str, Any]] = []
@@ -62,7 +68,26 @@ def term_sources(knowledge: Any) -> list[dict[str, Any]]:
         if not path.exists():
             continue
         blocks = json.loads(path.read_text(encoding="utf-8"))[key]
-        out.append(as_document(opinion, blocks, cert_date=cert))
+        ocr_path = CASE / filename.replace("_read.json", "_ocr.json")
+        pages = (json.loads(ocr_path.read_text(encoding="utf-8"))
+                 if ocr_path.exists() else None)
+        out.append(as_document(opinion, blocks, cert_date=cert, ocr_pages=pages))
+
+    # The unit designation itself: a recorded instrument printing lessor,
+    # lessee, date and recording for every lease it pools.
+    if DPU_EXHIBIT_A.exists():
+        leases = json.loads(DPU_EXHIBIT_A.read_text(encoding="utf-8"))["leases"]
+        out.append({
+            "file": DPU_NAME, "classified_as": "dpu",
+            "of_record": {"status": "recorded"}, "extracted": {},
+            "proves": [{"recording_book_page": v.get("recording"),
+                        "eog_lease_number": lease, "page": v.get("page"),
+                        "quote": f'Exhibit "A": {lease} | {v.get("lessor")}',
+                        "terms": {"lessor": v.get("lessor"),
+                                  "lessee": "EOG Resources, Inc.",
+                                  "instrument_date": v.get("date"),
+                                  "recording": v.get("recording")}}
+                       for lease, v in leases.items()]})
     return out
 
 
@@ -127,7 +152,10 @@ def _grouped_fetch(disps: list[Any], item_id: str,
                     'FALSE POSITIVE: the same lessor\'s lease in a neighbouring '
                     'unit — the pair (lease number, recording) must match '
                     'Exhibit "A"; neither field alone decides.'),
-        unlocks=[c for d in rows for c in _lease_cells(d.lease)],
+        # Per FIELD, not per row. "the lease is missing" and "the royalty is
+        # missing on a lease that is present" are different holes with different
+        # owners, and only field-level claims can tell them apart.
+        unlocks=[c for d in rows for c in _blanks(d)],
         already_searched=already,
         # Lease Review does not block certification: PLM works the runsheet
         # first, and a declared blank ships.
@@ -258,8 +286,10 @@ def build_items(perimeter: Perimeter, disps: list[Any]) -> list[BriefItem]:
 
     # --- the lease instruments: grouped by DECISION, not by row -------------
     absent = _grouped_fetch(
-        disps, "LEASE-FETCH",
-        (STATUS_NOT_IN_CORPUS, STATUS_NO_INSTRUMENT),
+        [d for d in disps if d.route() == "fetch"
+         and d.status not in (STATUS_UNIDENTIFIED, STATUS_ILLEGIBLE)],
+        "LEASE-FETCH",
+        (STATUS_NOT_IN_CORPUS, STATUS_NO_INSTRUMENT, STATUS_TERMS_SOURCED),
         "Recorded lease instruments not present in FILES/",
         origin=('every one is named in Exhibit "A" of ' + perimeter.authority
                 + "; for the folders that exist, every document in them was read "
@@ -267,7 +297,8 @@ def build_items(perimeter: Perimeter, disps: list[Any]) -> list[BriefItem]:
         already=[f"{d.lease}: " + ("; ".join(
             f"{Path(s['file']).name} = {s['classified_as']}" for s in d.sources)
             or "no folder in FILES/") for d in disps
-            if d.status in (STATUS_NOT_IN_CORPUS, STATUS_NO_INSTRUMENT)])
+            if d.route() == "fetch" and d.status not in (
+                STATUS_OUTSIDE, STATUS_UNIDENTIFIED, STATUS_ILLEGIBLE)])
     if absent:
         items.append(absent)
 
@@ -290,7 +321,7 @@ def build_items(perimeter: Perimeter, disps: list[Any]) -> list[BriefItem]:
                  "the disk is the most expensive mistake this brief can make.\n\n"
                  + "\n".join(table)),
             looks_like="A decision, not a document.",
-            unlocks=[c for d in unknown for c in _lease_cells(d.lease)],
+            unlocks=[c for d in unknown for c in _blanks(d)],
             already_searched=["the file was read; the reader could not identify it"],
             blocking=False, action=ACTION_VERDICT, source="drive_plm",
             effort="one look per file",
@@ -315,7 +346,7 @@ def build_items(perimeter: Perimeter, disps: list[Any]) -> list[BriefItem]:
                  "THEN pull the recording at the courthouse.\n\n" + "\n".join(table)),
             looks_like="The instrument is here. This is a legibility problem, "
                        "not a missing document.",
-            unlocks=[c for d in illegible for c in _lease_cells(d.lease)],
+            unlocks=[c for d in illegible for c in _blanks(d)],
             already_searched=["the file was opened and the read produced nothing "
                               "usable"],
             blocking=False, action=ACTION_RESCAN, source="drive_plm",
@@ -323,7 +354,7 @@ def build_items(perimeter: Perimeter, disps: list[Any]) -> list[BriefItem]:
             origin="the reader reported the document illegible"))
 
     # --- terms of record elsewhere: a DELIVERY, not a courthouse trip -------
-    sourced = [d for d in disps if d.status == STATUS_TERMS_SOURCED]
+    sourced = [d for d in disps if d.route() == "seller"]
     if sourced:
         table = ["| lease | recording | terms already filled, cited to |",
                  "|---|---|---|"]
@@ -435,6 +466,37 @@ def build_items(perimeter: Perimeter, disps: list[Any]) -> list[BriefItem]:
                 adopted_value="nothing adopted — the finding is new",
                 conflict_with=div.index_says, origin=div.proof))
 
+    # --- fields not yet read off documents we HOLD -------------------------
+    held = [d for d in disps if d.status == STATUS_OF_RECORD and d.unproved_terms]
+    if held:
+        by_term: dict[str, int] = {}
+        for d in held:
+            for t in d.unproved_terms:
+                by_term[t] = by_term.get(t, 0) + 1
+        table = ["| field | leases still missing it |", "|---|---|"]
+        for t, n in sorted(by_term.items(), key=lambda kv: -kv[1]):
+            table.append(f"| {t} | {n} |")
+        items.append(BriefItem(
+            id="EXTRACT-FIELDS",
+            what=(f"Second read of {len(held)} lease instrument(s) already on "
+                  f"disk, for fields the first pass did not extract"),
+            where=["PLM Drive / FILES — the instruments are already classified "
+                   "and their paths are in the ledger"],
+            how=("Nothing to fetch and nothing for you to do: this is the "
+                 "system's own second pass over documents it already holds. It "
+                 "is listed because these cells are blank, and a blank without "
+                 "an owner is a hole nobody is accountable for.\n\n"
+                 + "\n".join(table)),
+            looks_like="A re-read, not a document.",
+            unlocks=[c for d in held for c in _blanks(d)],
+            already_searched=["the instrument was read once and classified; "
+                              "these fields were not extracted from it"],
+            blocking=blocks_certification(LEASE_REVIEW_FEEDS),
+            action=ACTION_EXTRACT, source="drive_plm",
+            effort="one pass over documents already on disk",
+            origin="the instrument is of record and held; the field is blank "
+                   "because it has not been read, not because it is missing"))
+
     items.extend(_curative_items())
 
     for div in perimeter.divergences:
@@ -477,15 +539,27 @@ def run(generated: str) -> dict[str, Any]:
             "blank_cells": blank_cells}
 
 
+# Every column of the Lease Review a lease owes a value for. Naming them is what
+# makes "94 blanks" mean something: a lease with no royalty and a lease with no
+# instrument are not the same hole, and before this they counted the same.
+LEASE_REVIEW_FIELDS = ("lessor", "lessee", "instrument_date", "recording",
+                       "legal_description", "term", "royalty", "shut_in",
+                       "depth_limitation", "pooling_clause", "bonus")
+
+
 def _blanks(d: Any) -> list[str]:
-    """Every blank this disposition leaves. A blank whose cause is "nobody has
-    identified the file" is still a blank, and it still owes an owner
-    (invariant 18) — it just owes a VERDICT item rather than a search."""
-    if d.status == STATUS_MEMO_ONLY:
+    """Every blank this disposition leaves, PER FIELD (invariant 18).
+
+    A blank whose cause is "nobody has identified the file" is still a blank and
+    still owes an owner — it just owes a VERDICT item rather than a search."""
+    if d.status == STATUS_OUTSIDE:
+        return []
+    if d.status == STATUS_OF_RECORD:
+        # The instrument is here, and what it does NOT state is still a hole.
+        # A missing royalty on a present lease is a field gap, not a document
+        # gap, and it owes a field-level owner like any other blank.
         return [f"Lease Review!{d.lease}.{t}" for t in sorted(d.unproved_terms)]
-    if d.status == STATUS_TERMS_SOURCED:
-        return [f"Lease Review!{d.lease}.{t}" for t in sorted(d.unproved_terms)]
-    if d.status in (STATUS_NOT_IN_CORPUS, STATUS_NO_INSTRUMENT,
-                    STATUS_UNIDENTIFIED, STATUS_ILLEGIBLE):
-        return _lease_cells(d.lease)
-    return []
+    unproved = (sorted(d.unproved_terms) if d.unproved_terms
+                else [f for f in LEASE_REVIEW_FIELDS
+                      if f not in (d.proved_terms or {})])
+    return [f"Lease Review!{d.lease}.{t}" for t in unproved]

@@ -67,10 +67,72 @@ def parse_schedule(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+# "Leases 26 - 32 use the same form as Lease 10, and only those provisions
+# differing from Lease 10 are included below." That is not an inference invited
+# by a silent field — it is the opinion stating, in words, that the unstated
+# provisions ARE the base lease's. Reading it any other way leaves thirteen
+# royalty cells blank that the document actually fills.
+_FORM_REF_RE = re.compile(
+    r"Leases?\s+(\d{1,2})\s*(?:-|–|through|to)?\s*(\d{1,2})?\s+uses?\s+the\s+"
+    r"same\s+form\s+as\s+Lease\s+(\d{1,2})", re.IGNORECASE)
+
+# What a FORM carries. Identity never inherits: every entry prints its own
+# recording, date and lessor, and inheriting those would merge two leases.
+FORM_TERMS = ("royalty", "term", "shut_in", "pooling_clause", "depth_limitation")
+
+
+def form_references(pages: list[str]) -> dict[str, tuple[str, int, str]]:
+    """lease no -> (base lease no, page of the statement, the statement)."""
+    out: dict[str, tuple[str, int, str]] = {}
+    for page_no, text in enumerate(pages, start=1):
+        for m in _FORM_REF_RE.finditer(text or ""):
+            first, last, base = m.group(1), m.group(2), m.group(3)
+            quote = " ".join(m.group(0).split())
+            start, end = int(first), int(last or first)
+            for n in range(start, end + 1):
+                if str(n) != base:
+                    out[str(n)] = (base, page_no, quote)
+    return out
+
+
+def apply_form_references(schedule: list[dict[str, Any]],
+                          pages: list[str]) -> list[dict[str, Any]]:
+    """Fill each entry's unstated FORM terms from the lease it points at.
+
+    The chain is followed (26 -> 10 -> 9) and the citation keeps both pages, so
+    the reader can see the borrowed value AND the sentence that authorises it."""
+    refs = form_references(pages)
+    by_no = {e["lease_no"]: e for e in schedule}
+
+    def resolve(no: str, seen: frozenset[str]) -> None:
+        if no in seen or no not in refs:
+            return
+        base_no, page_no, quote = refs[no]
+        base = by_no.get(base_no)
+        entry = by_no.get(no)
+        if base is None or entry is None:
+            return
+        resolve(base_no, seen | {no})            # chains: 26 -> 10 -> 9
+        for term in FORM_TERMS:
+            if entry["terms"].get(term) or not base["terms"].get(term):
+                continue
+            entry["terms"][term] = base["terms"][term]
+            entry.setdefault("inherited", {})[term] = {
+                "from_lease": base_no, "from_page": base["page"],
+                "authority_page": page_no, "quote": quote}
+
+    for no in list(by_no):
+        resolve(no, frozenset())
+    return schedule
+
+
 def as_document(opinion_path: str | Path, blocks: list[dict[str, Any]],
-                cert_date: str = "") -> dict[str, Any]:
+                cert_date: str = "",
+                ocr_pages: list[str] | None = None) -> dict[str, Any]:
     """The opinion as a classification record carrying its `proves` entries."""
     schedule = parse_schedule(blocks)
+    if ocr_pages:
+        schedule = apply_form_references(schedule, ocr_pages)
     return {
         "file": str(opinion_path),
         "classified_as": "title_opinion",
