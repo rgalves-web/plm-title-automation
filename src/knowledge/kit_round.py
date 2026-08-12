@@ -74,6 +74,7 @@ def _tab_payloads() -> tuple[dict, list, list]:
     from src.knowledge.fetch_brief import (ACTION_FETCH, ACTION_REQUEST,
                                            ACTION_VERDICT, BriefItem)
     from src.knowledge.josh_b_round import live_requirements
+    from src.knowledge.recording_authority import RecordingAuthority
     from src.knowledge.unit_ownership import load_schedules
 
     engagement = _yaml.safe_load(
@@ -187,6 +188,7 @@ def _tab_payloads() -> tuple[dict, list, list]:
 
     payload = {
         "engagement": engagement, "unit_authority": unit_authority,
+        "authority": RecordingAuthority.from_exhibit_a(exhibit_a),
         "exhibit_c": exhibit_c, "schedules": schedules,
         "tract_map": tract_map, "wellbore": wellbore,
         "gaps_text": gaps_text, "gaps_cite": gaps_cite,
@@ -333,7 +335,8 @@ def build_kit(submitted: str) -> KitRound:
                 tract_map=payload["tract_map"],
                 exhibit_c=payload["exhibit_c"], dispositions=disps,
                 to_schedule_by_lease=payload["to_schedule_by_lease"],
-                county="Montague"),
+                county="Montague", authority=payload["authority"],
+                gross_acres="220.00"),
             lambda wb, w: ddr_tabs.write_wells(
                 wb, w, wellbore=payload["wellbore"],
                 gaps_text=payload["gaps_text"], gaps_cite=payload["gaps_cite"],
@@ -353,10 +356,14 @@ def build_kit(submitted: str) -> KitRound:
                 landman_cite=payload["landman_cite"],
                 submitted=submitted),
         ]
+        from src.knowledge.recording_authority import RecordingAuthority
+        authority = RecordingAuthority.from_exhibit_a(json.loads(
+            (WORK / "_josh_b_exhibitA.json").read_text(encoding="utf-8"))["leases"])
         ddr, writes = write_ddr(TEMPLATE, KIT / f"DDR - {UNIT.title()}.xlsx",
                                 disps, unit=UNIT, submitted=submitted,
                                 runsheet_entries=entries,
                                 runsheet_basis=RUNSHEET_BASIS,
+                                authority=authority,
                                 extra_writers=extra_writers)
         result = BuildResult(ddr_path=ddr, cells=writes,
                              problems=list(r["problems"]))

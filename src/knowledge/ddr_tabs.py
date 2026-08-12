@@ -71,12 +71,16 @@ def write_summary(wb, writes: list[CellWrite], *, engagement: dict[str, Any],
                                     "", "doc_nao_localizado"))
 
 
+UNIT_AUTHORITY = "recorded unit designation Vol. 611, Pg. 526 p.1"
+
+
 def write_worksheet(wb, writes: list[CellWrite], *, schedules: dict[str, Any],
                     tract_map: dict[str, dict[str, Any]],
                     exhibit_c: dict[str, dict[str, str]],
                     dispositions: list[dict[str, Any]],
                     to_schedule_by_lease: dict[str, dict[str, Any]],
-                    county: str) -> None:
+                    county: str, authority: Any = None,
+                    gross_acres: str = "") -> None:
     """Ownership - Worksheet at the deliverable's own grain: one row per lease.
 
     PLM's Phase I instruction asks for columns A (Unit Tract No.) through Q
@@ -116,21 +120,13 @@ def write_worksheet(wb, writes: list[CellWrite], *, schedules: dict[str, Any],
         recording, recording_cite = term("recording")
         legal, legal_cite = term("legal_description")
         primary, primary_cite = term("term")
-        # Exhibit "A" is the AUTHORITY on a lease's recording (categories.yaml
-        # dpu.authority). An extraction that scraped a volume/page off the page
-        # is not allowed to overrule it — five Lease Review rows once carried
-        # the land description's own deed reference as the lease's recording.
+        # One point of truth for every recording field (recording_authority).
         book = page = ""
-        authority_recording = str(d.get("recording") or "")
-        if authority_recording:
-            digits = re.findall(r"\d+", authority_recording)
-            if len(digits) >= 2:
-                book, page = digits[0], digits[1]
-            recording_cite = ('unit designation, Exhibit "A"'
-                              + (f" (extraction read {recording[:36]!r} — not "
-                                 f"adopted)" if recording
-                                 and re.findall(r"\d+", recording)[:2]
-                                 != digits[:2] else ""))
+        if authority is not None:
+            resolved = authority.resolve(lease, recording)
+            book, page = resolved.book_page
+            if resolved.citation:
+                recording_cite = resolved.citation
 
         cells: list[tuple[str, str, str, str, str]] = [
             # column, value, citation, term name, reason when blank
@@ -173,6 +169,30 @@ def write_worksheet(wb, writes: list[CellWrite], *, schedules: dict[str, Any],
                 writes.append(CellWrite("Ownership - Worksheet", row_no, col,
                                         term_name, "", "", reason))
         row_no += 1
+
+    # --- the unit recap, under the template's own headers at A4:E4 ---------
+    # The headline numbers of the whole DDR. Only A5 is provable from a document
+    # this round read; B5:E5 are weighted across tracts, and the tract mapping
+    # is still an INFERENCE owned by the TRACT-MAP verdict item. A weighted
+    # average resting on an unverified mapping would be a plausible number in
+    # the most-read cell of the deliverable.
+    recap = [
+        ("A", gross_acres, f"{UNIT_AUTHORITY}: the unit is declared to contain "
+                           f"{gross_acres} acres", ""),
+        ("B", "", "", "nao_computavel"),
+        ("C", "", "", "nao_computavel"),
+        ("D", "", "", "nao_computavel"),
+        ("E", "", "", "nao_computavel"),
+    ]
+    for col, value, cite, reason in recap:
+        if value:
+            ws[f"{col}5"] = value
+            writes.append(CellWrite("Ownership - Worksheet", 5, col,
+                                    "unit_recap", value, cite))
+        else:
+            writes.append(CellWrite(
+                "Ownership - Worksheet", 5, col, "unit_recap", "", "",
+                reason))
 
     # The unit's own tract schedule, from Exhibit "C": owner and gross acres.
     for tract_no, spec in sorted(exhibit_c.items()):

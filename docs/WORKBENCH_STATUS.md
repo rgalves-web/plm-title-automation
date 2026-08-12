@@ -726,3 +726,79 @@ de toda a coluna S sem ler o tipo declarado na C.
 
 A divergência única: `0220604-010`, gerado 0,02500000 contra 0,01250000 à mão —
 exatamente o dobro. É achado para verdito humano, não para conserto silencioso.
+
+---
+
+## PR-11 — proveniência não é corretude · **2026-08-12**
+
+Branch `pr11-crosstab-consistency`. O gate whitelist do PR-9 provava que **uma
+fonte foi citada**; não provava que **o campo certo foi lido dela**, nem
+enxergava célula que ninguém escreveu. Três defeitos passaram por ele com
+trilha completa.
+
+### 1. BLOQUEANTE — o registro errado, contradizendo a própria Lease Review
+
+`Runsheet!C5` dizia `Volume 199, Page 356` e `C6` `Volume 199, Page 336 of the
+Deed Records…` para as mesmas leases que a Lease Review do **mesmo arquivo**
+registrava como 567.170 e 571.343. É a referência de deed da descrição da terra
+— o defeito corrigido no PR-8 **no ponto de escrita da Lease Review**, que
+nunca virou regra. Quinta instância de "conserto no ponto de erro, não regra no
+ponto de acerto".
+
+`src/knowledge/recording_authority.py` é agora o **único ponto** que decide um
+registro, e `RECORDING_WRITERS` + um teste garantem que todo escritor o
+consulte. Corrigido no artefato: as duas células batem com a Lease Review e com
+o documento à mão.
+
+Um detalhe que valeu o PR: o check de consistência **não pegava** o defeito no
+começo, porque a citação do Runsheet era só `LEASE.TIF p.1` — sem a lease, não
+há junção. A citação passou a nomear a lease, e o artefato ficou verificável a
+partir dos próprios bytes, sem dado auxiliar.
+
+### 2. BLOQUEANTE — valor cuja única fonte é uma captura de tela
+
+A linha Choctaw citava `Captura de tela … .png p.1` nos **dez** campos, com o
+grantee saindo `ENEGRY LIMITED PARTNERSHIP, hereinafter refer…`. Captura é
+evidência de que um documento existe, nunca o documento: não tem carimbo, não
+tem página, não se re-lê.
+
+**Invariante 27**, imposto em `CellWrite.__post_init__` — onde toda célula
+nasce, para nenhum escritor poder optar por fora. `captura_de_tela` entrou no
+vocabulário fechado; o selector do Runsheet exclui com esse motivo. O gate
+disparou de verdade na primeira rodada após ser escrito, no defeito real.
+
+### 3. Brancos órfãos — o check tinha a forma do erro, não a do acerto
+
+`Ownership - Worksheet` A5:E5 — o recap da unidade sob os cabeçalhos declarados,
+os números-título do DDR inteiro — estava vazio **e** fora da trilha. O gate
+andava pelas células escritas, então não via.
+
+`cross_tab.check_coverage` passa a exigir as duas pontas sobre regiões de dados
+declaradas. A5 sai da DPU (220,00 ac, citado). B5:E5 seriam médias ponderadas
+por trato, e o mapeamento de trato ainda é **inferência** do item TRACT-MAP —
+então ficam brancas com `nao_computavel` e dono. Um número plausível na célula
+mais lida do documento seria o pior lugar para adivinhar.
+
+### 4–5. Gate de consistência e denominadores
+
+Consistência entre abas: **244 claims, 0 violações**. Denominadores agora em
+três colunas nomeadas — **1.178 escritas-com-trilha · 366 brancas-com-motivo ·
+144 estrutura**; escritas + estrutura = **1.322** = células não vazias no
+arquivo. (A contagem correta de brancos no PR-10 era 363, não 393 como o texto
+daquele PR disse.)
+
+### 6. `0220604-010` — a causa do dobro, achada
+
+O MI de Stephen Ray Walker é `1/10 x 1/8 + (1/8 x 1/5 x 1/2)` = 0,0125 **+**
+0,0125 = 0,025: **dois interesses componentes** de origens distintas. O
+documento à mão atribui **um** deles à lease; a cadeia royalty→dono→minerals
+soma os dois. É o mesmo padrão dos direitos executivos desta rodada — um dono
+aparecendo duas vezes por motivos diferentes. Fica em verdito humano, como
+mandado: qual componente pertence à lease é pergunta que o documento não
+responde sozinho.
+
+### Gates e regressão
+
+Whitelist **CLEAN** (1.322 células, 0 órfãs) · consistência **CLEAN** ·
+cobertura **CLEAN** · zero citações de captura. Suíte **830 verdes** (24 novos).
+Bowen/Maxwell em leitura, inalteradas.

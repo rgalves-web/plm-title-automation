@@ -135,6 +135,30 @@ class AbsenceNotDerived(AssertionError):
     """An absence token was written without a computed empty set behind it."""
 
 
+# A photograph of a document is not the document (PR-6 settled that for what
+# SHIPS). It is equally not a CITATION: a screen capture carries no file stamp,
+# no page, and cannot be re-read by whoever checks the cell later. Runsheet row
+# 7 of the PR-10 artefact cited `Captura de tela ….png p.1` for all ten of its
+# fields, and produced a grantee reading "ENEGRY LIMITED PARTNERSHIP,
+# hereinafter refer…" — a misread plus the parties recital, sourced from a
+# screenshot nobody could go back to.
+CAPTURE_MARKERS = ("captura de tela", "screenshot", "screen capture",
+                   "print da tela")
+CAPTURE_SUFFIXES = (".png", ".jpg", ".jpeg", ".bmp")
+
+
+class InadmissibleCitation(AssertionError):
+    """A client-facing value cited a source that cannot be re-read."""
+
+
+def is_screen_capture(citation: str) -> bool:
+    text = " ".join(str(citation or "").split()).lower()
+    if any(marker in text for marker in CAPTURE_MARKERS):
+        return True
+    return any(f"{suffix} " in text or text.endswith(suffix)
+               for suffix in CAPTURE_SUFFIXES)
+
+
 @dataclass
 class CellWrite:
     sheet: str
@@ -146,6 +170,14 @@ class CellWrite:
     reason: str = ""
 
     def __post_init__(self) -> None:
+        if self.value and is_screen_capture(self.citation):
+            raise InadmissibleCitation(
+                f"{self.sheet}!{self.column}{self.row}: the only source for "
+                f"{str(self.value)[:40]!r} is a screen capture "
+                f"({self.citation[:60]}). A capture has no file stamp, no page "
+                f"and cannot be re-read by whoever checks this cell. Put the "
+                f"document in FILES/ and read it, or leave the cell blank with "
+                f"a reason and a brief item (invariant 27).")
         text = " ".join(str(self.value or "").split()).lower()
         if text in ABSENCE_TOKENS and DERIVED_EMPTY not in self.citation:
             raise AbsenceNotDerived(
@@ -218,6 +250,7 @@ def write_ddr(template: str | Path, out_path: str | Path,
               submitted: str,
               runsheet_entries: list[Any] | None = None,
               runsheet_basis: Any = None,
+              authority: Any = None,
               extra_writers: list[Any] | None = None
               ) -> tuple[Path, list[CellWrite]]:
     """Fill Lease Review from the dispositions. Value+citation, or blank+reason."""
@@ -248,22 +281,18 @@ def write_ddr(template: str | Path, out_path: str | Path,
             if not col:
                 continue
             proved = (d.get("proved_terms") or {}).get(term)
-            if term == "recording" and d.get("recording"):
-                # Exhibit "A" is the AUTHORITY on which leases are in the unit
-                # and at what recording (categories.yaml dpu.authority). An
-                # extraction that scraped a volume/page off the page is not
-                # allowed to overrule it: five rows carried the land
-                # description's own deed reference as the lease's recording,
-                # which is a wrong value where a blank would have been honest.
-                extracted = str((proved or {}).get("value") or "")
-                if extracted and _norm_vp(extracted) != _norm_vp(d["recording"]):
-                    writes.append(CellWrite(
-                        "Lease Review", i, col, term, d["recording"],
-                        f'{DPU_AUTHORITY} (extraction read {extracted[:40]!r} — '
-                        f'not adopted; Exhibit "A" is the authority)'))
-                    ws[f"{col}{i}"] = d["recording"]
+            if term == "recording" and authority is not None:
+                # One point of truth for every recording field, in every tab
+                # (recording_authority). The rule used to live here alone, and
+                # the Runsheet written later never learned it.
+                resolved = authority.resolve(d["lease"],
+                                             (proved or {}).get("value"))
+                if resolved.value:
+                    ws[f"{col}{i}"] = resolved.value
+                    writes.append(CellWrite("Lease Review", i, col, term,
+                                            resolved.value, resolved.citation))
                     continue
-                proved = {"value": d["recording"], "cited_to": DPU_AUTHORITY}
+                proved = None
             if proved and proved.get("value"):
                 ws[f"{col}{i}"] = str(proved["value"])
                 writes.append(CellWrite("Lease Review", i, col, term,
@@ -277,7 +306,8 @@ def write_ddr(template: str | Path, out_path: str | Path,
                                         "", reason or _status_reason(d)))
 
     if runsheet_entries:
-        writes.extend(write_runsheet(wb, runsheet_entries, basis=runsheet_basis))
+        writes.extend(write_runsheet(wb, runsheet_entries, basis=runsheet_basis,
+                                     authority=authority))
 
     # PR-10: the other tabs, written by the same contract — every writer takes
     # (wb, writes) and appends a CellWrite per touched cell, so the trail and
@@ -304,6 +334,14 @@ def write_ddr(template: str | Path, out_path: str | Path,
     from src.knowledge.template_structure import assert_provenance
     assert_provenance(out_path)
     assert_clean(out_path, expected_sheets=EXPECTED_SHEETS)
+    # Provenance is not correctness (PR-11): the two gates above prove a source
+    # was cited and nothing unaccounted shipped. These two prove the right field
+    # was read from it, and that no declared data cell was left unanswered.
+    from src.knowledge.cross_tab import assert_consistent
+    assert_consistent(out_path,
+                      {lease: authority.resolve(lease).value
+                       for lease in getattr(authority, "_by_lease", {})}
+                      if authority is not None else None)
     return out_path, writes
 
 
@@ -560,8 +598,12 @@ RUNSHEET_HEADER_ROW = 2
 RUNSHEET_FIRST_ROW = 4
 
 
-def write_runsheet(wb, entries: list[Any], basis: Any = None) -> list[CellWrite]:
-    """Write the Runsheet tab. Each entry is a drafted cell, not a fact."""
+def write_runsheet(wb, entries: list[Any], basis: Any = None,
+                   authority: Any = None) -> list[CellWrite]:
+    """Write the Runsheet tab. Each entry is a drafted cell, not a fact.
+
+    `authority` is the RecordingAuthority. Column C is a recording field, so it
+    goes through the same single point every other tab uses."""
     ws = wb["Runsheet"]
     writes: list[CellWrite] = []
     if basis is not None:
@@ -570,7 +612,20 @@ def write_runsheet(wb, entries: list[Any], basis: Any = None) -> list[CellWrite]
                                 "declared basis of the run"))
     cols = ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
     for i, e in enumerate(entries, start=RUNSHEET_FIRST_ROW):
-        values = [e.no, e.instrument, e.instrument_number, e.effective_date,
+        # The citation names the lease, so the artefact can be cross-checked
+        # from its own bytes: a Runsheet row that cites only "LEASE.TIF p.1"
+        # cannot be joined to the Lease Review row for the same lease, and that
+        # is precisely how a contradicting recording survived a gate looking
+        # straight at both cells.
+        row_cite = e.citation() + (f" (lease {e.lease})" if getattr(e, "lease", "")
+                                   else "")
+        instrument_number, number_cite = e.instrument_number, row_cite
+        if authority is not None and getattr(e, "lease", ""):
+            resolved = authority.resolve(e.lease, e.instrument_number)
+            if resolved.value:
+                instrument_number = resolved.value
+                number_cite = f"{resolved.citation} (lease {e.lease})"
+        values = [e.no, e.instrument, instrument_number, e.effective_date,
                   e.instrument_date, e.recorded_date, e.grantor, e.grantee,
                   e.acreage]
         for col, value in zip(cols, values):
@@ -578,12 +633,12 @@ def write_runsheet(wb, entries: list[Any], basis: Any = None) -> list[CellWrite]
             # A runsheet cell with nothing in it is declared like any other
             # blank: the date the copy does not show is a fact about the copy.
             writes.append(CellWrite(
-                "Runsheet", i, col, "runsheet", value, e.citation(),
+                "Runsheet", i, col, "runsheet", value,
+                number_cite if col == "C" else row_cite,
                 "" if value else "fato_inexistente_no_registro"))
         # The house style lives in the entry, not in a wall of pasted text.
         note = " ".join(x for x in (e.conveyance, e.reservation) if x)
         if note:
             ws[f"J{i}"] = note
-            writes.append(CellWrite("Runsheet", i, "J", "entry", note,
-                                    e.citation()))
+            writes.append(CellWrite("Runsheet", i, "J", "entry", note, row_cite))
     return writes

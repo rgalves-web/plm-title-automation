@@ -76,6 +76,11 @@ class RunsheetEntry:
     reservation: str = ""           # ONE sentence, omitted when nothing reserved
     source_file: str = ""
     source_page: Any = None
+    # The lease this instrument belongs to. Without it the writer cannot ask
+    # the recording authority anything, which is how Volume 199 Page 336 — a
+    # deed reference out of a land description — reached Runsheet!C5 and C6
+    # while the Lease Review of the same workbook had it right.
+    lease: str = ""
     needs_verdict: bool = True
     findings: list[str] = field(default_factory=list)
 
@@ -90,6 +95,7 @@ class RunsheetEntry:
                 "instrument_date": self.instrument_date,
                 "recorded_date": self.recorded_date,
                 "grantor": self.grantor, "grantee": self.grantee,
+                "lease": self.lease,
                 "acreage": self.acreage, "conveyance": self.conveyance,
                 "reservation": self.reservation, "cited_to": self.citation(),
                 "needs_verdict": self.needs_verdict, "findings": self.findings}
@@ -130,6 +136,17 @@ def select(documents: list[dict[str, Any]], *, cert_date: date,
             dropped.append(Excluded(name, "fora_do_perimetro",
                                     "the lease it belongs to contributes zero "
                                     "acres to the unit"))
+            continue
+        # A capture is evidence that a document exists, never the document.
+        # Runsheet row 7 of the PR-10 artefact cited a screenshot for all ten
+        # of its fields and produced a garbled grantee nobody could go back
+        # and check.
+        from src.knowledge.kit_builder import is_screen_capture
+        if is_screen_capture(name):
+            dropped.append(Excluded(
+                name, "captura_de_tela",
+                "the only source is a screen capture; the instrument itself "
+                "must reach FILES/ before it can enter the chain"))
             continue
         if category not in CHAIN_CATEGORIES:
             dropped.append(Excluded(name, "fora_do_tipo",
@@ -253,7 +270,7 @@ def build(documents: list[dict[str, Any]], *, cert_date: date,
         where = str(e.get("unit_tract") or (unit_tracts or {}).get(
             str(e.get("recording")), "") or "")
         entry = RunsheetEntry(
-            no=n, instrument=label,
+            no=n, instrument=label, lease=str(doc.get("lease") or ""),
             instrument_number=str(e.get("recording") or ""),
             effective_date=str(e.get("effective_date")
                                or e.get("instrument_date") or NOT_SHOWN),
