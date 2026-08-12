@@ -128,7 +128,8 @@ def dispose(lease: str, recording: str, classifications: list[dict[str, Any]],
                              sources=[_source(c) for c in leases])
         sourcing = resolve({"recording_book_page": recording,
                             "eog_lease_number": lease},
-                           [*leases, *(extra_sources or [])], knowledge)
+                           [*leases, *(extra_sources or [])], knowledge,
+                           entity_is_of_record=bool(recording), about=leases)
         d.proved_terms = {t: p.to_dict() for t, p in sourcing.proved.items()}
         d.unproved_terms = dict(sourcing.unproved)
         d.pointers = dict(sourcing.pointers)
@@ -194,7 +195,8 @@ def _from_other_sources(lease: str, recording: str,
     if not extra_sources:
         return None
     key = {"recording_book_page": recording, "eog_lease_number": lease}
-    sourcing = resolve(key, extra_sources, knowledge)
+    sourcing = resolve(key, extra_sources, knowledge,
+                       entity_is_of_record=bool(recording))
     if not sourcing.proved:
         return None
 
@@ -249,7 +251,8 @@ def _memo_only(lease: str, recording: str, memos: list[dict[str, Any]],
 
     sourcing = resolve({"recording_book_page": recording,
                         "eog_lease_number": lease},
-                       [*memos, *(extra_sources or [])], knowledge)
+                       [*memos, *(extra_sources or [])], knowledge,
+                       entity_is_of_record=bool(recording), about=memos)
     d.proved_terms = {t: p.to_dict() for t, p in sourcing.proved.items()}
     d.unproved_terms = dict(sourcing.unproved)
     d.pointers = dict(sourcing.pointers)

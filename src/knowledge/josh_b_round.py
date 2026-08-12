@@ -39,11 +39,32 @@ UNIT = "JOSH B UNIT"
 COUNTY = "Montague County, Texas"
 
 
+EXTRACTIONS = "lease_extractions.json"
+
+
 def load_round() -> tuple[Perimeter, dict[str, list[dict[str, Any]]], Any]:
     perimeter = Perimeter.from_dict(
         yaml.safe_load((CASE / "perimeter.yaml").read_text(encoding="utf-8")))
+
+    # The extract pass is a SECOND read of documents already classified: the
+    # first pass asked "what is this?", this one asks "what does it say?". Its
+    # answers merge into the same record, so a consumer never has to know which
+    # pass produced a field.
+    deeper: dict[str, dict[str, Any]] = {}
+    path = CASE / EXTRACTIONS
+    if path.exists():
+        deeper = json.loads(path.read_text(encoding="utf-8"))
+
     by_lease: dict[str, list[dict[str, Any]]] = {}
     for rec in json.loads((CASE / "classifications.json").read_text(encoding="utf-8")):
+        more = (deeper.get(rec.get("file", "")) or {}).get("extracted") or {}
+        pages = more.pop("_pages", {}) if isinstance(more, dict) else {}
+        for term, value in more.items():
+            if term.startswith("_") or not value:
+                continue
+            rec.setdefault("extracted", {}).setdefault(term, value)
+        if pages:
+            rec["term_pages"] = pages
         by_lease.setdefault(rec.get("lease", "?"), []).append(rec)
     return perimeter, by_lease, load_knowledge()
 
@@ -71,7 +92,11 @@ def term_sources(knowledge: Any) -> list[dict[str, Any]]:
         ocr_path = CASE / filename.replace("_read.json", "_ocr.json")
         pages = (json.loads(ocr_path.read_text(encoding="utf-8"))
                  if ocr_path.exists() else None)
-        out.append(as_document(opinion, blocks, cert_date=cert, ocr_pages=pages))
+        clause_path = CASE / filename.replace("_read.json", "_clauses.json")
+        extra = ([json.loads(clause_path.read_text(encoding="utf-8"))]
+                 if clause_path.exists() else None)
+        out.append(as_document(opinion, blocks, cert_date=cert, ocr_pages=pages,
+                               extra_blocks=extra))
 
     # The unit designation itself: a recorded instrument printing lessor,
     # lessee, date and recording for every lease it pools.

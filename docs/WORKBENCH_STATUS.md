@@ -436,3 +436,83 @@ documentos de título. Well Files continua vazio porque o RRC nunca foi buscado.
 | 11 | RRC W-1 / P-12 / plat | ❌ | ❌ — não tentado |
 | 12 | Tract 1: EOG WI 0,50 / NRI 0,40 | ⚠️ | ⚠️ — curativa emitida; aritmética não tentada |
 | 13 | Runsheet com 23 instrumentos | ❌ | ❌ — não tentado; é o que trava Title Documents |
+
+---
+
+## PR-7 — a última milha · **2026-08-11** · **objetivo NÃO atingido**
+
+O kit ainda não é submissível. O que segue é o estado medido, não o pretendido.
+
+### 1. Dívida de `extract` — meta 87,4%, entregue **65,7%**
+
+| | |
+|---|---|
+| Lease Review preenchida com citação | **355 / 540 = 65,7%** (era 51,7%) |
+| linhas COM instrumento no corpus (35) | 236/315 = **74,9%** |
+| linhas SEM instrumento no corpus (25) | 119/225 = **52,9%** |
+| células órfãs | **0** |
+
+Duas passadas de visão sobre os 35 instrumentos que temos (páginas 1–2, depois
+3–6 para as cláusulas) recuperaram lessor/lessee/data/descrição em 38, royalty em
+36, shut-in em 34 — mas depth limitation em apenas 15.
+
+Três correções de regra saíram daí, e a primeira é a que mais valia:
+
+- **Ser de registro é propriedade do INSTRUMENTO, não da página escaneada.** Eu
+  exigia `of_record: recorded` do documento; a página 1 de uma lease raramente
+  mostra o carimbo, então 34 instrumentos liam `unknown` e não provavam nada. Um
+  instrumento cujo registro o Exhibit "A" declara **é** de registro. `not_recorded`
+  continua duro — é o filtro que manteve uma carta fora de um Runsheet entregue.
+- **Identidade pela pasta.** Um documento que o ledger arquivou sob a lease não
+  precisa casar recording com ela; exigir isso jogava fora as palavras do próprio
+  instrumento em favor do recital do examinador.
+- **Herança de forma e cláusulas** do schedule do TO (segunda leitura, pedindo o
+  que a primeira não perguntou).
+
+**Por que 87,4% não é alcançável deste corpus:** 25 das 60 linhas não têm
+instrumento nenhum. Para elas o Exhibit "A" dá 4 campos e o TO dá mais alguns; o
+resto está genuinamente ausente. O DDR à mão chegou a 100% porque o operador
+tinha as 67 leases na mão — 32 a mais que eu. O teto estrutural aqui é ~77%, e
+mesmo ele não foi atingido: as linhas com instrumento estão em 74,9%, e a
+diferença é dívida de leitura ainda em aberto, não ausência de documento.
+
+### 2. Runsheet — **4 entradas contra 24 do gabarito**, e a base é bloqueante
+
+`src/knowledge/runsheet.py` + `knowledge/rules/runsheet_style.yaml` existem e
+funcionam: três colunas de data separadas, entrada numa sentença, filtro de
+escopo com motivo do vocabulário para cada exclusão (210 excluídos, contados).
+
+Mas o piso de escopo **não foi resolvido**. `find_cert_date` devolve BLOQUEANTE
+para as três opiniões — nenhuma imprime frase de certificação. Os candidatos
+(9/4/2010 e 21/5/2010) **não batem** com as datas que o runsheet à mão declara
+(A-669 de 3/3/2010, A-319 de 9/9/2010), e a base à mão é **por trato**, coisa que
+o sistema ainda não modela. Construí com o candidato mais antigo e **declarei a
+base na própria célula A3**, como o runsheet à mão declara a dele.
+
+Um defeito de correção apareceu na inspeção e foi corrigido: o runsheet não
+aplicava o filtro de perímetro, e duas entradas eram da série 0220936, que
+contribui zero acres.
+
+O que sobrou eu listo no arquivo da aba: grantee poluído com o recital das
+partes, vol/pg capturado da descrição da terra em vez do registro, e nenhuma data
+de registro (as cópias não mostram o carimbo). **Nenhuma dessas entradas deve ir
+à PLM sem verdito.**
+
+### 3. Phase I - Checklist — **9 Yes / 5 No**, contra 14/1 do gabarito
+
+Preenchida e no kit, com Notes declarando cada pendência. Os 5 "No" são honestos:
+Well Files (sem RRC), Ownership - Worksheet, Ownership - Wells, Agreements e PLM
+Title Review — abas que esta rodada não populou.
+
+### 4. Kit: **43 de 86**
+
+Leases 35/53 · Title Documents 1/19 · Seller Files 1/6 · Title Opinions 3/4 ·
+Unit Designations 1/1 · Well Files 0/1 · Checklist 1/1. As 26 lacunas estão
+declaradas no manifesto, cada uma numa das duas caixas exigidas.
+
+### O que falta para submissível
+
+1. Cert dates por trato, confirmadas — destrava o Runsheet, que destrava Title Documents.
+2. Os instrumentos pós-certificação de 2010–2012 (as 15 OGLs da lista à mão) não estão no corpus.
+3. Ownership - Worksheet e Ownership - Wells: a aritmética de interesse, nunca tentada.
+4. RRC para Well Files.

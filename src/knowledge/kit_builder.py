@@ -115,7 +115,9 @@ def _column_for(headers: dict[str, str], term: str) -> str | None:
 
 def write_ddr(template: str | Path, out_path: str | Path,
               dispositions: list[dict[str, Any]], *, unit: str,
-              submitted: str) -> tuple[Path, list[CellWrite]]:
+              submitted: str,
+              runsheet_entries: list[Any] | None = None,
+              runsheet_basis: Any = None) -> tuple[Path, list[CellWrite]]:
     """Fill Lease Review from the dispositions. Value+citation, or blank+reason."""
     out_path = Path(assert_not_frozen(out_path))
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -148,6 +150,9 @@ def write_ddr(template: str | Path, out_path: str | Path,
                     reason = "doc_nao_localizado"
                 writes.append(CellWrite("Lease Review", i, col, term, "",
                                         "", reason or _status_reason(d)))
+
+    if runsheet_entries:
+        writes.extend(write_runsheet(wb, runsheet_entries, basis=runsheet_basis))
 
     summary = wb["Summary"]
     for row in summary.iter_rows(min_row=1, max_row=40):
@@ -308,3 +313,94 @@ def is_shippable(path: Path, classification: dict[str, Any]) -> bool:
     if path.suffix.lower() in SCREEN_CAPTURE_SUFFIXES:
         return False
     return str(classification.get("classified_as")) not in NEVER_SHIPS
+
+
+# ---------------------------------------------------------------------------
+# Phase I - Checklist — without it the kit is not submissible, by PLM's own
+# definition. A row is "Yes" only when the folder actually holds what the row
+# describes; every "No" carries its pendência in Notes, because a No with no
+# explanation is the same hole as a blank cell with no reason.
+# ---------------------------------------------------------------------------
+
+CHECKLIST_ROW_TO_FOLDER = {
+    2: "Leases",
+    3: None, 4: None, 5: None, 6: None, 7: None, 8: None, 9: None, 10: None,
+    11: "Seller Files",
+    12: "Title Documents",
+    13: "Title Opinions",
+    14: "Unit Designations",
+    15: "Well Files",
+}
+# The PLM Report rows are about DDR TABS, not folders. A tab counts as done when
+# the round converged for it — never because the file exists.
+CHECKLIST_ROW_TO_TAB = {
+    3: "Summary", 4: "Ownership - Worksheet", 5: "Ownership - Wells",
+    6: "Lease Review", 7: "Agreements", 8: "Unit and Pooling Agreements",
+    9: "Runsheet", 10: "PLM Title Review",
+}
+
+
+def fill_checklist(template: str | Path, out_path: str | Path, *,
+                   placed: dict[str, list[str]], tabs_done: dict[str, bool],
+                   notes: dict[int, str]) -> tuple[Path, dict[str, int]]:
+    out_path = Path(assert_not_frozen(out_path))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    wb = openpyxl.load_workbook(template)
+    ws = wb[wb.sheetnames[0]]
+    if not str(ws.cell(row=1, column=5).value or "").strip():
+        ws.cell(row=1, column=5, value="Notes")
+
+    tally = {"Yes": 0, "No": 0}
+    for row in range(2, 16):
+        folder = CHECKLIST_ROW_TO_FOLDER.get(row)
+        tab = CHECKLIST_ROW_TO_TAB.get(row)
+        if folder is not None:
+            done = bool(placed.get(folder))
+        elif tab is not None:
+            done = bool(tabs_done.get(tab))
+        else:
+            done = False
+        ws.cell(row=row, column=4, value="Yes" if done else "No")
+        tally["Yes" if done else "No"] += 1
+        note = notes.get(row, "")
+        if note:
+            ws.cell(row=row, column=5, value=note)
+    save_and_verify(wb, out_path)
+    return out_path, tally
+
+
+# ---------------------------------------------------------------------------
+# Runsheet tab — three dates, house style, one entry per instrument
+# ---------------------------------------------------------------------------
+
+RUNSHEET_HEADER_ROW = 2
+RUNSHEET_FIRST_ROW = 4
+
+
+def write_runsheet(wb, entries: list[Any], basis: Any = None) -> list[CellWrite]:
+    """Write the Runsheet tab. Each entry is a drafted cell, not a fact."""
+    ws = wb["Runsheet"]
+    writes: list[CellWrite] = []
+    if basis is not None:
+        ws["A3"] = basis.statement
+        writes.append(CellWrite("Runsheet", 3, "A", "basis", basis.statement,
+                                "declared basis of the run"))
+    cols = ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
+    for i, e in enumerate(entries, start=RUNSHEET_FIRST_ROW):
+        values = [e.no, e.instrument, e.instrument_number, e.effective_date,
+                  e.instrument_date, e.recorded_date, e.grantor, e.grantee,
+                  e.acreage]
+        for col, value in zip(cols, values):
+            ws[f"{col}{i}"] = value
+            # A runsheet cell with nothing in it is declared like any other
+            # blank: the date the copy does not show is a fact about the copy.
+            writes.append(CellWrite(
+                "Runsheet", i, col, "runsheet", value, e.citation(),
+                "" if value else "fato_inexistente_no_registro"))
+        # The house style lives in the entry, not in a wall of pasted text.
+        note = " ".join(x for x in (e.conveyance, e.reservation) if x)
+        if note:
+            ws[f"J{i}"] = note
+            writes.append(CellWrite("Runsheet", i, "J", "entry", note,
+                                    e.citation()))
+    return writes

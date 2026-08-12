@@ -17,11 +17,14 @@ from pathlib import Path
 from typing import Any
 
 _FIELDS = ("DATE", "RECORDING", "LESSOR", "LESSEE", "LAND", "INTEREST_COVERED",
-           "ROYALTY", "PRIMARY_TERM")
+           "ROYALTY", "PRIMARY_TERM", "SHUT_IN", "DEPTH_LIMITATION",
+           "POOLING_CLAUSE", "BONUS")
 _TERM_OF = {"DATE": "instrument_date", "RECORDING": "recording",
             "LESSOR": "lessor", "LESSEE": "lessee", "LAND": "legal_description",
             "INTEREST_COVERED": "interest_covered", "ROYALTY": "royalty",
-            "PRIMARY_TERM": "term"}
+            "PRIMARY_TERM": "term", "SHUT_IN": "shut_in",
+            "DEPTH_LIMITATION": "depth_limitation",
+            "POOLING_CLAUSE": "pooling_clause", "BONUS": "bonus"}
 _UNKNOWN = {"", "?", "NONE", "N/A", "-"}
 
 
@@ -126,11 +129,33 @@ def apply_form_references(schedule: list[dict[str, Any]],
     return schedule
 
 
+def merge_schedules(*block_sets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One entry per lease, built from several reads of the same summary.
+
+    The first read asked eight questions and never asked for the shut-in or the
+    depth limitation, so sixty cells stayed blank for want of a question. Adding
+    a second read is cheaper than re-reading everything, and merging them here
+    keeps the entry a single object with a single page."""
+    merged: dict[str, dict[str, Any]] = {}
+    for blocks in block_sets:
+        for entry in parse_schedule(blocks):
+            slot = merged.setdefault(entry["lease_no"], entry)
+            if slot is not entry:
+                for k, v in entry["terms"].items():
+                    slot["terms"].setdefault(k, v)
+                slot["recording_book_page"] = (slot.get("recording_book_page")
+                                               or entry.get("recording_book_page"))
+    return list(merged.values())
+
+
 def as_document(opinion_path: str | Path, blocks: list[dict[str, Any]],
                 cert_date: str = "",
-                ocr_pages: list[str] | None = None) -> dict[str, Any]:
+                ocr_pages: list[str] | None = None,
+                extra_blocks: list[list[dict[str, Any]]] | None = None
+                ) -> dict[str, Any]:
     """The opinion as a classification record carrying its `proves` entries."""
-    schedule = parse_schedule(blocks)
+    schedule = (merge_schedules(blocks, *(extra_blocks or []))
+                if extra_blocks else parse_schedule(blocks))
     if ocr_pages:
         schedule = apply_form_references(schedule, ocr_pages)
     return {

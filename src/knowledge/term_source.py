@@ -108,14 +108,41 @@ def _matches(rule: Any, key: dict[str, Any], entry: dict[str, Any]) -> bool:
     return False
 
 
+def _of_record_enough(doc: dict[str, Any], entity_is_of_record: bool) -> bool:
+    """Is this document's word good enough to fill a cell?
+
+    Being of record is a property of the INSTRUMENT, not of the page that
+    happened to be scanned. A lease whose first page carries no file stamp reads
+    back as `unknown` — and it is still the recorded instrument when an
+    independent of-record source (the unit designation's Exhibit "A", an
+    opinion's lease summary) states its recording.
+
+    `not_recorded` never passes. That is the internal-memo filter, and it is the
+    one that kept a letter out of a delivered Runsheet; it stays hard."""
+    status = str((doc.get("of_record") or {}).get("status") or "unknown")
+    if status == "recorded":
+        return True
+    if status == "not_recorded":
+        return False
+    return entity_is_of_record
+
+
 def resolve(key: dict[str, Any], documents: list[dict[str, Any]],
-            knowledge: Any, wanted: list[str] | None = None) -> TermSourcing:
+            knowledge: Any, wanted: list[str] | None = None,
+            entity_is_of_record: bool = False,
+            about: list[dict[str, Any]] | None = None) -> TermSourcing:
     """Which of `wanted` terms are proved for this entity, and by what.
 
     `documents` are classification records. A record may carry `proves`: a list
     of entries this document makes statements about, each with its identity
     fields, its `page`, and its `terms`. A document with no `proves` speaks only
-    about itself, using its own `extracted` fields."""
+    about itself, using its own `extracted` fields.
+
+    `about` are documents whose identity is ALREADY established — the ledger
+    filed them under this lease. They skip the recording match, because a lease
+    whose scanned first page shows no file stamp has no recording to match with,
+    and demanding one throws away the instrument's own words in favour of an
+    examiner's recital of them."""
     out = TermSourcing()
     candidates: list[tuple[int, str, dict[str, Any], dict[str, Any], Any]] = []
 
@@ -127,13 +154,14 @@ def resolve(key: dict[str, Any], documents: list[dict[str, Any]],
             rule = None
         if rule is None:
             continue
-        if str((doc.get("of_record") or {}).get("status")) != "recorded":
+        if not _of_record_enough(doc, entity_is_of_record):
             # Only an of-record document proves anything (flow spec §2 rule 5).
             continue
         rank = (SOURCE_PRECEDENCE.index(category)
                 if category in SOURCE_PRECEDENCE else len(SOURCE_PRECEDENCE))
+        known = any(doc is x for x in (about or []))
         for entry in _entries(doc):
-            if _matches(rule, key, entry):
+            if known or _matches(rule, key, entry):
                 candidates.append((rank, category, doc, entry, rule))
 
     candidates.sort(key=lambda c: c[0])
