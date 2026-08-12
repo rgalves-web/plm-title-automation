@@ -180,15 +180,33 @@ def write_workbook(ledger: Ledger, target: str | Path) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(TEMPLATE, target)
 
+    from src.examinador.ledger import BlankRecord
+
+    unplaced: list[str] = []
     wb = openpyxl.load_workbook(target)
     try:
-        for (tab, coord), cell in ledger.final_cells().items():
-            if tab not in wb.sheetnames:
-                wb.create_sheet(tab)
-            wb[tab][coord] = cell.valor
-        for blank in ledger.blanks:
-            if blank.aba in wb.sheetnames:
-                wb[blank.aba][blank.celula].value = None
+        # In the order the model acted. It cleared surplus template rows and
+        # then wrote its own values into them; all-writes-then-all-blanks
+        # reverses that and silently erases the work it just did.
+        for action in ledger.actions():
+            if action.aba not in wb.sheetnames:
+                wb.create_sheet(action.aba)
+            targets = _targets(wb[action.aba], action.celula)
+            if isinstance(action, BlankRecord):
+                # A range IS a legitimate way to say "blank all of this" — the
+                # model cleared two whole sample tabs that way. Honouring it is
+                # execution; refusing it would be the code overruling the model.
+                for cell in targets:
+                    cell.value = None
+                continue
+            if len(targets) == 1:
+                targets[0].value = action.valor
+            else:
+                # One value does not become forty by being addressed to a
+                # range. Spreading it would be the code inventing forty facts
+                # from one, so the write is reported unplaced instead.
+                unplaced.append(f"{action.aba}!{action.celula} "
+                                f"({len(targets)} celulas)")
         # The trail ships INSIDE the artefact: a workbook whose sources live in
         # a side file is not auditable alone, and it is the workbook that goes
         # to the client.
@@ -205,7 +223,31 @@ def write_workbook(ledger: Ledger, target: str | Path) -> Path:
         wb.save(target)
     finally:
         wb.close()
+    if unplaced:
+        (Path(target).parent / "escritas_nao_colocadas.json").write_text(
+            json.dumps(unplaced, indent=2, ensure_ascii=False), encoding="utf-8")
     return target
+
+
+def _targets(ws: Any, coord: str) -> list[Any]:
+    """The cells an address names — one for `C12`, many for `A1:Z44`.
+
+    openpyxl returns a Cell for one and nested tuples for the other, and the
+    difference crashed a finished run after every model token was already paid
+    for."""
+    from openpyxl.cell.cell import MergedCell
+
+    got = ws[coord]
+    flat: list[Any] = []
+    if hasattr(got, "value"):
+        flat = [got]
+    else:
+        for item in got:
+            flat.extend(item if isinstance(item, tuple) else [item])
+    # A merged block has one real cell and N read-only shadows. The shadows are
+    # not skipped to be tidy — assigning to one raises, and the master carries
+    # the value anyway, so clearing it clears the block.
+    return [c for c in flat if not isinstance(c, MergedCell)]
 
 
 if __name__ == "__main__":                          # pragma: no cover

@@ -77,3 +77,8 @@ Uma linha por escrita. Quem escreveu foi o modelo; este arquivo e o rastro.
 - criou `ddr-template-structure-runsheet` (layout)
 - criou `ddr-template-structure-summary` (layout)
 - criou `ddr-template-structure-unit-and-pooling-agreements` (layout)
+- criou `template-dados-de-exemplo-a-e-carroll` (regra)
+- criou `formulario-eog-declaration-of-pooled-unit-montague` (formulario)
+- criou `unidade-josh-b-unit-montague` (unidade)
+- criou `cadeia-bra-de-oil-and-gas-para-eog-montague` (cadeia)
+- criou `custo-legibilidade-do-corpus-montague-eog` (custo)

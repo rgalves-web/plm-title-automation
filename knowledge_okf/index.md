@@ -2,6 +2,7 @@
 
 Uma ficha por conceito. Lida uma vez, consultada sempre.
 
+- [cadeia-bra-de-oil-and-gas-para-eog-montague](cadeia-bra-de-oil-and-gas-para-eog-montague.md) `cadeia` — ## Bra-De Oil & Gas, Inc. → EOG Resources, Inc. (Montague County)
 - [categories: agreement](categories-agreement.md) `regra` — - **label**: Agreement (JOA / farmout / ratification)
 - [categories: assignment](categories-assignment.md) `regra` — - **label**: Assignment / conveyance
 - [categories: correspondence](categories-correspondence.md) `regra` — - **label**: Correspondence / internal paperwork
@@ -29,6 +30,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [category_to_ddr: runsheet](category-to-ddr-runsheet.md) `regra` — - **resolves_to**:
 - [category_to_ddr: unit_and_pooling_agreements](category-to-ddr-unit-and-pooling-agreements.md) `regra` — - **resolves_to**:
 - [category_to_ddr: well_files](category-to-ddr-well-files.md) `regra` — - **resolves_to**:
+- [custo-legibilidade-do-corpus-montague-eog](custo-legibilidade-do-corpus-montague-eog.md) `custo` — ## O que da para ler neste corpus, e por qual modo (medido)
 - [ddr_template_structure: Agreements](ddr-template-structure-agreements.md) `layout` — - **sample_stripped**: 36
 - [ddr_template_structure: Disclaimer](ddr-template-structure-disclaimer.md) `layout` — - **sample_stripped**: 0
 - [ddr_template_structure: Lease Review](ddr-template-structure-lease-review.md) `layout` — - **sample_stripped**: 288
@@ -61,6 +63,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [exclusion_reasons: pendente_de_terceiro](exclusion-reasons-pendente-de-terceiro.md) `regra` — - **label**: Pending a third party
 - [exclusion_reasons: pre_cert_date](exclusion-reasons-pre-cert-date.md) `regra` — - **label**: Predates the controlling certification date
 - [exclusion_reasons: trade_de_terceiro](exclusion-reasons-trade-de-terceiro.md) `regra` — - **label**: Third-party trade
+- [formulario-eog-declaration-of-pooled-unit-montague](formulario-eog-declaration-of-pooled-unit-montague.md) `formulario` — ## Declaration of Pooled Unit da EOG Resources, Inc. — Montague County (forma padrao)
 - [identity_keys: instrument](identity-keys-instrument.md) `entidade` — - **required**:
 - [identity_keys: lease](identity-keys-lease.md) `entidade` — - **required**:
 - [identity_keys: party](identity-keys-party.md) `entidade` — - **required**:
@@ -76,4 +79,6 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [sources: drive_plm](sources-drive-plm.md) `regra` — - **label**: PLM Drive
 - [sources: rrc](sources-rrc.md) `regra` — - **label**: Texas Railroad Commission
 - [sources: third_party_request](sources-third-party-request.md) `regra` — - **label**: Third party (Clerk, Seller, examining attorney)
+- [template-dados-de-exemplo-a-e-carroll](template-dados-de-exemplo-a-e-carroll.md) `regra` — ## O template da casa chega preenchido com dados de OUTRA unidade
 - [transmittal_cover_is_not_the_document/fixture](transmittal-cover-is-not-the-document-fixture.md) `regra` — - **lesson_id**: transmittal_cover_is_not_the_document
+- [unidade-josh-b-unit-montague](unidade-josh-b-unit-montague.md) `unidade` — ## JOSH B UNIT — Montague County, Texas

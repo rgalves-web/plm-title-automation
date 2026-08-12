@@ -426,6 +426,74 @@ def test_the_populations_are_declared_before_the_rates(tmp_path: Path):
     assert got["resultado"]["divergiu"] == 1
 
 
+def test_a_date_and_its_iso_string_are_the_same_value(tmp_path: Path):
+    """A workbook stores 2010-01-21 as a datetime and a model writes it as
+    text. Calling those different makes the harness the thing being measured."""
+    from datetime import datetime
+
+    from src.examinador.compare import compare
+
+    hand = _book(tmp_path / "hand.xlsx",
+                 {"Lease Review": {"E20": datetime(2010, 1, 21)}})
+    template = _book(tmp_path / "tpl.xlsx", {"Lease Review": {}})
+    ia = _book(tmp_path / "ia.xlsx", {"Lease Review": {"E20": "2010-01-21"}})
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({
+        "celulas": [{"aba": "Lease Review", "celula": "E20"}], "brancos": []}),
+        encoding="utf-8")
+    got = compare(ia, ledger, hand=hand, template=template, aliases={})
+    assert got.to_dict()["resultado"]["concordou"] == 1
+
+
+def test_the_same_value_with_more_prose_is_its_own_bucket(tmp_path: Path):
+    """`volume 506, page 386, real records, montague county` and `volume 506,
+    page 386, montague county, texas` are one recording written two ways —
+    which is not the same as being right, because house style is the product."""
+    from src.examinador.compare import compare
+
+    hand = _book(tmp_path / "hand.xlsx", {"Lease Review": {
+        "F20": "Volume 506, Page 386, Real Records, Montague County, Texas"}})
+    template = _book(tmp_path / "tpl.xlsx", {"Lease Review": {}})
+    ia = _book(tmp_path / "ia.xlsx", {"Lease Review": {
+        "F20": "Volume 506, Page 386"}})
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({
+        "celulas": [{"aba": "Lease Review", "celula": "F20"}], "brancos": []}),
+        encoding="utf-8")
+    got = compare(ia, ledger, hand=hand, template=template,
+                  aliases={}).to_dict()
+    assert got["resultado"]["equivalente"] == 1
+    assert got["resultado"]["concordou"] == 0
+
+
+def test_a_tab_alias_is_declared_in_the_report_not_applied_in_silence(
+        tmp_path: Path):
+    """The template calls a sheet `Ownership Report`; the delivered kit calls
+    it `Ownership - Worksheet`. Without the alias every cell on it counts twice
+    as a failure — once as silence, once as surplus."""
+    from src.examinador.compare import compare
+
+    hand = _book(tmp_path / "hand.xlsx",
+                 {"Ownership - Worksheet": {"A5": "220.00"}})
+    template = _book(tmp_path / "tpl.xlsx", {"Ownership Report": {}})
+    ia = _book(tmp_path / "ia.xlsx", {"Ownership Report": {"A5": "220.00"}})
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({
+        "celulas": [{"aba": "Ownership Report", "celula": "A5"}],
+        "brancos": []}), encoding="utf-8")
+
+    blind = compare(ia, ledger, hand=hand, template=template, aliases={})
+    assert blind.to_dict()["resultado"]["calou_onde_a_mao_escreveu"] == 1
+    assert blind.to_dict()["resultado"]["escreveu_onde_a_mao_nao_tem"] == 1
+
+    aligned = compare(ia, ledger, hand=hand, template=template,
+                      aliases={"Ownership Report": "Ownership - Worksheet"})
+    got = aligned.to_dict()
+    assert got["resultado"]["concordou"] == 1
+    assert got["abas_alinhadas_por_apelido"] == {
+        "Ownership Report": "Ownership - Worksheet"}
+
+
 def test_template_leftovers_are_counted_as_a_defect_of_their_own(tmp_path: Path):
     from src.examinador.compare import leftovers
 
@@ -440,6 +508,103 @@ def test_template_leftovers_are_counted_as_a_defect_of_their_own(tmp_path: Path)
     got = leftovers(ia, ledger, template=template)
     assert got["celulas_do_template_ainda_no_entregavel"] == 1
     assert "A.E. Carroll" in got["amostra"][0]
+
+
+# --- writing the workbook ----------------------------------------------------
+
+def _template(tmp_path: Path, cells: dict[str, dict[str, Any]]) -> Path:
+    return _book(tmp_path / "template.xlsx", cells)
+
+
+def _write(tmp_path: Path, ledger: Ledger, template: Path) -> Path:
+    import src.examinador.run as run_mod
+    original, run_mod.TEMPLATE = run_mod.TEMPLATE, template
+    try:
+        return run_mod.write_workbook(ledger, tmp_path / "out.xlsx")
+    finally:
+        run_mod.TEMPLATE = original
+
+
+def test_clearing_a_row_then_writing_into_it_keeps_what_was_written(
+        tmp_path: Path):
+    """The model cleared the template's sample rows and then wrote its own
+    values into them. Replaying every write and THEN every blank reverses that
+    and erases the work — it cost 31 cells before the order became explicit."""
+    tpl = _template(tmp_path, {"Ownership": {"A8": "amostra", "B8": "amostra"}})
+    led = Ledger()
+    led.record_blank("Ownership", "A8:X8", "linha de exemplo de outra unidade",
+                     "eu, com dados verificados")
+    led.write_cell("Ownership", "A8", "1", "dpu.pdf", 1, "TRACT 1", "alta")
+    out = _write(tmp_path, led, tpl)
+    wb = openpyxl.load_workbook(out)
+    assert wb["Ownership"]["A8"].value == "1"
+    assert wb["Ownership"]["B8"].value is None
+    wb.close()
+
+
+def test_writing_then_clearing_leaves_it_cleared(tmp_path: Path):
+    tpl = _template(tmp_path, {"Ownership": {"A8": "amostra"}})
+    led = Ledger()
+    led.write_cell("Ownership", "A8", "1", "dpu.pdf", 1, "TRACT 1", "alta")
+    led.record_blank("Ownership", "A8", "nao consigo provar", "operador")
+    out = _write(tmp_path, led, tpl)
+    wb = openpyxl.load_workbook(out)
+    assert wb["Ownership"]["A8"].value is None
+    wb.close()
+
+
+def test_a_blank_addressed_to_a_range_clears_the_whole_range(tmp_path: Path):
+    tpl = _template(tmp_path, {"Extra": {"A1": "x", "B1": "y", "A2": "z"}})
+    led = Ledger()
+    led.record_blank("Extra", "A1:B2", "aba de exemplo inteira", "eu")
+    out = _write(tmp_path, led, tpl)
+    wb = openpyxl.load_workbook(out)
+    assert [wb["Extra"][c].value for c in ("A1", "B1", "A2")] == [None] * 3
+    wb.close()
+
+
+def test_one_value_addressed_to_a_range_is_reported_not_spread(tmp_path: Path):
+    """Forty facts do not follow from one. The write is set aside and named."""
+    tpl = _template(tmp_path, {"Aba": {"A1": "x"}})
+    led = Ledger()
+    led.write_cell("Aba", "A1:D4", "220.00", "dpu.pdf", 1, "220.00", "alta")
+    out = _write(tmp_path, led, tpl)
+    report = json.loads((out.parent / "escritas_nao_colocadas.json")
+                        .read_text(encoding="utf-8"))
+    assert report == ["Aba!A1:D4 (16 celulas)"]
+    wb = openpyxl.load_workbook(out)
+    assert wb["Aba"]["A1"].value == "x"          # untouched, not overwritten
+    wb.close()
+
+
+def test_a_merged_block_is_cleared_through_its_master_cell(tmp_path: Path):
+    """Assigning to a merged shadow raises. It crashed a finished run after
+    every model token had already been paid for."""
+    path = tmp_path / "template.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Aba"
+    ws["A1"] = "titulo largo"
+    ws.merge_cells("A1:D1")
+    wb.save(path)
+    wb.close()
+    led = Ledger()
+    led.record_blank("Aba", "A1:D1", "titulo de outra unidade", "eu")
+    out = _write(tmp_path, led, path)
+    check = openpyxl.load_workbook(out)
+    assert check["Aba"]["A1"].value is None
+    check.close()
+
+
+def test_the_ledger_survives_a_crash_after_the_last_token_is_paid(
+        tmp_path: Path):
+    led = Ledger()
+    led.write_cell("Aba", "A1", "v", "d.pdf", 1, "V", "alta")
+    led.record_blank("Aba", "B1", "motivo", "dono")
+    path = led.save(tmp_path / "ledger.json")
+    back = Ledger.load(path)
+    assert back.counts() == led.counts()
+    assert [a.seq for a in back.actions()] == [1, 2]
 
 
 # --- the migration -----------------------------------------------------------
