@@ -549,15 +549,16 @@ def build_items(perimeter: Perimeter, disps: list[Any]) -> list[BriefItem]:
     return items
 
 
-def run(generated: str) -> dict[str, Any]:
+def run(generated: str, extra_items: list[BriefItem] | None = None,
+        extra_blanks: list[str] | None = None) -> dict[str, Any]:
     """`generated` is passed in, never taken from the clock — a replay that
     stamps itself with today's date is not a replay."""
     perimeter, by_lease, knowledge = load_round()
     disps = dispositions(perimeter, by_lease, knowledge)
-    items = build_items(perimeter, disps)
+    items = build_items(perimeter, disps) + list(extra_items or [])
     brief = FetchBrief(unit=UNIT, generated=generated, round_no=1, items=items)
 
-    blank_cells = [c for d in disps for c in _blanks(d)]
+    blank_cells = [c for d in disps for c in _blanks(d)] + list(extra_blanks or [])
     problems = validate_brief(brief, knowledge, blank_cells=blank_cells)
 
     (WORK / "dispositions.json").write_text(

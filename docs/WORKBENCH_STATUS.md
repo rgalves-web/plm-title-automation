@@ -629,3 +629,100 @@ asserções de ausência que a rodada contradizia.
 CLAUDE.md ganha os invariantes **25 (whitelist de proveniência + ausência
 derivada)** e **26 (write-roots)**; o contrato do brief permanece no 24.
 Suíte: **806 verdes** (24 novos). Bowen/Maxwell em leitura, inalteradas.
+
+---
+
+## PR-10 — as abas que nunca foram escritas, com dados reais · **2026-08-12**
+
+Branch `pr10-real-tabs`. Gate whitelist ativo o tempo todo; quarentena do
+gabarito ativa (0 tentativas de leitura durante a rodada). Regra do PR: só se
+escreve o que a rodada prova com citação.
+
+### Métrica do artefato
+
+| | PR-9 | PR-10 |
+|---|---|---|
+| células com valor + trilha | 393 | **1.186** |
+| brancos declarados | 188 | 393 |
+| órfãs | 0 | **0** |
+| checklist derivada dos bytes | 7 Yes / 7 No | **10 Yes / 4 No** |
+
+### Item 1 — Summary
+
+`knowledge/project/engagement.yaml`: cada campo com o **documento** que o
+declara. Operator/Seller vêm do CSV do RRC no corpus e da própria DPU; State e
+Counties da DPU. `dsu_str` fica **nulo** — nenhum documento do corpus o declara,
+então a célula sai branca com motivo. O linter pegou minha primeira versão
+citando `Vol. 611, Pg. 526` dentro de `knowledge/` (fato de unidade, invariante
+13): a citação virou genérica e o Vol/Pg específico entra pela rodada.
+
+Potential Defects e Outstanding Curative são **derivados**: os grupos de
+requirement vivos que o gap-hunter emite, incluindo os probates de Ector com as
+causas 1449 / 3734-A / 16915-02 e o aviso de que **não** é Montague.
+
+### Item 2 — Ownership - Worksheet
+
+Três defeitos meus, todos achados por medição e nenhum por opinião:
+
+1. **Grão errado.** Eu escrevia uma linha por DONO, saída das schedules de
+   ownership. O DDR à mão tem 47 linhas, todas tipadas WI, uma por **lease** —
+   e a instrução da PLM pede colunas A→Q, a identidade da lease. Transcrição
+   fiel no grão errado. Reescrito para lease×trato.
+2. **Executive rights não é interesse mineral.** A opinião A-669 155ac lista os
+   mesmos donos duas vezes na mesma página, sob "Executive Rights:" e "Minerals
+   less Executive Rights:", cada bloco fechando em 1. Lidos como uma seção só,
+   viram MI duplicado; escritos como MI, afirmam que o direito de arrendar é o
+   mineral. Agora a seção decide o tipo, declarado na coluna C do template.
+3. **Registro da descrição da terra.** A coluna K/L pegava `Volume 199, Page
+   336` — a referência de deed da descrição, não o registro da lease. O
+   Exhibit "A" é a autoridade (mesma regra já aplicada na Lease Review).
+
+A aritmética está ligada: `interest_formula` avalia cada expressão impressa em
+`Fraction` e compara com o decimal do examinador — **109 VERIFIED, 17 MISMATCH,
+0 UNPARSED**, e os 6 recaps por trato fecham exatamente em 1.00000000. Os
+MISMATCH vão para a trilha com "requires human verdict", nunca adotados nem
+recalculados em silêncio.
+
+O MI por lease só é escrito quando a cadeia **royalty → dono → minerals**
+resolve para um único dono. Onde vários donos resolvem para uma lease, a
+atribuição é pergunta humana: célula branca com `nao_computavel` e o item de
+veredito que a possui.
+
+### Item 3 — Ownership - Wells
+
+API, well name, operator, profundidade e formação saem dos CSVs do RRC que
+**estão** no corpus; unit size 220,00 e "Barnett Shale only" da DPU. Spud,
+completion, status e drill type ficam brancos com motivo — só o W-1/P-12 os
+prova, e esses não estão no corpus (item `RRC-FETCH` no brief).
+
+### Item 4 — Agreements
+
+**Aba em branco.** Nenhum dos 214 documentos classificados é um operating
+agreement desta unidade. Item `AGREEMENTS-REQUEST` ao Seller. Nenhum card nasce
+de recital.
+
+### Item 5 — PLM Title Review
+
+Cert dates com a mesma disciplina da A3 do Runsheet: base provisória declarada
+na própria célula, `requires_human_verdict`. Landman fica branco com motivo e
+item — `config.yaml` não declara `landman_name`. **A pergunta do PR-9 segue
+aberta:** de onde vêm 3/3/2010 (A-669) e 9/9/2010 (A-319)? Os candidatos que o
+sistema acha (9/4/2010 e 21/5/2010) não batem.
+
+### Item 7 — comparação externa (harness, pós-rodada)
+
+Junção declarada: **por LEASE (coluna B)**, que é como os dois documentos
+modelam a aba. Duas medições minhas estavam erradas antes disso e foram
+corrigidas no harness, não no sistema: junção por nome truncado (reportava 0/31
+enquanto "Adrian Acker Walker" e "Adrian Walker" tinham o mesmo valor) e soma
+de toda a coluna S sem ler o tipo declarado na C.
+
+| | resultado |
+|---|---|
+| leases em ambos | **60 de 60** (0 só num lado) |
+| lessor | 52/60 concordam |
+| **MI** | **27 idênticos** · 1 divergente · 18 em branco declarado |
+| Ownership - Wells | API, well name, operator, unit size **IGUAIS** |
+
+A divergência única: `0220604-010`, gerado 0,02500000 contra 0,01250000 à mão —
+exatamente o dobro. É achado para verdito humano, não para conserto silencioso.

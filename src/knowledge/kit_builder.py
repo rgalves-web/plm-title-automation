@@ -217,7 +217,9 @@ def write_ddr(template: str | Path, out_path: str | Path,
               dispositions: list[dict[str, Any]], *, unit: str,
               submitted: str,
               runsheet_entries: list[Any] | None = None,
-              runsheet_basis: Any = None) -> tuple[Path, list[CellWrite]]:
+              runsheet_basis: Any = None,
+              extra_writers: list[Any] | None = None
+              ) -> tuple[Path, list[CellWrite]]:
     """Fill Lease Review from the dispositions. Value+citation, or blank+reason."""
     out_path = Path(assert_not_frozen(out_path))
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -276,6 +278,12 @@ def write_ddr(template: str | Path, out_path: str | Path,
 
     if runsheet_entries:
         writes.extend(write_runsheet(wb, runsheet_entries, basis=runsheet_basis))
+
+    # PR-10: the other tabs, written by the same contract — every writer takes
+    # (wb, writes) and appends a CellWrite per touched cell, so the trail and
+    # the whitelist gate see them exactly like Lease Review rows.
+    for writer in (extra_writers or []):
+        writer(wb, writes)
 
     summary = wb["Summary"]
     for row in summary.iter_rows(min_row=1, max_row=40):
