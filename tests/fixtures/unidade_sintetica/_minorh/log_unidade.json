@@ -1,0 +1,1157 @@
+{
+  "modelo": "claude-opus-5",
+  "turnos": 24,
+  "parou_porque": "o modelo parou de pedir ferramentas",
+  "uso": {
+    "entrada": 48,
+    "saida": 41096,
+    "cache_escrita": 57573,
+    "cache_leitura": 627545,
+    "entrada_total": 685166,
+    "custo_usd": 1.7012
+  },
+  "ordem_das_ferramentas": [
+    "list_documents",
+    "read_knowledge",
+    "read_page",
+    "read_page",
+    "read_knowledge",
+    "read_page",
+    "read_page",
+    "read_page",
+    "read_page",
+    "read_page",
+    "read_page",
+    "read_page",
+    "read_page",
+    "get_precedent",
+    "read_knowledge",
+    "read_knowledge",
+    "declarar_censo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "declarar_branco",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "declarar_branco",
+    "declarar_branco",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "declarar_branco",
+    "declarar_branco",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "declarar_branco",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "gravar_campo",
+    "pedir_documento",
+    "pedir_documento",
+    "pedir_documento",
+    "perguntar",
+    "perguntar",
+    "write_knowledge",
+    "write_knowledge",
+    "write_knowledge",
+    "write_knowledge"
+  ],
+  "detalhe": [
+    {
+      "turno": 1,
+      "texto": "Vou abrir a unidade pelo inventário e pelas fichas herdadas.",
+      "chamadas": [
+        {
+          "tool": "list_documents",
+          "args": "{}",
+          "erro": false,
+          "resposta": "{\"documentos\": [{\"documento\": \"0999001-001 (ana souza) lease.pdf\", \"pasta\": \"\", \"tipo\": \".pdf\", \"paginas\": null, \"bytes\": 2862}, {\"documento\": \"0999001-002 (bruno lima) lease.pdf\", \"pasta\": \"\", \"tipo\": \".pdf\", \"paginas\": null, \"bytes\": 2863}, {\"documento\": \"0999001-003 (carla nunes) lease.pdf\", \"pasta\": \"\", \"tipo\": \".pdf\", \"paginas\": null, \"bytes\": 2865}, {\"documento\": \"dpu - josh sintetico unit -…"
+        },
+        {
+          "tool": "read_knowledge",
+          "args": "{\"conceito\": \"unidade_sintetica\"}",
+          "erro": false,
+          "resposta": "{\"origem\": \"nenhuma\", \"encontrado\": false, \"conceito\": \"unidade_sintetica\", \"parecidas_na_unidade\": [], \"parecidas_globais\": [], \"todas_da_unidade\": [], \"todas_globais\": [\"cadeia-bra-de-oil-and-gas-para-eog-montague\", \"categories-agreement\", \"categories-assignment\", \"categories-correspondence\", \"categories-deed-release-lien\", \"categories-dpu-amendment\", \"categories-dpu\", \"categories-lease-memorand…"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 112,
+        "cache_escrita": 3906,
+        "cache_leitura": 0,
+        "entrada_total": 3908,
+        "custo_usd": 0.0272
+      }
+    },
+    {
+      "turno": 2,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "read_page",
+          "args": "{\"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": 1, \"modo\": \"texto\"}",
+          "erro": false,
+          "resposta": "{\"kind\": \"text\", \"text\": \"DOCUMENTO SINTETICO - FIXTURE DE TESTE - NAO E DADO DE CLIENTE\\nDECLARATION OF POOLED UNIT\\nJOSH SINTETICO UNIT\\nPalo Duro County, Texas\\nEOG SINTETICA RESOURCES INC., as Operator, declares the pooled unit named\\nJOSH SINTETICO UNIT, comprising 100.00 acres, more or less, effective\\nMarch 15, 2011, recorded at Vol. 200, Pg. 50, Official Records,\\nPalo Duro County, Texas.\\…"
+        },
+        {
+          "tool": "read_page",
+          "args": "{\"documento\": \"pocos - rrc sintetico.csv\", \"pagina\": 1, \"modo\": \"texto\"}",
+          "erro": false,
+          "resposta": "{\"kind\": \"text\", \"text\": \"DOCUMENTO SINTETICO - FIXTURE DE TESTE - NAO E DADO DE CLIENTE\\nAPI,WELL NAME,OPERATOR,STATUS,TOTAL DEPTH,COMPLETION DATE\\n42-999-00001,JOSH SINTETICO 1H,EOG SINTETICA RESOURCES INC.,PRODUCING,7500,2012-01-20\", \"documento\": \"pocos - rrc sintetico.csv\", \"pagina\": 1, \"modo\": \"texto\", \"caracteres\": 206}"
+        },
+        {
+          "tool": "read_knowledge",
+          "args": "{\"conceito\": \"template-dados-de-exemplo-a-e-carroll\"}",
+          "erro": false,
+          "resposta": "{\"origem\": \"global\", \"encontrado\": true, \"conceito\": \"template-dados-de-exemplo-a-e-carroll\", \"tipo\": \"regra\", \"corpo\": \"## O template da casa chega preenchido com dados de OUTRA unidade\\n\\nA copia do template entregue por unidade vem populada com dados de exemplo de **duas** unidades alheias, e nada disso e mascarado o suficiente para ser inofensivo:\\n\\n- **A.E. Carroll (Panola County, TX; PetroQ…"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 412,
+        "cache_escrita": 1724,
+        "cache_leitura": 3906,
+        "entrada_total": 5632,
+        "custo_usd": 0.023
+      }
+    },
+    {
+      "turno": 3,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "read_page",
+          "args": "{\"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": 2, \"modo\": \"texto\"}",
+          "erro": false,
+          "resposta": "{\"kind\": \"text\", \"text\": \"DOCUMENTO SINTETICO - FIXTURE DE TESTE - NAO E DADO DE CLIENTE\\nEXHIBIT \\\"A\\\" TO DECLARATION OF POOLED UNIT - JOSH SINTETICO UNIT\\nSchedule of Oil and Gas Leases pooled into the unit:\\n  LEASE NO. | LESSOR | LESSEE | DATE | RECORDING\\n  0999001-001 | Ana Souza | EOG SINTETICA RESOURCES INC. | January 5, 2011 | Vol. 100, Pg. 1\\n  0999001-002 | Bruno Lima | EOG SINTETICA RE…"
+        },
+        {
+          "tool": "read_page",
+          "args": "{\"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": 3, \"modo\": \"texto\"}",
+          "erro": false,
+          "resposta": "{\"kind\": \"text\", \"text\": \"DOCUMENTO SINTETICO - FIXTURE DE TESTE - NAO E DADO DE CLIENTE\\nEXHIBIT \\\"C\\\" TO DECLARATION OF POOLED UNIT - JOSH SINTETICO UNIT\\nSchedule of Tracts:\\n  TRACT 1 - 40.00 acres out of the Sintetica Survey, Abstract 1 (A-1),\\n            covered by Leases 0999001-001, 0999001-002 and 0999001-003.\\n  TRACT 2 - 60.00 acres out of the Sintetica Survey, Abstract 2 (A-2),\\n     …"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 309,
+        "cache_escrita": 2197,
+        "cache_leitura": 5630,
+        "entrada_total": 7829,
+        "custo_usd": 0.0243
+      }
+    },
+    {
+      "turno": 4,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "read_page",
+          "args": "{\"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": 4, \"modo\": \"texto\"}",
+          "erro": false,
+          "resposta": "{\"kind\": \"text\", \"text\": \"\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": 4, \"modo\": \"texto\", \"caracteres\": 0}"
+        },
+        {
+          "tool": "read_page",
+          "args": "{\"documento\": \"titulo - original title opinion.pdf\", \"pagina\": 1, \"modo\": \"texto\"}",
+          "erro": false,
+          "resposta": "{\"kind\": \"text\", \"text\": \"DOCUMENTO SINTETICO - FIXTURE DE TESTE - NAO E DADO DE CLIENTE\\nORIGINAL TITLE OPINION\\nRE: JOSH SINTETICO UNIT - 100.00 acres, Sintetica Survey,\\n    Palo Duro County, Texas\\nEscritorio Sintetico de Pareceres LLP examined title to the captioned lands\\nas of June 1, 2011 (the certification date), and finds title vested as\\nreflected in the ownership schedules of this opin…"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 458,
+        "cache_escrita": 1228,
+        "cache_leitura": 7827,
+        "entrada_total": 9057,
+        "custo_usd": 0.023
+      }
+    },
+    {
+      "turno": 5,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "read_page",
+          "args": "{\"documento\": \"0999001-001 (ana souza) lease.pdf\", \"pagina\": 1, \"modo\": \"texto\"}",
+          "erro": false,
+          "resposta": "{\"kind\": \"text\", \"text\": \"DOCUMENTO SINTETICO - FIXTURE DE TESTE - NAO E DADO DE CLIENTE\\nOIL AND GAS LEASE\\nEOG SINTETICA LEASE NO. 0999001-001\\nTHIS AGREEMENT made this January 5, 2011, between Ana Souza, as Lessor,\\nand EOG SINTETICA RESOURCES INC., as Lessee.\\nLessor leases to Lessee the lands in the JOSH SINTETICO UNIT area,\\nPalo Duro County, Texas, for the purpose of producing oil and gas.\\…"
+        },
+        {
+          "tool": "read_page",
+          "args": "{\"documento\": \"0999001-002 (bruno lima) lease.pdf\", \"pagina\": 1, \"modo\": \"texto\"}",
+          "erro": false,
+          "resposta": "{\"kind\": \"text\", \"text\": \"DOCUMENTO SINTETICO - FIXTURE DE TESTE - NAO E DADO DE CLIENTE\\nOIL AND GAS LEASE\\nEOG SINTETICA LEASE NO. 0999001-002\\nTHIS AGREEMENT made this January 12, 2011, between Bruno Lima, as Lessor,\\nand EOG SINTETICA RESOURCES INC., as Lessee.\\nLessor leases to Lessee the lands in the JOSH SINTETICO UNIT area,\\nPalo Duro County, Texas, for the purpose of producing oil and gas…"
+        },
+        {
+          "tool": "read_page",
+          "args": "{\"documento\": \"0999001-003 (carla nunes) lease.pdf\", \"pagina\": 1, \"modo\": \"texto\"}",
+          "erro": false,
+          "resposta": "{\"kind\": \"text\", \"text\": \"DOCUMENTO SINTETICO - FIXTURE DE TESTE - NAO E DADO DE CLIENTE\\nOIL AND GAS LEASE\\nEOG SINTETICA LEASE NO. 0999001-003\\nTHIS AGREEMENT made this February 2, 2011, between Carla Nunes, as Lessor,\\nand EOG SINTETICA RESOURCES INC., as Lessee.\\nLessor leases to Lessee the lands in the JOSH SINTETICO UNIT area,\\nPalo Duro County, Texas, for the purpose of producing oil and ga…"
+        },
+        {
+          "tool": "read_page",
+          "args": "{\"documento\": \"titulo - original title opinion.pdf\", \"pagina\": 2, \"modo\": \"texto\"}",
+          "erro": false,
+          "resposta": "{\"kind\": \"text\", \"text\": \"\", \"documento\": \"titulo - original title opinion.pdf\", \"pagina\": 2, \"modo\": \"texto\", \"caracteres\": 0}"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 432,
+        "cache_escrita": 937,
+        "cache_leitura": 9055,
+        "entrada_total": 9994,
+        "custo_usd": 0.0212
+      }
+    },
+    {
+      "turno": 6,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "get_precedent",
+          "args": "{\"campo\": \"REGISTRO\"}",
+          "erro": false,
+          "resposta": "{\"campo\": \"REGISTRO\", \"precedentes\": [], \"nota\": \"Sem precedente registrado.\"}"
+        },
+        {
+          "tool": "read_knowledge",
+          "args": "{\"conceito\": \"ddr-template-structure-runsheet\"}",
+          "erro": false,
+          "resposta": "{\"origem\": \"global\", \"encontrado\": true, \"conceito\": \"ddr_template_structure: Runsheet\", \"tipo\": \"layout\", \"corpo\": \"- **sample_stripped**: 63\\n- **structure**: 11\", \"fontes\": [\"knowledge/templates/ddr_template_structure.yaml\"], \"links\": [], \"unidade\": \"\", \"confianca\": \"herdado da base escrita a mao\"}"
+        },
+        {
+          "tool": "read_knowledge",
+          "args": "{\"conceito\": \"runsheet-style\"}",
+          "erro": false,
+          "resposta": "{\"origem\": \"global\", \"encontrado\": true, \"conceito\": \"runsheet_style\", \"tipo\": \"regra\", \"corpo\": \"- **version**: 1\\n- **scope**:\\n  - **what_enters**: Instruments OF RECORD, recorded after the controlling opinion's certification date, that touch the Seller's interest or a unit tract. An instrument that is not of record never enters — internal paperwork stays in the ledger, visible, and out of the …"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 796,
+        "cache_escrita": 1703,
+        "cache_leitura": 9992,
+        "entrada_total": 11697,
+        "custo_usd": 0.0355
+      }
+    },
+    {
+      "turno": 7,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "declarar_censo",
+          "args": "{\"exige\": 89, \"resumo\": \"## Censo — unidade_sintetica (JOSH SINTETICO UNIT, Palo Duro County, TX)\\n\\nDenominador derivado do que o registro declara × campos por linha do cabecalho de cada aba.\\n\\n### O que o registro dec…",
+          "erro": false,
+          "resposta": "{\"censo_declarado\": 89}"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 2765,
+        "cache_escrita": 1922,
+        "cache_leitura": 11695,
+        "entrada_total": 13619,
+        "custo_usd": 0.087
+      }
+    },
+    {
+      "turno": 8,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"unidade JOSH SINTETICO UNIT\", \"campo\": \"Summary!B2 Unidade\", \"valor\": \"JOSH SINTETICO UNIT\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"1\", \"trecho\": \"EOG SINTETICA RESOURCES INC., as Op…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"unidade JOSH SINTETICO UNIT :: Summary!B2 Unidade\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"unidade JOSH SINTETICO UNIT\", \"campo\": \"Summary!B3 Condado\", \"valor\": \"Palo Duro County, Texas\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"1\", \"trecho\": \"DECLARATION OF POOLED UNIT / JO…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"unidade JOSH SINTETICO UNIT :: Summary!B3 Condado\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"unidade JOSH SINTETICO UNIT\", \"campo\": \"Summary!B4 Acres\", \"valor\": \"100.00\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"1\", \"trecho\": \"declares the pooled unit named JOSH SINTETICO UNIT…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"unidade JOSH SINTETICO UNIT :: Summary!B4 Acres\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"unidade JOSH SINTETICO UNIT\", \"campo\": \"Summary!B5 Operador\", \"valor\": \"EOG SINTETICA RESOURCES INC.\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"1\", \"trecho\": \"EOG SINTETICA RESOURCES I…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"unidade JOSH SINTETICO UNIT :: Summary!B5 Operador\", \"substituiu\": null}"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 1177,
+        "cache_escrita": 2782,
+        "cache_leitura": 13617,
+        "entrada_total": 16401,
+        "custo_usd": 0.0536
+      }
+    },
+    {
+      "turno": 9,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"poco 42-999-00001\", \"campo\": \"Wells!API\", \"valor\": \"42-999-00001\", \"documento\": \"pocos - rrc sintetico.csv\", \"pagina\": \"1\", \"trecho\": \"42-999-00001,JOSH SINTETICO 1H,EOG SINTETICA RESOURCES INC.,PRODUCING,7…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"poco 42-999-00001 :: Wells!API\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"poco 42-999-00001\", \"campo\": \"Wells!NOME\", \"valor\": \"JOSH SINTETICO 1H\", \"documento\": \"pocos - rrc sintetico.csv\", \"pagina\": \"1\", \"trecho\": \"API,WELL NAME,OPERATOR,STATUS,TOTAL DEPTH,COMPLETION DATE / 42-99…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"poco 42-999-00001 :: Wells!NOME\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"poco 42-999-00001\", \"campo\": \"Wells!OPERADOR\", \"valor\": \"EOG SINTETICA RESOURCES INC.\", \"documento\": \"pocos - rrc sintetico.csv\", \"pagina\": \"1\", \"trecho\": \"42-999-00001,JOSH SINTETICO 1H,EOG SINTETICA RESOU…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"poco 42-999-00001 :: Wells!OPERADOR\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"poco 42-999-00001\", \"campo\": \"Wells!STATUS\", \"valor\": \"PRODUCING\", \"documento\": \"pocos - rrc sintetico.csv\", \"pagina\": \"1\", \"trecho\": \"42-999-00001,JOSH SINTETICO 1H,EOG SINTETICA RESOURCES INC.,PRODUCING,7…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"poco 42-999-00001 :: Wells!STATUS\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"poco 42-999-00001\", \"campo\": \"Wells!PROFUNDIDADE\", \"valor\": \"7500\", \"documento\": \"pocos - rrc sintetico.csv\", \"pagina\": \"1\", \"trecho\": \"API,WELL NAME,OPERATOR,STATUS,TOTAL DEPTH,COMPLETION DATE / 42-999-000…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"poco 42-999-00001 :: Wells!PROFUNDIDADE\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"poco 42-999-00001\", \"campo\": \"Wells!COMPLETACAO\", \"valor\": \"2012-01-20\", \"documento\": \"pocos - rrc sintetico.csv\", \"pagina\": \"1\", \"trecho\": \"API,WELL NAME,OPERATOR,STATUS,TOTAL DEPTH,COMPLETION DATE / 42-99…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"poco 42-999-00001 :: Wells!COMPLETACAO\", \"substituiu\": null}"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 1754,
+        "cache_escrita": 1476,
+        "cache_leitura": 16399,
+        "entrada_total": 17877,
+        "custo_usd": 0.0613
+      }
+    },
+    {
+      "turno": 10,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"tract 1\", \"campo\": \"Ownership - Worksheet!TRACT\", \"valor\": \"1\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"3\", \"trecho\": \"TRACT 1 - 40.00 acres out of the Sintetica Survey, Abstract 1 (A…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"tract 1 :: Ownership - Worksheet!TRACT\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"tract 1\", \"campo\": \"Ownership - Worksheet!ACRES\", \"valor\": \"40.00\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"3\", \"trecho\": \"TRACT 1 - 40.00 acres out of the Sintetica Survey, Abstract …",
+          "erro": false,
+          "resposta": "{\"gravado\": \"tract 1 :: Ownership - Worksheet!ACRES\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"tract 1\", \"campo\": \"Ownership - Worksheet!LEASES\", \"valor\": \"0999001-001, 0999001-002, 0999001-003\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"3\", \"trecho\": \"covered by Leases 0999001-0…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"tract 1 :: Ownership - Worksheet!LEASES\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"tract 1\", \"campo\": \"Ownership - Worksheet!SURVEY\", \"valor\": \"Sintetica Survey, Abstract 1 (A-1)\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"3\", \"trecho\": \"TRACT 1 - 40.00 acres out of t…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"tract 1 :: Ownership - Worksheet!SURVEY\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"tract 2\", \"campo\": \"Ownership - Worksheet!TRACT\", \"valor\": \"2\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"3\", \"trecho\": \"TRACT 2 - 60.00 acres out of the Sintetica Survey, Abstract 2 (A…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"tract 2 :: Ownership - Worksheet!TRACT\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"tract 2\", \"campo\": \"Ownership - Worksheet!ACRES\", \"valor\": \"60.00\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"3\", \"trecho\": \"TRACT 2 - 60.00 acres out of the Sintetica Survey, Abstract …",
+          "erro": false,
+          "resposta": "{\"gravado\": \"tract 2 :: Ownership - Worksheet!ACRES\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"tract 2\", \"campo\": \"Ownership - Worksheet!LEASES\", \"valor\": \"0999001-004, 0999001-005\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"3\", \"trecho\": \"covered by Leases 0999001-004 and 099900…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"tract 2 :: Ownership - Worksheet!LEASES\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"tract 2\", \"campo\": \"Ownership - Worksheet!SURVEY\", \"valor\": \"Sintetica Survey, Abstract 2 (A-2)\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"3\", \"trecho\": \"TRACT 2 - 60.00 acres out of t…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"tract 2 :: Ownership - Worksheet!SURVEY\", \"substituiu\": null}"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 2113,
+        "cache_escrita": 2152,
+        "cache_leitura": 17875,
+        "entrada_total": 20029,
+        "custo_usd": 0.0752
+      }
+    },
+    {
+      "turno": 11,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-001\", \"campo\": \"Lease Review!LEASE NO.\", \"valor\": \"0999001-001\", \"documento\": \"0999001-001 (ana souza) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"EOG SINTETICA LEASE NO. 0999001-001\", \"confianca\": …",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-001 :: Lease Review!LEASE NO.\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-001\", \"campo\": \"Lease Review!LESSOR\", \"valor\": \"Ana Souza\", \"documento\": \"0999001-001 (ana souza) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"THIS AGREEMENT made this January 5, 2011, between Ana So…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-001 :: Lease Review!LESSOR\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-001\", \"campo\": \"Lease Review!LESSEE\", \"valor\": \"EOG SINTETICA RESOURCES INC.\", \"documento\": \"0999001-001 (ana souza) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"between Ana Souza, as Lessor, and EOG…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-001 :: Lease Review!LESSEE\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-001\", \"campo\": \"Lease Review!DATA\", \"valor\": \"January 5, 2011\", \"documento\": \"0999001-001 (ana souza) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"THIS AGREEMENT made this January 5, 2011, between An…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-001 :: Lease Review!DATA\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-001\", \"campo\": \"Lease Review!REGISTRO\", \"valor\": \"Vol. 100, Pg. 1, Official Records, Palo Duro County, Texas\", \"documento\": \"0999001-001 (ana souza) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"RECOR…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-001 :: Lease Review!REGISTRO\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-001\", \"campo\": \"Lease Review!ROYALTY\", \"valor\": \"1/8 (one-eighth)\", \"documento\": \"0999001-001 (ana souza) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"ROYALTY: Lessor shall receive one-eighth (1/8) o…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-001 :: Lease Review!ROYALTY\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-001\", \"campo\": \"Lease Review!TERMO\", \"valor\": \"3 anos a partir de January 5, 2011 (termo primario)\", \"documento\": \"0999001-001 (ana souza) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"TERM: This leas…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-001 :: Lease Review!TERMO\", \"substituiu\": null}"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 1893,
+        "cache_escrita": 2649,
+        "cache_leitura": 20027,
+        "entrada_total": 22678,
+        "custo_usd": 0.0739
+      }
+    },
+    {
+      "turno": 12,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-002\", \"campo\": \"Lease Review!LEASE NO.\", \"valor\": \"0999001-002\", \"documento\": \"0999001-002 (bruno lima) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"EOG SINTETICA LEASE NO. 0999001-002\", \"confianca\":…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-002 :: Lease Review!LEASE NO.\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-002\", \"campo\": \"Lease Review!LESSOR\", \"valor\": \"Bruno Lima\", \"documento\": \"0999001-002 (bruno lima) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"THIS AGREEMENT made this January 12, 2011, between Bru…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-002 :: Lease Review!LESSOR\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-002\", \"campo\": \"Lease Review!LESSEE\", \"valor\": \"EOG SINTETICA RESOURCES INC.\", \"documento\": \"0999001-002 (bruno lima) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"between Bruno Lima, as Lessor, and E…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-002 :: Lease Review!LESSEE\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-002\", \"campo\": \"Lease Review!DATA\", \"valor\": \"January 12, 2011\", \"documento\": \"0999001-002 (bruno lima) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"THIS AGREEMENT made this January 12, 2011, between…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-002 :: Lease Review!DATA\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-002\", \"campo\": \"Lease Review!REGISTRO\", \"valor\": \"Vol. 100, Pg. 2, Official Records, Palo Duro County, Texas\", \"documento\": \"0999001-002 (bruno lima) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"RECO…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-002 :: Lease Review!REGISTRO\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-002\", \"campo\": \"Lease Review!ROYALTY\", \"valor\": \"1/8 (one-eighth)\", \"documento\": \"0999001-002 (bruno lima) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"ROYALTY: Lessor shall receive one-eighth (1/8) …",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-002 :: Lease Review!ROYALTY\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-002\", \"campo\": \"Lease Review!TERMO\", \"valor\": \"3 anos a partir de January 12, 2011 (termo primario)\", \"documento\": \"0999001-002 (bruno lima) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"TERM: This le…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-002 :: Lease Review!TERMO\", \"substituiu\": null}"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 1882,
+        "cache_escrita": 2362,
+        "cache_leitura": 22676,
+        "entrada_total": 25040,
+        "custo_usd": 0.0732
+      }
+    },
+    {
+      "turno": 13,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-003\", \"campo\": \"Lease Review!LEASE NO.\", \"valor\": \"0999001-003\", \"documento\": \"0999001-003 (carla nunes) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"EOG SINTETICA LEASE NO. 0999001-003\", \"confianca\"…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-003 :: Lease Review!LEASE NO.\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-003\", \"campo\": \"Lease Review!LESSOR\", \"valor\": \"Carla Nunes\", \"documento\": \"0999001-003 (carla nunes) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"THIS AGREEMENT made this February 2, 2011, between C…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-003 :: Lease Review!LESSOR\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-003\", \"campo\": \"Lease Review!LESSEE\", \"valor\": \"EOG SINTETICA RESOURCES INC.\", \"documento\": \"0999001-003 (carla nunes) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"between Carla Nunes, as Lessor, and…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-003 :: Lease Review!LESSEE\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-003\", \"campo\": \"Lease Review!DATA\", \"valor\": \"February 2, 2011\", \"documento\": \"0999001-003 (carla nunes) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"THIS AGREEMENT made this February 2, 2011, betwee…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-003 :: Lease Review!DATA\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-003\", \"campo\": \"Lease Review!ROYALTY\", \"valor\": \"1/8 (one-eighth)\", \"documento\": \"0999001-003 (carla nunes) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"ROYALTY: Lessor shall receive one-eighth (1/8)…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-003 :: Lease Review!ROYALTY\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-003\", \"campo\": \"Lease Review!TERMO\", \"valor\": \"3 anos a partir de February 2, 2011 (termo primario)\", \"documento\": \"0999001-003 (carla nunes) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"TERM: This l…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-003 :: Lease Review!TERMO\", \"substituiu\": null}"
+        },
+        {
+          "tool": "declarar_branco",
+          "args": "{\"entidade\": \"lease 0999001-003\", \"campo\": \"Lease Review!REGISTRO\", \"motivo\": \"Conflito entre duas fontes do registro, sem terceira que desempate: a copia do lease diz \\\"RECORDED: Vol. 100, Pg. 33, Official Records, Palo…",
+          "erro": false,
+          "resposta": "{\"branco\": \"lease 0999001-003 :: Lease Review!REGISTRO\"}"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 2059,
+        "cache_escrita": 2351,
+        "cache_leitura": 25038,
+        "entrada_total": 27391,
+        "custo_usd": 0.0787
+      }
+    },
+    {
+      "turno": 14,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-004\", \"campo\": \"Lease Review!LEASE NO.\", \"valor\": \"0999001-004\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"2\", \"trecho\": \"0999001-004 | Daniel Prado | EOG SINTETICA RESOUR…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-004 :: Lease Review!LEASE NO.\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-004\", \"campo\": \"Lease Review!LESSOR\", \"valor\": \"Daniel Prado\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"2\", \"trecho\": \"LEASE NO. | LESSOR | LESSEE | DATE | RECORDING ... …",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-004 :: Lease Review!LESSOR\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-004\", \"campo\": \"Lease Review!LESSEE\", \"valor\": \"EOG SINTETICA RESOURCES INC.\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"2\", \"trecho\": \"0999001-004 | Daniel Prado | EOG SI…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-004 :: Lease Review!LESSEE\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-004\", \"campo\": \"Lease Review!DATA\", \"valor\": \"February 20, 2011\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"2\", \"trecho\": \"0999001-004 | Daniel Prado | EOG SINTETICA RESOU…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-004 :: Lease Review!DATA\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-004\", \"campo\": \"Lease Review!REGISTRO\", \"valor\": \"Vol. 100, Pg. 4 (Official Records, Palo Duro County, Texas) — conforme Exhibit \\\"A\\\"; copia do lease nao consta do corpus\", \"documento\": \"dpu …",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-004 :: Lease Review!REGISTRO\", \"substituiu\": null}"
+        },
+        {
+          "tool": "declarar_branco",
+          "args": "{\"entidade\": \"lease 0999001-004\", \"campo\": \"Lease Review!ROYALTY\", \"motivo\": \"A copia do lease 0999001-004 nao esta no corpus; o Exhibit \\\"A\\\" da DPU lista apenas LEASE NO., LESSOR, LESSEE, DATE e RECORDING — nao traz ro…",
+          "erro": false,
+          "resposta": "{\"branco\": \"lease 0999001-004 :: Lease Review!ROYALTY\"}"
+        },
+        {
+          "tool": "declarar_branco",
+          "args": "{\"entidade\": \"lease 0999001-004\", \"campo\": \"Lease Review!TERMO\", \"motivo\": \"Mesma razao: sem copia do lease -004, o termo primario nao consta de nenhum documento do corpus. O Exhibit \\\"A\\\" nao declara termo. PENDENTE do …",
+          "erro": false,
+          "resposta": "{\"branco\": \"lease 0999001-004 :: Lease Review!TERMO\"}"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 2045,
+        "cache_escrita": 2520,
+        "cache_leitura": 27389,
+        "entrada_total": 29911,
+        "custo_usd": 0.0806
+      }
+    },
+    {
+      "turno": 15,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-005\", \"campo\": \"Lease Review!LEASE NO.\", \"valor\": \"0999001-005\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"2\", \"trecho\": \"0999001-005 | Elisa Ramos | EOG SINTETICA RESOURC…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-005 :: Lease Review!LEASE NO.\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-005\", \"campo\": \"Lease Review!LESSOR\", \"valor\": \"Elisa Ramos\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"2\", \"trecho\": \"LEASE NO. | LESSOR | LESSEE | DATE | RECORDING ... 0…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-005 :: Lease Review!LESSOR\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-005\", \"campo\": \"Lease Review!LESSEE\", \"valor\": \"EOG SINTETICA RESOURCES INC.\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"2\", \"trecho\": \"0999001-005 | Elisa Ramos | EOG SIN…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-005 :: Lease Review!LESSEE\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-005\", \"campo\": \"Lease Review!DATA\", \"valor\": \"March 1, 2011\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"2\", \"trecho\": \"0999001-005 | Elisa Ramos | EOG SINTETICA RESOURCES …",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-005 :: Lease Review!DATA\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"lease 0999001-005\", \"campo\": \"Lease Review!REGISTRO\", \"valor\": \"Vol. 100, Pg. 5 (Official Records, Palo Duro County, Texas) — conforme Exhibit \\\"A\\\"; copia do lease nao consta do corpus\", \"documento\": \"dpu …",
+          "erro": false,
+          "resposta": "{\"gravado\": \"lease 0999001-005 :: Lease Review!REGISTRO\", \"substituiu\": null}"
+        },
+        {
+          "tool": "declarar_branco",
+          "args": "{\"entidade\": \"lease 0999001-005\", \"campo\": \"Lease Review!ROYALTY\", \"motivo\": \"A copia do lease 0999001-005 nao esta no corpus; o Exhibit \\\"A\\\" da DPU nao declara royalty. Nao se extrapola o 1/8 dos leases com copia. PEND…",
+          "erro": false,
+          "resposta": "{\"branco\": \"lease 0999001-005 :: Lease Review!ROYALTY\"}"
+        },
+        {
+          "tool": "declarar_branco",
+          "args": "{\"entidade\": \"lease 0999001-005\", \"campo\": \"Lease Review!TERMO\", \"motivo\": \"Sem copia do lease -005, o termo primario nao consta de nenhum documento do corpus. PENDENTE do pedido de copia.\", \"dono\": \"Landman da unidade —…",
+          "erro": false,
+          "resposta": "{\"branco\": \"lease 0999001-005 :: Lease Review!TERMO\"}"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 1948,
+        "cache_escrita": 2498,
+        "cache_leitura": 29909,
+        "entrada_total": 32409,
+        "custo_usd": 0.0793
+      }
+    },
+    {
+      "turno": 16,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 1 (lease 0999001-001)\", \"campo\": \"Runsheet!NO.\", \"valor\": \"1\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"2\", \"trecho\": \"Schedule of Oil and Gas Leases pooled into the unit…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 1 (lease 0999001-001) :: Runsheet!NO.\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 1 (lease 0999001-001)\", \"campo\": \"Runsheet!INSTRUMENTO\", \"valor\": \"Oil and Gas Lease no. 0999001-001\", \"documento\": \"0999001-001 (ana souza) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"OIL AND GAS L…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 1 (lease 0999001-001) :: Runsheet!INSTRUMENTO\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 1 (lease 0999001-001)\", \"campo\": \"Runsheet!REGISTRO\", \"valor\": \"Vol. 100, Pg. 1, Official Records, Palo Duro County, Texas\", \"documento\": \"0999001-001 (ana souza) lease.pdf\", \"pagina\": \"1\", \"t…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 1 (lease 0999001-001) :: Runsheet!REGISTRO\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 1 (lease 0999001-001)\", \"campo\": \"Runsheet!DATA\", \"valor\": \"January 5, 2011 (data do instrumento; data de registro nao consta da copia)\", \"documento\": \"0999001-001 (ana souza) lease.pdf\", \"pag…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 1 (lease 0999001-001) :: Runsheet!DATA\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 1 (lease 0999001-001)\", \"campo\": \"Runsheet!PARTES\", \"valor\": \"Ana Souza, Lessor, para EOG SINTETICA RESOURCES INC., Lessee\", \"documento\": \"0999001-001 (ana souza) lease.pdf\", \"pagina\": \"1\", \"t…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 1 (lease 0999001-001) :: Runsheet!PARTES\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 2 (lease 0999001-002)\", \"campo\": \"Runsheet!NO.\", \"valor\": \"2\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"2\", \"trecho\": \"0999001-002 | Bruno Lima | EOG SINTETICA RESOURCES …",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 2 (lease 0999001-002) :: Runsheet!NO.\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 2 (lease 0999001-002)\", \"campo\": \"Runsheet!INSTRUMENTO\", \"valor\": \"Oil and Gas Lease no. 0999001-002\", \"documento\": \"0999001-002 (bruno lima) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"OIL AND GAS …",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 2 (lease 0999001-002) :: Runsheet!INSTRUMENTO\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 2 (lease 0999001-002)\", \"campo\": \"Runsheet!REGISTRO\", \"valor\": \"Vol. 100, Pg. 2, Official Records, Palo Duro County, Texas\", \"documento\": \"0999001-002 (bruno lima) lease.pdf\", \"pagina\": \"1\", \"…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 2 (lease 0999001-002) :: Runsheet!REGISTRO\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 2 (lease 0999001-002)\", \"campo\": \"Runsheet!DATA\", \"valor\": \"January 12, 2011 (data do instrumento; data de registro nao consta da copia)\", \"documento\": \"0999001-002 (bruno lima) lease.pdf\", \"p…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 2 (lease 0999001-002) :: Runsheet!DATA\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 2 (lease 0999001-002)\", \"campo\": \"Runsheet!PARTES\", \"valor\": \"Bruno Lima, Lessor, para EOG SINTETICA RESOURCES INC., Lessee\", \"documento\": \"0999001-002 (bruno lima) lease.pdf\", \"pagina\": \"1\", …",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 2 (lease 0999001-002) :: Runsheet!PARTES\", \"substituiu\": null}"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 3365,
+        "cache_escrita": 2401,
+        "cache_leitura": 32407,
+        "entrada_total": 34810,
+        "custo_usd": 0.1153
+      }
+    },
+    {
+      "turno": 17,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 3 (lease 0999001-003)\", \"campo\": \"Runsheet!NO.\", \"valor\": \"3\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"2\", \"trecho\": \"0999001-003 | Carla Nunes | EOG SINTETICA RESOURCES…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 3 (lease 0999001-003) :: Runsheet!NO.\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 3 (lease 0999001-003)\", \"campo\": \"Runsheet!INSTRUMENTO\", \"valor\": \"Oil and Gas Lease no. 0999001-003\", \"documento\": \"0999001-003 (carla nunes) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"OIL AND GAS…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 3 (lease 0999001-003) :: Runsheet!INSTRUMENTO\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 3 (lease 0999001-003)\", \"campo\": \"Runsheet!DATA\", \"valor\": \"February 2, 2011 (data do instrumento; data de registro nao consta da copia)\", \"documento\": \"0999001-003 (carla nunes) lease.pdf\", \"…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 3 (lease 0999001-003) :: Runsheet!DATA\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 3 (lease 0999001-003)\", \"campo\": \"Runsheet!PARTES\", \"valor\": \"Carla Nunes, Lessor, para EOG SINTETICA RESOURCES INC., Lessee\", \"documento\": \"0999001-003 (carla nunes) lease.pdf\", \"pagina\": \"1\"…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 3 (lease 0999001-003) :: Runsheet!PARTES\", \"substituiu\": null}"
+        },
+        {
+          "tool": "declarar_branco",
+          "args": "{\"entidade\": \"runsheet item 3 (lease 0999001-003)\", \"campo\": \"Runsheet!REGISTRO\", \"motivo\": \"Mesmo conflito do Lease Review: a copia do lease diz \\\"Vol. 100, Pg. 33\\\" (0999001-003 (carla nunes) lease.pdf, p.1) e o Exhibi…",
+          "erro": false,
+          "resposta": "{\"branco\": \"runsheet item 3 (lease 0999001-003) :: Runsheet!REGISTRO\"}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 4 (lease 0999001-004)\", \"campo\": \"Runsheet!NO.\", \"valor\": \"4\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"2\", \"trecho\": \"0999001-004 | Daniel Prado | EOG SINTETICA RESOURCE…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 4 (lease 0999001-004) :: Runsheet!NO.\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 4 (lease 0999001-004)\", \"campo\": \"Runsheet!INSTRUMENTO\", \"valor\": \"Oil and Gas Lease no. 0999001-004 (identificado pelo Exhibit \\\"A\\\"; copia nao consta do corpus)\", \"documento\": \"dpu - josh si…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 4 (lease 0999001-004) :: Runsheet!INSTRUMENTO\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 4 (lease 0999001-004)\", \"campo\": \"Runsheet!REGISTRO\", \"valor\": \"Vol. 100, Pg. 4 (Official Records, Palo Duro County, Texas) — conforme Exhibit \\\"A\\\"\", \"documento\": \"dpu - josh sintetico unit -…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 4 (lease 0999001-004) :: Runsheet!REGISTRO\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 4 (lease 0999001-004)\", \"campo\": \"Runsheet!DATA\", \"valor\": \"February 20, 2011 (data do instrumento conforme Exhibit \\\"A\\\"; data de registro nao declarada)\", \"documento\": \"dpu - josh sintetico …",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 4 (lease 0999001-004) :: Runsheet!DATA\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 4 (lease 0999001-004)\", \"campo\": \"Runsheet!PARTES\", \"valor\": \"Daniel Prado, Lessor, para EOG SINTETICA RESOURCES INC., Lessee\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"2…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 4 (lease 0999001-004) :: Runsheet!PARTES\", \"substituiu\": null}"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 3177,
+        "cache_escrita": 4121,
+        "cache_leitura": 34808,
+        "entrada_total": 38931,
+        "custo_usd": 0.1226
+      }
+    },
+    {
+      "turno": 18,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 5 (lease 0999001-005)\", \"campo\": \"Runsheet!NO.\", \"valor\": \"5\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"2\", \"trecho\": \"0999001-005 | Elisa Ramos | EOG SINTETICA RESOURCES…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 5 (lease 0999001-005) :: Runsheet!NO.\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 5 (lease 0999001-005)\", \"campo\": \"Runsheet!INSTRUMENTO\", \"valor\": \"Oil and Gas Lease no. 0999001-005 (identificado pelo Exhibit \\\"A\\\"; copia nao consta do corpus)\", \"documento\": \"dpu - josh si…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 5 (lease 0999001-005) :: Runsheet!INSTRUMENTO\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 5 (lease 0999001-005)\", \"campo\": \"Runsheet!REGISTRO\", \"valor\": \"Vol. 100, Pg. 5 (Official Records, Palo Duro County, Texas) — conforme Exhibit \\\"A\\\"\", \"documento\": \"dpu - josh sintetico unit -…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 5 (lease 0999001-005) :: Runsheet!REGISTRO\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 5 (lease 0999001-005)\", \"campo\": \"Runsheet!DATA\", \"valor\": \"March 1, 2011 (data do instrumento conforme Exhibit \\\"A\\\"; data de registro nao declarada)\", \"documento\": \"dpu - josh sintetico unit…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 5 (lease 0999001-005) :: Runsheet!DATA\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 5 (lease 0999001-005)\", \"campo\": \"Runsheet!PARTES\", \"valor\": \"Elisa Ramos, Lessor, para EOG SINTETICA RESOURCES INC., Lessee\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"2\"…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 5 (lease 0999001-005) :: Runsheet!PARTES\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 6 (DPU JOSH SINTETICO UNIT)\", \"campo\": \"Runsheet!NO.\", \"valor\": \"6\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"1\", \"trecho\": \"DECLARATION OF POOLED UNIT / JOSH SINTETICO U…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 6 (DPU JOSH SINTETICO UNIT) :: Runsheet!NO.\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 6 (DPU JOSH SINTETICO UNIT)\", \"campo\": \"Runsheet!INSTRUMENTO\", \"valor\": \"Declaration of Pooled Unit — JOSH SINTETICO UNIT\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\": \"1\", \"…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 6 (DPU JOSH SINTETICO UNIT) :: Runsheet!INSTRUMENTO\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 6 (DPU JOSH SINTETICO UNIT)\", \"campo\": \"Runsheet!REGISTRO\", \"valor\": \"Vol. 200, Pg. 50, Official Records, Palo Duro County, Texas\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pagina\"…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 6 (DPU JOSH SINTETICO UNIT) :: Runsheet!REGISTRO\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 6 (DPU JOSH SINTETICO UNIT)\", \"campo\": \"Runsheet!DATA\", \"valor\": \"Efetiva em March 15, 2011 (data de assinatura e data de registro nao constam da copia)\", \"documento\": \"dpu - josh sintetico un…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 6 (DPU JOSH SINTETICO UNIT) :: Runsheet!DATA\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"runsheet item 6 (DPU JOSH SINTETICO UNIT)\", \"campo\": \"Runsheet!PARTES\", \"valor\": \"EOG SINTETICA RESOURCES INC., as Operator (declaracao unilateral)\", \"documento\": \"dpu - josh sintetico unit - rec.pdf\", \"pag…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"runsheet item 6 (DPU JOSH SINTETICO UNIT) :: Runsheet!PARTES\", \"substituiu\": null}"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 3254,
+        "cache_escrita": 3925,
+        "cache_leitura": 38929,
+        "entrada_total": 42856,
+        "custo_usd": 0.1254
+      }
+    },
+    {
+      "turno": 19,
+      "texto": "Agora a aba Curative e os pedidos/perguntas.",
+      "chamadas": [
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"curative 1 (Requirement No. 1 — probate Ana Souza)\", \"campo\": \"Curative!NO.\", \"valor\": \"1\", \"documento\": \"titulo - original title opinion.pdf\", \"pagina\": \"1\", \"trecho\": \"REQUIREMENT NO. 1: Obtain and record…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"curative 1 (Requirement No. 1 — probate Ana Souza) :: Curative!NO.\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"curative 1 (Requirement No. 1 — probate Ana Souza)\", \"campo\": \"Curative!REQUIREMENT\", \"valor\": \"Obter e registrar copias certificadas do inventario/probate do Estate of Ana Souza, de cuja devise dependem os…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"curative 1 (Requirement No. 1 — probate Ana Souza) :: Curative!REQUIREMENT\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"curative 1 (Requirement No. 1 — probate Ana Souza)\", \"campo\": \"Curative!FONTE\", \"valor\": \"Original Title Opinion, Escritorio Sintetico de Pareceres LLP, data de certificacao June 1, 2011, p.1 (Requirement N…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"curative 1 (Requirement No. 1 — probate Ana Souza) :: Curative!FONTE\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"curative 2 (conflito de registro — lease 0999001-003)\", \"campo\": \"Curative!NO.\", \"valor\": \"2\", \"documento\": \"0999001-003 (carla nunes) lease.pdf\", \"pagina\": \"1\", \"trecho\": \"RECORDED: Vol. 100, Pg. 33, Offic…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"curative 2 (conflito de registro — lease 0999001-003) :: Curative!NO.\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"curative 2 (conflito de registro — lease 0999001-003)\", \"campo\": \"Curative!REQUIREMENT\", \"valor\": \"Conciliar a referencia de registro do lease 0999001-003: a copia do lease recita Vol. 100, Pg. 33 e o Exhib…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"curative 2 (conflito de registro — lease 0999001-003) :: Curative!REQUIREMENT\", \"substituiu\": null}"
+        },
+        {
+          "tool": "gravar_campo",
+          "args": "{\"entidade\": \"curative 2 (conflito de registro — lease 0999001-003)\", \"campo\": \"Curative!FONTE\", \"valor\": \"Cotejo: 0999001-003 (carla nunes) lease.pdf p.1 (\\\"Vol. 100, Pg. 33\\\") x dpu - josh sintetico unit - rec.pdf p.2,…",
+          "erro": false,
+          "resposta": "{\"gravado\": \"curative 2 (conflito de registro — lease 0999001-003) :: Curative!FONTE\", \"substituiu\": null}"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 2155,
+        "cache_escrita": 4055,
+        "cache_leitura": 42854,
+        "entrada_total": 46911,
+        "custo_usd": 0.1007
+      }
+    },
+    {
+      "turno": 20,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "pedir_documento",
+          "args": "{\"titulo\": \"Copias dos leases 0999001-004 (Daniel Prado) e 0999001-005 (Elisa Ramos)\", \"o_que\": \"Oil and Gas Lease no. 0999001-004, Daniel Prado a EOG SINTETICA RESOURCES INC., datado February 20, 2011, registrado em Vol…",
+          "erro": false,
+          "resposta": "{\"pedido\": \"PED-001\", \"campos_pendentes\": 6}"
+        },
+        {
+          "tool": "pedir_documento",
+          "args": "{\"titulo\": \"Certidao de registro do lease 0999001-003 (Carla Nunes) — Vol. 100, Pg. 3 ou Pg. 33\", \"o_que\": \"Copia certificada do Oil and Gas Lease no. 0999001-003, Carla Nunes a EOG SINTETICA RESOURCES INC., datado Febru…",
+          "erro": false,
+          "resposta": "{\"pedido\": \"PED-002\", \"campos_pendentes\": 3}"
+        },
+        {
+          "tool": "pedir_documento",
+          "args": "{\"titulo\": \"Probate do Estate of Ana Souza (Requirement No. 1 do parecer)\", \"o_que\": \"Copias certificadas do processo de inventario (probate proceedings) do Estate of Ana Souza, exigidas pelo Requirement No. 1 do Origina…",
+          "erro": false,
+          "resposta": "{\"pedido\": \"PED-003\", \"campos_pendentes\": 2}"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 1872,
+        "cache_escrita": 2632,
+        "cache_leitura": 46909,
+        "entrada_total": 49543,
+        "custo_usd": 0.0867
+      }
+    },
+    {
+      "turno": 21,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "perguntar",
+          "args": "{\"pergunta\": \"A Runsheet desta unidade deve listar os 6 instrumentos do corpus (5 leases + a DPU), ou fica VAZIA por exclusao `pre_cert_date`? Todos os instrumentos sao de registro anterior a data de certificacao do pare…",
+          "erro": false,
+          "resposta": "{\"pergunta\": \"P1\"}"
+        },
+        {
+          "tool": "perguntar",
+          "args": "{\"pergunta\": \"Em conflito de referencia de registro entre a copia do instrumento e o Exhibit \\\"A\\\" da DPU, qual fonte prevalece no DDR enquanto nao ha certidao do cartorio? Caso concreto: lease 0999001-003 (Carla Nunes) …",
+          "erro": false,
+          "resposta": "{\"pergunta\": \"P2\"}"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 1172,
+        "cache_escrita": 2042,
+        "cache_leitura": 49541,
+        "entrada_total": 51585,
+        "custo_usd": 0.0668
+      }
+    },
+    {
+      "turno": 22,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "write_knowledge",
+          "args": "{\"conceito\": \"unidade-josh-sintetico-unit-palo-duro\", \"tipo\": \"unidade\", \"escopo\": \"unidade\", \"confianca\": \"alta — corpus inteiro lido pagina a pagina (6 documentos, 8 paginas com texto)\", \"fontes\": [\"dpu - josh sintetic…",
+          "erro": false,
+          "resposta": "{\"escopo\": \"unidade\", \"gravado\": \"unidade-josh-sintetico-unit-palo-duro\", \"substituiu\": false}"
+        },
+        {
+          "tool": "write_knowledge",
+          "args": "{\"conceito\": \"exhibit-a-da-dpu-vs-recital-recorded-do-lease\", \"tipo\": \"regra\", \"escopo\": \"global\", \"confianca\": \"media — padrao observado em 1 unidade; a regra de precedencia esta em aberto com o operador (P2)\", \"fontes\"…",
+          "erro": false,
+          "resposta": "{\"escopo\": \"global\", \"gravado\": \"exhibit-a-da-dpu-vs-recital-recorded-do-lease\", \"substituiu\": false}"
+        },
+        {
+          "tool": "write_knowledge",
+          "args": "{\"conceito\": \"runsheet-vazia-por-pre-cert-date-em-unidade-so-com-original-opinion\", \"tipo\": \"regra\", \"escopo\": \"global\", \"confianca\": \"media — leitura direta da regra global; decisao pendente do operador (P1)\", \"fontes\":…",
+          "erro": false,
+          "resposta": "{\"escopo\": \"global\", \"gravado\": \"runsheet-vazia-por-pre-cert-date-em-unidade-so-com-original-opinion\", \"substituiu\": false}"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 3552,
+        "cache_escrita": 1258,
+        "cache_leitura": 51583,
+        "entrada_total": 52843,
+        "custo_usd": 0.1225
+      }
+    },
+    {
+      "turno": 23,
+      "texto": "",
+      "chamadas": [
+        {
+          "tool": "write_knowledge",
+          "args": "{\"conceito\": \"custo-corpus-sintetico-6-docs-legibilidade-total\", \"tipo\": \"custo\", \"escopo\": \"global\", \"confianca\": \"alta — medido nesta unidade\", \"fontes\": [\"read_page modo=texto em todos os 6 documentos da unidade_sinte…",
+          "erro": false,
+          "resposta": "{\"escopo\": \"global\", \"gravado\": \"custo-corpus-sintetico-6-docs-legibilidade-total\", \"substituiu\": false}"
+        }
+      ],
+      "uso": {
+        "entrada": 2,
+        "saida": 882,
+        "cache_escrita": 3797,
+        "cache_leitura": 52841,
+        "entrada_total": 56640,
+        "custo_usd": 0.0722
+      }
+    },
+    {
+      "turno": 24,
+      "texto": "## Unidade fechada — JOSH SINTETICO UNIT (Palo Duro County, TX)\n\n**Censo declarado: 89 campos.** 83 gravados com citação literal, 6 em branco declarado com motivo e dono. Nada estimado.\n\n| Aba | Exige | Gravado | Branco |\n|---|---|---|---|\n| Summary | 4 | 4 | — |\n| Lease Review | 35 (5 leases × 7) | 30 | 5 |\n| Ownership - Worksheet | 8 (2 tratos × 4) | 8 | — |\n| Runsheet | 30 (6 instrumentos × 5) | 29 | 1 |\n| Wells | 6 (1 poço × 6) | 6 | — |\n| Curative | 6 (2 itens × 3) | 6 | — |\n\n**Sanidade que fechou:** Exhibit \"C\" 40.00 + 60.00 = 100.00 ac = acreage declarado na DPU; Exhibit \"A\" declara \"Five (5) leases\" e lista cinco.\n\n### Os três buracos, cada um com dono\n1. **Leases -004 (Daniel Prado) e -005 (Elisa Ramos) não têm cópia no corpus** — e cobrem o Tract 2 inteiro, 60 dos 100 acres. Gravei os 4 campos que o Exhibit \"A\" sustenta (confiança média, o valor diz que vem do Exhibit); ROYALTY e TERMO ficaram **brancos**. Não extrapolei o 1/8 / 3 anos dos leases irmãos — formulário igual não é prova de conteúdo igual. → **PED-001**.\n2. **Conflito de registro no lease -003 (Carla Nunes):** a cópia recita `Vol. 100, Pg. 33`, o Exhibit \"A\" recita `Vol. 100, Pg. 3`. Os vizinhos batem (Pgs. 1 e 2), o que torna a sequência do Exhibit suspeita de ser transcrição \"limpa\" — mas isso é inferência, não registro. REGISTRO **branco** em Lease Review e Runsheet, item de **Curative #2** aberto. → **PED-002** (certidão do County Clerk) + **P2** (precedente de precedência de fonte).\n3. **Requirement No. 1 do parecer** (probate do Estate of Ana Souza, lease -001/Tract 1) em aberto; o parecer diz \"the lease is subject to the claims of the heirs\". → **PED-003**.\n\n### A pergunta que muda o denominador\n**P1 — a Runsheet desta unidade deveria sair vazia.** O parecer certifica em 01/06/2011 e os 6 instrumentos são todos anteriores; a regra global `runsheet_style` exclui exatamente isso (`pre_cert_date`). Gravei os 6 itens com citação literal mesmo assim — são os documentos que eu já tinha aberto, então a decisão do operador vira um interruptor de projeção, não uma releitura. Se a resposta for \"vazia\", o censo cai de 89 para 59 e eu redeclaro.\n\n### Para as outras 299\nGravei em global: o cotejo obrigatório **Exhibit \"A\" × recital RECORDED** (com o procedimento de branco+curative+pedido), a **colisão pre_cert_date em unidades só com original opinion** (checar as datas antes de gastar leituras na aba), e o **custo**: fixture sintético tem camada de texto em 100% — `texto` resolve, `ocr`/`imagem` é desperdício de 4x.\n\n**Aviso para o ship:** o template chega com `Lease Review` A2/B2 = \"0888888-001 / Amostra De Outra Unidade\". Tem que ser sobrescrito ou apagado — dado de unidade alheia no arquivo do cliente é pior que branco.",
+      "chamadas": [],
+      "uso": {
+        "entrada": 2,
+        "saida": 1512,
+        "cache_escrita": 935,
+        "cache_leitura": 56638,
+        "entrada_total": 57575,
+        "custo_usd": 0.072
+      }
+    }
+  ]
+}

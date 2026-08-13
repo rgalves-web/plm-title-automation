@@ -58,6 +58,79 @@ def norm(value: Any) -> str:
 # dash where the other has a comma, a parenthetical source note appended.
 _LOOSE = re.compile(r"[^a-z0-9]+")
 
+# --- row alignment by identity ---------------------------------------------
+#
+# Round 1 wrote one Worksheet row per tract while the hand DDR repeats the
+# tract per lease. Comparing by coordinate then reports the same facts as
+# wrong twice over — row position is layout, not truth. So rows that carry an
+# identity (a lease number, an API number, a tract label) are matched by that
+# identity first, and only rows with no identity fall back to coordinates.
+# Proven externally: realigned, round 1 got 50 of 51 fields.
+
+_IDENTITY_RES = (
+    re.compile(r"0\d{6}[-/]\d{3}"),                 # lease
+    re.compile(r"\b\d{2}-\d{3}-\d{5}\b"),           # API well number
+    re.compile(r"\btra(?:c)?t\s+\d+\b"),            # tract label
+)
+_COORD = re.compile(r"^([A-Z]{1,3})(\d+)$")
+
+
+def _row_identity(joined: str) -> str | None:
+    for pattern in _IDENTITY_RES:
+        m = pattern.search(joined)
+        if m:
+            return m.group(0).replace("/", "-")
+    return None
+
+
+def _identities_by_row(cells: dict[tuple[str, str], str]
+                       ) -> dict[tuple[str, int], str]:
+    rows: dict[tuple[str, int], list[str]] = {}
+    for (tab, coord), value in cells.items():
+        m = _COORD.match(coord)
+        if m:
+            rows.setdefault((tab, int(m.group(2))), []).append(value)
+    out: dict[tuple[str, int], str] = {}
+    for key, values in rows.items():
+        identity = _row_identity(" ".join(values))
+        if identity:
+            out[key] = identity
+    return out
+
+
+def row_translation(ia_cells: dict[tuple[str, str], str],
+                    hand_cells: dict[tuple[str, str], str]
+                    ) -> dict[tuple[str, int], int]:
+    """(tab, ia_row) -> hand_row, for rows whose identity appears on both
+    sides. Repeated identities (the hand repeats a lease per tract) pair in
+    sheet order; the unpaired remainder stays untranslated — honest silence
+    beats a forced match."""
+    ia_ids = _identities_by_row(ia_cells)
+    hand_ids = _identities_by_row(hand_cells)
+
+    hand_rows: dict[tuple[str, str], list[int]] = {}
+    for (tab, row), identity in sorted(hand_ids.items()):
+        hand_rows.setdefault((tab, identity), []).append(row)
+
+    translation: dict[tuple[str, int], int] = {}
+    for (tab, row), identity in sorted(ia_ids.items()):
+        pool = hand_rows.get((tab, identity))
+        if pool:
+            translation[(tab, row)] = pool.pop(0)
+    return translation
+
+
+def translate(cells: dict[tuple[str, str], str],
+              translation: dict[tuple[str, int], int]
+              ) -> dict[tuple[str, str], str]:
+    out: dict[tuple[str, str], str] = {}
+    for (tab, coord), value in cells.items():
+        m = _COORD.match(coord)
+        if m and (tab, int(m.group(2))) in translation:
+            coord = f"{m.group(1)}{translation[(tab, int(m.group(2)))]}"
+        out[(tab, coord)] = value
+    return out
+
 
 def equivalent(a: str, b: str) -> bool:
     """Same value, more or less prose around it.
@@ -103,6 +176,7 @@ class Comparison:
     tabs_only_hand: list[str] = field(default_factory=list)
     tabs_only_ia: list[str] = field(default_factory=list)
     aliases: dict[str, str] = field(default_factory=dict)
+    aligned_rows: int = 0
     agreed: list[str] = field(default_factory=list)
     equivalent: list[dict[str, str]] = field(default_factory=list)
     disagreed: list[dict[str, str]] = field(default_factory=list)
@@ -114,6 +188,7 @@ class Comparison:
         return {
             "populacoes_declaradas_antes": [p.to_dict() for p in self.populations],
             "abas_alinhadas_por_apelido": self.aliases,
+            "linhas_alinhadas_por_identidade": self.aligned_rows,
             "abas_so_no_gabarito": self.tabs_only_hand,
             "abas_so_na_ia": self.tabs_only_ia,
             "baldes": {
@@ -167,15 +242,25 @@ def compare(ia_workbook: str | Path, ledger_path: str | Path,
     ia_cells = alias(cells_of(ia_workbook))
     tpl_cells = alias(cells_of(template if template is not None else TEMPLATE))
 
+    # Rows are matched by the entity they carry before any cell is compared —
+    # row position is layout. Only rows with no identity keep coordinates.
+    translation = row_translation(ia_cells, hand_cells)
+    ia_cells = translate(ia_cells, translation)
+
     ledger = json.loads(Path(ledger_path).read_text(encoding="utf-8"))
-    written = {(aliases.get(c["aba"], c["aba"]), c["celula"])
-               for c in ledger["celulas"]}
+    written_raw = {(aliases.get(c["aba"], c["aba"]), c["celula"])
+                   for c in ledger["celulas"]}
+    written = {
+        (tab, coord) for tab, coord in (
+            next(iter(translate({key: ""}, translation)))
+            for key in written_raw)}
 
     hand_tabs = {t for t, _ in hand_cells}
     ia_tabs = {t for t, _ in ia_cells}
 
     out = Comparison(
         aliases=aliases,
+        aligned_rows=len(translation),
         tabs_only_hand=sorted(hand_tabs - ia_tabs),
         tabs_only_ia=sorted(ia_tabs - hand_tabs),
         populations=[

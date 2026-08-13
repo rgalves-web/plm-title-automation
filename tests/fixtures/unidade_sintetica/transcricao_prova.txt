@@ -1,0 +1,65 @@
+
+exige 89 · escrevi 83 (com citação) · branco declarado 0 (motivo e dono) · pendente de documento 11
+custo desta execução: $1.7012 (entrada_total 685166 · saída 41096 · cache escrita 57573 · cache leitura 627545)
+acumulado da unidade: $1.7012
+
+delta: censo 89 → 60 · escritos 83 → 91 · pendentes 11 → 13 · documentos novos processados: 1 · respostas processadas: 1
+
+exige 60 · escrevi 91 (com citação) · branco declarado 1 (motivo e dono) · pendente de documento 13
+custo desta execução: $0.4854 (entrada_total 160910 · saída 11871 · cache escrita 18789 · cache leitura 142097)
+acumulado da unidade: $2.1866
+1/3 projeção: a memória vira DDR…
+2/3 auditoria de 100% das células escritas…
+   LIMITACAO REGISTRADA: nenhuma chave de segundo provedor no .env — auditoria feita por claude-sonnet-5 (mesma familia do Examinador), em contexto isolado. Cabecas da mesma familia podem errar juntas.
+   rodada 1: 55 auditadas, 8 reprovadas
+   rodada 2: 8 reauditadas, 5 seguem reprovadas
+   REGRA DE EMBARQUE: 5 célula(s) rebaixada(s) a branco declarado: Curative!A3, Curative!B3, Curative!C3, Lease Review!E6, Runsheet!A9
+3/3 kit…
+   ddr: tests\fixtures\unidade_sintetica\_minorh\ship\DDR.xlsx
+   auditoria: tests\fixtures\unidade_sintetica\_minorh\ship\AUDITORIA.json
+   manifesto: tests\fixtures\unidade_sintetica\_minorh\ship\MANIFESTO_LACUNAS.md
+   auditor (anthropic/claude-sonnet-5): {'entrada': 174729, 'saida': 22780, 'cache_escrita': 0, 'cache_leitura': 0, 'entrada_total': 174729, 'custo_usd': 0.8659}
+
+exige 60 · escrevi 91 (com citação) · branco declarado 1 (motivo e dono) · pendente de documento 13
+custo desta execução: $2.2217 (entrada_total 245594 · saída 29552 · cache escrita 85920 · cache leitura 159646)
+acumulado da unidade: $4.4083
+1/3 projeção: a memória vira DDR…
+2/3 auditoria de 100% das células escritas…
+   LIMITACAO REGISTRADA: nenhuma chave de segundo provedor no .env — auditoria feita por claude-sonnet-5 (mesma familia do Examinador), em contexto isolado. Cabecas da mesma familia podem errar juntas.
+   rodada 1: 57 auditadas, 3 reprovadas
+   rodada 2: 2 reauditadas, 1 seguem reprovadas
+   REGRA DE EMBARQUE: 1 célula(s) rebaixada(s) a branco declarado: Runsheet!A2
+3/3 kit…
+   ddr: tests\fixtures\unidade_sintetica\_minorh\ship\DDR.xlsx
+   auditoria: tests\fixtures\unidade_sintetica\_minorh\ship\AUDITORIA.json
+   manifesto: tests\fixtures\unidade_sintetica\_minorh\ship\MANIFESTO_LACUNAS.md
+   auditor (anthropic/claude-sonnet-5): {'entrada': 143018, 'saida': 20523, 'cache_escrita': 0, 'cache_leitura': 0, 'entrada_total': 143018, 'custo_usd': 0.7369}
+
+exige 60 · escrevi 91 (com citação) · branco declarado 1 (motivo e dono) · pendente de documento 13
+custo desta execução: $2.1774 (entrada_total 547377 · saída 32445 · cache escrita 61820 · cache leitura 485511)
+acumulado da unidade: $6.5857
+unidade: tests\fixtures\unidade_sintetica
+documentos no corpus: 7 · já lidos: 7
+pedidos abertos: 4 · perguntas abertas: 1
+execuções: 4
+
+exige 60 · escrevi 91 (com citação) · branco declarado 1 (motivo e dono) · pendente de documento 13
+acumulado da unidade: $6.5857
+[P1] (respondida) A Runsheet desta unidade deve listar os 6 instrumentos do corpus (5 leases + a DPU), ou fica VAZIA por exclusao `pre_cert_date`? Todos os instrumentos sao de registro anterior a data de certificacao do parecer controlador (June 1, 2011); a regra global `runsheet_style` manda excluir exatamente isso ("Of record before the certification date, so the opinion already examined it").
+    resposta: (a) Runsheet vazia com a nota. A Runsheet e cadeia SUPLEMENTAR de titulo — so instrumentos de registro POSTERIORES a data de certificacao do parecer controlador. Quando nao ha nenhum, ela sai vazia com a nota 'nenhum instrumento de registro posterior a <data>'. Vale como regra para todas as unidades do projeto.
+[P2] (aberta) Em conflito de referencia de registro entre a copia do instrumento e o Exhibit "A" da DPU, qual fonte prevalece no DDR enquanto nao ha certidao do cartorio? Caso concreto: lease 0999001-003 (Carla Nunes) — a copia do lease recita "Vol. 100, Pg. 33" e o Exhibit "A" recita "Vol. 100, Pg. 3".
+
+exige 60 · escrevi 91 (com citação) · branco declarado 1 (motivo e dono) · pendente de documento 13
+acumulado da unidade: $6.5857
+PROVA DO AUDITOR SOBRE O ERRO PLANTADO (chamada real):
+{
+ "celula": "Lease Review!F2",
+ "valor": "1/6",
+ "citacao": "0999001-001 (ana souza) lease.pdf p.1",
+ "aprovada": false,
+ "sustenta": false,
+ "contradiz": null,
+ "unidade_certa": true,
+ "motivo": "A pagina cita royalty de one-eighth (1/8), nao 1/6 como escrito na celula."
+}
+=> REPROVADA, como exigido. A rodada fecha.

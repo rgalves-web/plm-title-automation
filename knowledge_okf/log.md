@@ -82,3 +82,8 @@ Uma linha por escrita. Quem escreveu foi o modelo; este arquivo e o rastro.
 - criou `unidade-josh-b-unit-montague` (unidade)
 - criou `cadeia-bra-de-oil-and-gas-para-eog-montague` (cadeia)
 - criou `custo-legibilidade-do-corpus-montague-eog` (custo)
+- criou `exhibit-a-da-dpu-vs-recital-recorded-do-lease` (regra)
+- criou `runsheet-vazia-por-pre-cert-date-em-unidade-so-com-original-opinion` (regra)
+- criou `custo-corpus-sintetico-6-docs-legibilidade-total` (custo)
+- criou `runsheet-e-cadeia-suplementar-vazia-quando-nada-e-posterior-a-cert-date` (veredito)
+- atualizou `runsheet-vazia-por-pre-cert-date-em-unidade-so-com-original-opinion` (regra)

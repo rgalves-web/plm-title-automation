@@ -1,0 +1,599 @@
+{
+  "auditor": {
+    "provedor": "anthropic",
+    "modelo": "claude-sonnet-5",
+    "limitacao": "LIMITACAO REGISTRADA: nenhuma chave de segundo provedor no .env — auditoria feita por claude-sonnet-5 (mesma familia do Examinador), em contexto isolado. Cabecas da mesma familia podem errar juntas.",
+    "tokens": {
+      "entrada": 143018,
+      "saida": 20523,
+      "cache_escrita": 0,
+      "cache_leitura": 0,
+      "entrada_total": 143018,
+      "custo_usd": 0.7369
+    }
+  },
+  "cobertura": {
+    "nao_vazias": 87,
+    "auditadas": 57,
+    "vivas": 57,
+    "estrutura_do_template": 30,
+    "amostragem": "nenhuma — 100% das escritas",
+    "rodadas": 2
+  },
+  "resultado": {
+    "aprovadas": 55,
+    "reprovadas_ao_final": 2
+  },
+  "celulas": [
+    {
+      "celula": "Curative!A2",
+      "valor": "1",
+      "citacao": "titulo - original title opinion.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A pagina cita 'REQUIREMENT NO. 1', confirmando o numero '1' em Curative!A2."
+    },
+    {
+      "celula": "Curative!A3",
+      "valor": "2",
+      "citacao": "0999001-003 (carla nunes) lease.pdf p.1",
+      "aprovada": false,
+      "sustenta": false,
+      "contradiz": null,
+      "unidade_certa": false,
+      "motivo": "auditor nao produziu veredito legivel (2x)"
+    },
+    {
+      "celula": "Curative!B2",
+      "valor": "Obter e registrar copias certificadas do inventario/probate do Estate of Ana Souza, de cuja devise dependem os minerais do lease 0999001-001 no Tract 1; enquanto o probate nao estiver registrado, o lease fica sujeito as pretensoes dos herdeiros.",
+      "citacao": "titulo - original title opinion.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "O texto da celula reflete fielmente o Requirement No. 1 da pagina citada, sem contradizer outras celulas."
+    },
+    {
+      "celula": "Curative!B3",
+      "valor": "Conciliar a referencia de registro do lease 0999001-003: a copia do lease recita Vol. 100, Pg. 33 e o Exhibit \"A\" da DPU recita Vol. 100, Pg. 3. Obter certidao do County Clerk de Palo Duro County e, se o erro estiver na DPU, avaliar correction/ratification do Exhibit \"A\".",
+      "citacao": "0999001-003 (carla nunes) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A pagina citada confirma 'Vol. 100, Pg. 33' para o lease 0999001-003, conforme afirmado na celula."
+    },
+    {
+      "celula": "Curative!C2",
+      "valor": "Original Title Opinion, Escritorio Sintetico de Pareceres LLP, data de certificacao June 1, 2011, p.1 (Requirement No. 1)",
+      "citacao": "titulo - original title opinion.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A pagina citada confirma data, firma e Requirement No. 1, consistente com Lease Review (Ana Souza) e Summary (Josh Sintetico Unit)."
+    },
+    {
+      "celula": "Curative!C3",
+      "valor": "Fontes divergentes sobre o registro do lease 0999001-003: dpu - josh sintetico unit - rec.pdf p.2, Exhibit \"A\" = \"Vol. 100, Pg. 3\"; 0999001-003 (carla nunes) lease.pdf p.1, recital RECORDED = \"Vol. 100, Pg. 33\". REGISTRO fica em branco declarado nas abas Lease Review e Runsheet ate certidao do County Clerk.",
+      "citacao": "dpu - josh sintetico unit - rec.pdf p.2",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A citação confirma exatamente 'Vol. 100, Pg. 3' para o lease 0999001-003 no Exhibit A, conforme afirmado na célula."
+    },
+    {
+      "celula": "Lease Review!A2",
+      "valor": "0999001-001",
+      "citacao": "0999001-001 (ana souza) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A pagina citada confirma o numero de lease 0999001-001, lessor Ana Souza, data e registro consistentes com Lease Review!A2."
+    },
+    {
+      "celula": "Lease Review!A3",
+      "valor": "0999001-002",
+      "citacao": "0999001-002 (bruno lima) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A pagina citada confirma o numero do lease 0999001-002 e os demais dados (lessor, data, registro) coincidem com a linha correspondente."
+    },
+    {
+      "celula": "Lease Review!A4",
+      "valor": "0999001-003",
+      "citacao": "0999001-003 (carla nunes) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "Numero do lease citado na pagina corresponde exatamente ao valor da celula A4."
+    },
+    {
+      "celula": "Lease Review!A5",
+      "valor": "0999001-004",
+      "citacao": "0999001-004 (daniel prado) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A pagina citada confirma lease 0999001-004, Daniel Prado, data e registro consistentes com a linha 5."
+    },
+    {
+      "celula": "Lease Review!A6",
+      "valor": "0999001-005",
+      "citacao": "dpu - josh sintetico unit - rec.pdf p.2",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A citação lista exatamente a linha '0999001-005 | Elisa Ramos | ... | March 1, 2011 | Vol. 100, Pg. 5', confirmando o valor da célula A6."
+    },
+    {
+      "celula": "Lease Review!B2",
+      "valor": "Ana Souza",
+      "citacao": "0999001-001 (ana souza) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "O trecho citado confirma literalmente 'Ana Souza' como Lessor no lease 0999001-001, condizente com a unidade sintetica de teste."
+    },
+    {
+      "celula": "Lease Review!B3",
+      "valor": "Bruno Lima",
+      "citacao": "0999001-002 (bruno lima) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A página citada confirma Bruno Lima como Lessor no lease 0999001-002, consistente com data e registro em D3/E3."
+    },
+    {
+      "celula": "Lease Review!B4",
+      "valor": "Carla Nunes",
+      "citacao": "0999001-003 (carla nunes) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A pagina citada mostra literalmente 'between Carla Nunes, as Lessor', confirmando o valor da celula."
+    },
+    {
+      "celula": "Lease Review!B5",
+      "valor": "Daniel Prado",
+      "citacao": "0999001-004 (daniel prado) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A pagina citada confirma 'Daniel Prado' como Lessor na data e termos correspondentes, sem contradicao com outras celulas."
+    },
+    {
+      "celula": "Lease Review!B6",
+      "valor": "Elisa Ramos",
+      "citacao": "dpu - josh sintetico unit - rec.pdf p.2",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A pagina citada confirma 'Elisa Ramos' como lessor do lease 0999001-005, sem contradicoes."
+    },
+    {
+      "celula": "Lease Review!C2",
+      "valor": "EOG SINTETICA RESOURCES INC.",
+      "citacao": "0999001-001 (ana souza) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "O trecho citado confirma literalmente o nome do Lessee 'EOG SINTETICA RESOURCES INC.' na pagina 1 do lease 0999001-001."
+    },
+    {
+      "celula": "Lease Review!C3",
+      "valor": "EOG SINTETICA RESOURCES INC.",
+      "citacao": "0999001-002 (bruno lima) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "O trecho citado confirma literalmente o nome do Lessee conforme registrado na página 1 do lease.pdf."
+    },
+    {
+      "celula": "Lease Review!C4",
+      "valor": "EOG SINTETICA RESOURCES INC.",
+      "citacao": "0999001-003 (carla nunes) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A pagina citada confirma literalmente o nome do Lessee, sem contradicoes com outras celulas."
+    },
+    {
+      "celula": "Lease Review!C5",
+      "valor": "EOG SINTETICA RESOURCES INC.",
+      "citacao": "0999001-004 (daniel prado) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A citação reproduz exatamente o trecho do lease.pdf que nomeia EOG SINTETICA RESOURCES INC. como Lessee."
+    },
+    {
+      "celula": "Lease Review!C6",
+      "valor": "EOG SINTETICA RESOURCES INC.",
+      "citacao": "dpu - josh sintetico unit - rec.pdf p.2",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A citação confirma lessee EOG SINTETICA RESOURCES INC. para o lease 0999001-005, consistente com a unidade JOSH SINTETICO."
+    },
+    {
+      "celula": "Lease Review!D2",
+      "valor": "January 5, 2011",
+      "citacao": "0999001-001 (ana souza) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "O trecho citado reproduz literalmente a data em D2 e nao ha conflito com G2 ou outras celulas."
+    },
+    {
+      "celula": "Lease Review!D3",
+      "valor": "January 12, 2011",
+      "citacao": "0999001-002 (bruno lima) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A data citada na pagina 1 do lease.pdf corresponde exatamente ao valor escrito e e consistente com G3."
+    },
+    {
+      "celula": "Lease Review!D4",
+      "valor": "February 2, 2011",
+      "citacao": "0999001-003 (carla nunes) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "O trecho citado contém exatamente a data 'February 2, 2011' referente ao lease 0999001-003."
+    },
+    {
+      "celula": "Lease Review!D5",
+      "valor": "February 20, 2011",
+      "citacao": "0999001-004 (daniel prado) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A citacao da pagina 1 confirma literalmente a data 'February 20, 2011' para o lease 0999001-004 de Daniel Prado."
+    },
+    {
+      "celula": "Lease Review!D6",
+      "valor": "March 1, 2011",
+      "citacao": "dpu - josh sintetico unit - rec.pdf p.2",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A pagina citada confirma exatamente a data March 1, 2011 para o lease 0999001-005 (Elisa Ramos)."
+    },
+    {
+      "celula": "Lease Review!E2",
+      "valor": "Vol. 100, Pg. 1, Official Records, Palo Duro County, Texas",
+      "citacao": "0999001-001 (ana souza) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A citação reproduz literalmente o trecho 'RECORDED' da página, confirmando o valor de E2."
+    },
+    {
+      "celula": "Lease Review!E3",
+      "valor": "Vol. 100, Pg. 2, Official Records, Palo Duro County, Texas",
+      "citacao": "0999001-002 (bruno lima) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "O texto citado reproduz exatamente o valor registrado em E3."
+    },
+    {
+      "celula": "Lease Review!E5",
+      "valor": "Vol. 100, Pg. 4, Official Records, Palo Duro County, Texas",
+      "citacao": "0999001-004 (daniel prado) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A página citada reproduz literalmente 'Vol. 100, Pg. 4, Official Records, Palo Duro County, Texas', igual ao valor da célula, e refere-se ao lease 0999001-004 de Daniel Prado, mesma linha da tabela."
+    },
+    {
+      "celula": "Lease Review!E6",
+      "valor": "Vol. 100, Pg. 5 (Official Records, Palo Duro County, Texas) — conforme Exhibit \"A\"; copia do lease nao consta do corpus",
+      "citacao": "dpu - josh sintetico unit - rec.pdf p.2",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A pagina confirma Vol. 100, Pg. 5 para o lease 0999001-005 (Elisa Ramos), consistente com o valor escrito."
+    },
+    {
+      "celula": "Lease Review!F2",
+      "valor": "1/8 (one-eighth)",
+      "citacao": "0999001-001 (ana souza) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A citacao da pagina 1 confirma literalmente 'one-eighth (1/8)' para o lease 0999001-001 (Ana Souza)."
+    },
+    {
+      "celula": "Lease Review!F3",
+      "valor": "1/8 (one-eighth)",
+      "citacao": "0999001-002 (bruno lima) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "O trecho citado confirma exatamente o royalty de 1/8 para o lease 0999001-002 de Bruno Lima."
+    },
+    {
+      "celula": "Lease Review!F4",
+      "valor": "1/8 (one-eighth)",
+      "citacao": "0999001-003 (carla nunes) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A página citada confirma literalmente o royalty de 1/8 para o lease 0999001-003."
+    },
+    {
+      "celula": "Lease Review!F5",
+      "valor": "1/8 (one-eighth)",
+      "citacao": "0999001-004 (daniel prado) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "Citação confere exatamente com o texto da página, referente ao lease 0999001-004 (Daniel Prado)."
+    },
+    {
+      "celula": "Lease Review!G2",
+      "valor": "3 anos a partir de January 5, 2011 (termo primario)",
+      "citacao": "0999001-001 (ana souza) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "O trecho citado confirma prazo de 3 anos a partir de 5/jan/2011, condizente com A2/B2/D2."
+    },
+    {
+      "celula": "Lease Review!G3",
+      "valor": "3 anos a partir de January 12, 2011 (termo primario)",
+      "citacao": "0999001-002 (bruno lima) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "Trecho citado confirma 3 anos a partir de January 12, 2011, data do lease 0999001-002 (Bruno Lima)."
+    },
+    {
+      "celula": "Lease Review!G4",
+      "valor": "3 anos a partir de February 2, 2011 (termo primario)",
+      "citacao": "0999001-003 (carla nunes) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A citação confirma prazo de 3 anos a partir da data do contrato (2/2/2011), coerente com D4."
+    },
+    {
+      "celula": "Lease Review!G5",
+      "valor": "3 anos a partir de February 20, 2011 (termo primario)",
+      "citacao": "0999001-004 (daniel prado) lease.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A citacao confirma prazo de 3 anos a partir de 20/02/2011, consistente com D5 e demais celulas da linha."
+    },
+    {
+      "celula": "Ownership - Worksheet!A2",
+      "valor": "1",
+      "citacao": "dpu - josh sintetico unit - rec.pdf p.3",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A pagina confirma TRACT 1 com 40 acres, Abstract 1, consistente com as demais celulas da linha 2."
+    },
+    {
+      "celula": "Ownership - Worksheet!A3",
+      "valor": "2",
+      "citacao": "dpu - josh sintetico unit - rec.pdf p.3",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A pagina confirma TRACT 2 com 60.00 acres, consistente com as demais celulas da linha 3."
+    },
+    {
+      "celula": "Ownership - Worksheet!B2",
+      "valor": "40.00",
+      "citacao": "dpu - josh sintetico unit - rec.pdf p.3",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A citação confirma 40.00 acres para o Tract 1, consistente com o total de 100.00 acres da unidade."
+    },
+    {
+      "celula": "Ownership - Worksheet!B3",
+      "valor": "60.00",
+      "citacao": "dpu - josh sintetico unit - rec.pdf p.3",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A pagina confirma TRACT 2 com 60.00 acres, consistente com as demais celulas."
+    },
+    {
+      "celula": "Ownership - Worksheet!C2",
+      "valor": "0999001-001, 0999001-002, 0999001-003",
+      "citacao": "dpu - josh sintetico unit - rec.pdf p.3",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "Citação confirma exatamente os três leases do Tract 1, consistente com demais células da linha 2."
+    },
+    {
+      "celula": "Ownership - Worksheet!C3",
+      "valor": "0999001-004, 0999001-005",
+      "citacao": "dpu - josh sintetico unit - rec.pdf p.3",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "Trecho citado confirma exatamente os leases 0999001-004 e 0999001-005 para o Tract 2."
+    },
+    {
+      "celula": "Ownership - Worksheet!D2",
+      "valor": "Sintetica Survey, Abstract 1 (A-1)",
+      "citacao": "dpu - josh sintetico unit - rec.pdf p.3",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "O trecho citado confirma exatamente o valor 'Sintetica Survey, Abstract 1 (A-1)' para o Tract 1."
+    },
+    {
+      "celula": "Ownership - Worksheet!D3",
+      "valor": "Sintetica Survey, Abstract 2 (A-2)",
+      "citacao": "dpu - josh sintetico unit - rec.pdf p.3",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "O trecho citado confirma exatamente 'Sintetica Survey, Abstract 2 (A-2)' para o Tract 2, sem contradições com outras células."
+    },
+    {
+      "celula": "Runsheet!A2",
+      "valor": "NOTA DA ABA: aba vazia. O parecer controlador (Original Title Opinion) certifica o titulo \"as of June 1, 2011 (the certification date)\"; a Runsheet e cadeia suplementar e so admite instrumento cujo registro seja POSTERIOR a essa data. Nenhuma linha projetada — exclusao pre_cert_date.",
+      "citacao": "titulo - original title opinion.pdf p.1",
+      "aprovada": false,
+      "sustenta": true,
+      "contradiz": "Curative!C3",
+      "unidade_certa": true,
+      "motivo": "Fontes divergentes sobre registro do lease 0999001-003 podem indicar instrumento pos-cert nao contemplado na Runsheet."
+    },
+    {
+      "celula": "Summary!B2",
+      "valor": "JOSH SINTETICO UNIT",
+      "citacao": "dpu - josh sintetico unit - rec.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A citação confirma literalmente o nome 'JOSH SINTETICO UNIT' e os demais dados (condado, acres, operador) coincidem com outras células."
+    },
+    {
+      "celula": "Summary!B3",
+      "valor": "Palo Duro County, Texas",
+      "citacao": "dpu - josh sintetico unit - rec.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "O trecho citado contém literalmente 'Palo Duro County, Texas' e é consistente com as demais células."
+    },
+    {
+      "celula": "Summary!B4",
+      "valor": "100.00",
+      "citacao": "dpu - josh sintetico unit - rec.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "O trecho citado confirma explicitamente 100.00 acres para o JOSH SINTETICO UNIT."
+    },
+    {
+      "celula": "Summary!B5",
+      "valor": "EOG SINTETICA RESOURCES INC.",
+      "citacao": "dpu - josh sintetico unit - rec.pdf p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A citação confirma literalmente o valor e é consistente com as demais células que citam o mesmo Operator."
+    },
+    {
+      "celula": "Wells!A2",
+      "valor": "42-999-00001",
+      "citacao": "pocos - rrc sintetico.csv p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "O trecho citado mostra exatamente o API '42-999-00001' correspondente ao poço JOSH SINTETICO 1H, consistente com Wells!B2-F2."
+    },
+    {
+      "celula": "Wells!B2",
+      "valor": "JOSH SINTETICO 1H",
+      "citacao": "pocos - rrc sintetico.csv p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "O valor do poço bate exatamente com o trecho citado do CSV e com as demais células da aba Wells."
+    },
+    {
+      "celula": "Wells!C2",
+      "valor": "EOG SINTETICA RESOURCES INC.",
+      "citacao": "pocos - rrc sintetico.csv p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "O trecho citado confirma exatamente o operador 'EOG SINTETICA RESOURCES INC.' para o poco 42-999-00001, consistente com demais celulas."
+    },
+    {
+      "celula": "Wells!D2",
+      "valor": "PRODUCING",
+      "citacao": "pocos - rrc sintetico.csv p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "A citação do CSV confirma exatamente API, nome do poço, operador e status PRODUCING conforme Wells!D2."
+    },
+    {
+      "celula": "Wells!E2",
+      "valor": "7500",
+      "citacao": "pocos - rrc sintetico.csv p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "O valor 7500 corresponde exatamente ao campo TOTAL DEPTH do CSV citado para o mesmo API 42-999-00001."
+    },
+    {
+      "celula": "Wells!F2",
+      "valor": "2012-01-20",
+      "citacao": "pocos - rrc sintetico.csv p.1",
+      "aprovada": true,
+      "sustenta": true,
+      "contradiz": null,
+      "unidade_certa": true,
+      "motivo": "CSV citado mostra COMPLETION DATE 2012-01-20 para o API 42-999-00001, igual ao valor escrito."
+    }
+  ]
+}

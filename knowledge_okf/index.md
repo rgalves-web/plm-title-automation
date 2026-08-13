@@ -30,6 +30,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [category_to_ddr: runsheet](category-to-ddr-runsheet.md) `regra` — - **resolves_to**:
 - [category_to_ddr: unit_and_pooling_agreements](category-to-ddr-unit-and-pooling-agreements.md) `regra` — - **resolves_to**:
 - [category_to_ddr: well_files](category-to-ddr-well-files.md) `regra` — - **resolves_to**:
+- [custo-corpus-sintetico-6-docs-legibilidade-total](custo-corpus-sintetico-6-docs-legibilidade-total.md) `custo` — ## Corpus sintetico: camada de texto em 100% dos documentos — nunca use `ocr`/`imagem` aqui
 - [custo-legibilidade-do-corpus-montague-eog](custo-legibilidade-do-corpus-montague-eog.md) `custo` — ## O que da para ler neste corpus, e por qual modo (medido)
 - [ddr_template_structure: Agreements](ddr-template-structure-agreements.md) `layout` — - **sample_stripped**: 36
 - [ddr_template_structure: Disclaimer](ddr-template-structure-disclaimer.md) `layout` — - **sample_stripped**: 0
@@ -63,6 +64,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [exclusion_reasons: pendente_de_terceiro](exclusion-reasons-pendente-de-terceiro.md) `regra` — - **label**: Pending a third party
 - [exclusion_reasons: pre_cert_date](exclusion-reasons-pre-cert-date.md) `regra` — - **label**: Predates the controlling certification date
 - [exclusion_reasons: trade_de_terceiro](exclusion-reasons-trade-de-terceiro.md) `regra` — - **label**: Third-party trade
+- [exhibit-a-da-dpu-vs-recital-recorded-do-lease](exhibit-a-da-dpu-vs-recital-recorded-do-lease.md) `regra` — ## Sempre cotejar o Exhibit "A" da DPU com o recital RECORDED de cada lease
 - [formulario-eog-declaration-of-pooled-unit-montague](formulario-eog-declaration-of-pooled-unit-montague.md) `formulario` — ## Declaration of Pooled Unit da EOG Resources, Inc. — Montague County (forma padrao)
 - [identity_keys: instrument](identity-keys-instrument.md) `entidade` — - **required**:
 - [identity_keys: lease](identity-keys-lease.md) `entidade` — - **required**:
@@ -73,7 +75,9 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [identity_keys: unit](identity-keys-unit.md) `entidade` — - **required**:
 - [identity_keys: well](identity-keys-well.md) `entidade` — - **required**:
 - [resolver_identity_by_key/fixture](resolver-identity-by-key-fixture.md) `regra` — - **lesson_id**: resolver_identity_by_key
+- [runsheet-e-cadeia-suplementar-vazia-quando-nada-e-posterior-a-cert-date](runsheet-e-cadeia-suplementar-vazia-quando-nada-e-posterior-a-cert-date.md) `veredito` — ## VEREDITO DO OPERADOR (P1) — a Runsheet e cadeia SUPLEMENTAR de titulo
 - [runsheet_style](runsheet-style.md) `regra` — - **version**: 1
+- [runsheet-vazia-por-pre-cert-date-em-unidade-so-com-original-opinion](runsheet-vazia-por-pre-cert-date-em-unidade-so-com-original-opinion.md) `regra` — ## RESOLVIDO — unidade cujo unico parecer e o ORIGINAL title opinion
 - [sources: county_clerk_records](sources-county-clerk-records.md) `regra` — - **label**: County Clerk — real property records
 - [sources: county_records_portal](sources-county-records-portal.md) `regra` — - **label**: TexasFile / CourthouseDirect
 - [sources: drive_plm](sources-drive-plm.md) `regra` — - **label**: PLM Drive

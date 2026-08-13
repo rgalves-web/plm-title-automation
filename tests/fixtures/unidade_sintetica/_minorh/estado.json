@@ -1,0 +1,214 @@
+{
+  "unidade": "tests\\fixtures\\unidade_sintetica",
+  "censo": {
+    "exige": 60,
+    "resumo": "## Censo — unidade_sintetica (JOSH SINTETICO UNIT, Palo Duro County, TX) — **v2** (substitui a v1 de 89)\n\nDois fatos novos mudaram a conta: (1) veredito do operador em **P1** sobre a Runsheet; (2) chegada da copia do **lease 0999001-004**.\n\n### O que o registro declara (inalterado)\n- **5 leases** — Exhibit \"A\" da DPU: \"Five (5) leases in total are pooled into the JOSH SINTETICO UNIT.\" (dpu - josh sintetico unit - rec.pdf, p.2)\n- **2 tratos / 100.00 acres** — Exhibit \"C\": \"Total: 100.00 acres, two (2) tracts.\" (dpu, p.3)\n- **1 poco** — pocos - rrc sintetico.csv, p.1 (1 linha de dados: 42-999-00001)\n- **6 instrumentos de registro** — 5 leases (Vol. 100, Pgs. 1-5) + a DPU (Vol. 200, Pg. 50); **nenhum** posterior a June 1, 2011\n- **1 requirement** no parecer + **1 conflito de registro** achado na conferencia\n\n### Conta por aba (v2)\n| Aba | Linhas | Campos/linha (cabecalho) | Total |\n|---|---|---|---|\n| Summary | 1 | 4 (B2 Unidade, B3 Condado, B4 Acres, B5 Operador) | 4 |\n| Lease Review | 5 leases | 7 (LEASE NO., LESSOR, LESSEE, DATA, REGISTRO, ROYALTY, TERMO) | 35 |\n| Ownership - Worksheet | 2 tratos | 4 (TRACT, ACRES, LEASES, SURVEY) | 8 |\n| Runsheet | **0** instrumentos + 1 celula de NOTA | 5 por linha; nota e celula de aba | **1** |\n| Wells | 1 poco | 6 (API, NOME, OPERADOR, STATUS, PROFUNDIDADE, COMPLETACAO) | 6 |\n| Curative | 2 itens | 3 (NO., REQUIREMENT, FONTE) | 6 |\n| **TOTAL** | | | **60** |\n\n### Por que a Runsheet caiu de 30 para 1\nVeredito do operador (**P1**, gravado como ficha global `runsheet-e-cadeia-suplementar-vazia-quando-nada-e-posterior-a-cert-date`): a Runsheet e cadeia **suplementar** — so instrumentos de registro **posterior** a data de certificacao do parecer controlador. O parecer certifica em **June 1, 2011** (\"examined title to the captioned lands as of June 1, 2011 (the certification date)\", titulo - original title opinion.pdf p.1) e os 6 instrumentos do corpus sao todos anteriores → exclusao `pre_cert_date`. Aba **vazia com a nota**; conto **1 campo** (a celula de NOTA DA ABA, gravada com citacao). Quem preferir nao contar a nota como campo lera **59** — a diferenca esta declarada aqui, nao escondida.\nOs 6 instrumentos seguem na memoria com citacao literal e continuam sustentando Lease Review / Ownership; a exclusao e **so** da Runsheet.\n\n### Cobertura (nao muda o denominador, muda o quanto esta coberto)\n- **lease 0999001-004 (Daniel Prado): COMPLETO** — copia lida (0999001-004 (daniel prado) lease.pdf, p.1); os 7 campos gravados do proprio instrumento, confianca alta. Confere integralmente com o Exhibit \"A\" (Feb 20, 2011; Vol. 100, Pg. 4) — **nenhum novo item de curative**.\n- **lease 0999001-005 (Elisa Ramos): 5 de 7** — LEASE NO., LESSOR, LESSEE, DATA, REGISTRO vem do Exhibit \"A\"; **ROYALTY e TERMO seguem PENDENTES** ate a copia chegar (pedido **PED-004**, que estreita o pedido anterior agora que o -004 chegou).\n- **Curative com 2 linhas**: Requirement No. 1 do parecer + o conflito de registro do lease 0999001-003 (Exhibit \"A\": Vol. 100, Pg. 3; o lease: Vol. 100, Pg. 33). Se o operador nao quiser defeitos descobertos na aba, cai para 57 (ou 56 sem a nota).",
+    "quando": "2026-08-13T19:02:08+00:00"
+  },
+  "lidos": {
+    "23f96393b81aec7dc51588e85c1fb568": {
+      "documento": "dpu - josh sintetico unit - rec.pdf",
+      "quando": "2026-08-13T19:27:51+00:00"
+    },
+    "e8eccf1998453d79efdb86d125bf04ee": {
+      "documento": "pocos - rrc sintetico.csv",
+      "quando": "2026-08-13T18:50:06+00:00"
+    },
+    "e973d4c013e7945fb327af26630dae08": {
+      "documento": "titulo - original title opinion.pdf",
+      "quando": "2026-08-13T19:27:51+00:00"
+    },
+    "67926914344e9224c2ab5f183bf698b6": {
+      "documento": "0999001-001 (ana souza) lease.pdf",
+      "quando": "2026-08-13T18:50:21+00:00"
+    },
+    "e7849668e162de2ec51495cba1336c80": {
+      "documento": "0999001-002 (bruno lima) lease.pdf",
+      "quando": "2026-08-13T18:50:21+00:00"
+    },
+    "25374e03ba5b8c6d1782e7d239759d88": {
+      "documento": "0999001-003 (carla nunes) lease.pdf",
+      "quando": "2026-08-13T19:27:51+00:00"
+    },
+    "99cd05cac11f7fdfe6b612d77c0e0f60": {
+      "documento": "0999001-004 (daniel prado) lease.pdf",
+      "quando": "2026-08-13T19:18:16+00:00"
+    }
+  },
+  "pedidos": [
+    {
+      "id": "PED-001",
+      "titulo": "Copias dos leases 0999001-004 (Daniel Prado) e 0999001-005 (Elisa Ramos)",
+      "o_que": "Oil and Gas Lease no. 0999001-004, Daniel Prado a EOG SINTETICA RESOURCES INC., datado February 20, 2011, registrado em Vol. 100, Pg. 4; e Oil and Gas Lease no. 0999001-005, Elisa Ramos a EOG SINTETICA RESOURCES INC., datado March 1, 2011, registrado em Vol. 100, Pg. 5 — ambos conforme Exhibit \"A\" da Declaration of Pooled Unit do JOSH SINTETICO UNIT (p.2). Sao os dois leases que cobrem integralmente o Tract 2 (60.00 dos 100.00 acres da unidade).",
+      "onde": "Arquivo de leases do Seller (Drive PLM) e, na falta, County Clerk de Palo Duro County, Texas — Official Records Vol. 100, Pgs. 4 e 5",
+      "metodo": "Solicitar as copias executadas ao Seller; em paralelo, pedir copias certificadas do registro ao County Clerk pelas referencias de volume/pagina do Exhibit \"A\".",
+      "campos": [
+        {
+          "entidade": "lease 0999001-004",
+          "campo": "Lease Review!ROYALTY"
+        },
+        {
+          "entidade": "lease 0999001-004",
+          "campo": "Lease Review!TERMO"
+        },
+        {
+          "entidade": "lease 0999001-005",
+          "campo": "Lease Review!ROYALTY"
+        },
+        {
+          "entidade": "lease 0999001-005",
+          "campo": "Lease Review!TERMO"
+        },
+        {
+          "entidade": "lease 0999001-004",
+          "campo": "Lease Review!REGISTRO (confirmacao)"
+        },
+        {
+          "entidade": "lease 0999001-005",
+          "campo": "Lease Review!REGISTRO (confirmacao)"
+        }
+      ],
+      "status": "aberto",
+      "quando": "2026-08-13T18:55:34+00:00"
+    },
+    {
+      "id": "PED-002",
+      "titulo": "Certidao de registro do lease 0999001-003 (Carla Nunes) — Vol. 100, Pg. 3 ou Pg. 33",
+      "o_que": "Copia certificada do Oil and Gas Lease no. 0999001-003, Carla Nunes a EOG SINTETICA RESOURCES INC., datado February 2, 2011, tal como consta dos Official Records de Palo Duro County — para determinar se a referencia correta e Vol. 100, Pg. 3 (Exhibit \"A\" da DPU, p.2) ou Vol. 100, Pg. 33 (recital RECORDED da propria copia do lease, p.1).",
+      "onde": "County Clerk de Palo Duro County, Texas — indice de grantor/grantee (Nunes/EOG) e Official Records Vol. 100",
+      "metodo": "Buscar o instrumento pelo indice grantor/grantee e conferir as duas paginas candidatas (Pg. 3 e Pg. 33); pedir certidao da pagina onde o lease efetivamente esta registrado.",
+      "campos": [
+        {
+          "entidade": "lease 0999001-003",
+          "campo": "Lease Review!REGISTRO"
+        },
+        {
+          "entidade": "runsheet item 3 (lease 0999001-003)",
+          "campo": "Runsheet!REGISTRO"
+        },
+        {
+          "entidade": "curative 2 (conflito de registro — lease 0999001-003)",
+          "campo": "Curative!REQUIREMENT (baixa)"
+        }
+      ],
+      "status": "aberto",
+      "quando": "2026-08-13T18:55:34+00:00"
+    },
+    {
+      "id": "PED-003",
+      "titulo": "Probate do Estate of Ana Souza (Requirement No. 1 do parecer)",
+      "o_que": "Copias certificadas do processo de inventario (probate proceedings) do Estate of Ana Souza, exigidas pelo Requirement No. 1 do Original Title Opinion, das quais depende a devise dos minerais sob o Tract 1 cobertos pelo lease 0999001-001.",
+      "onde": "County Clerk / Probate Court do condado do inventario (a determinar; comecar por Palo Duro County, Texas) e arquivo de curative do Seller",
+      "metodo": "Pesquisar o indice de probate pelo nome Ana Souza; obter certidao do will/inventory e registra-la nos Official Records de Palo Duro County, como o parecer exige.",
+      "campos": [
+        {
+          "entidade": "curative 1 (Requirement No. 1 — probate Ana Souza)",
+          "campo": "Curative!STATUS (baixa do requirement)"
+        },
+        {
+          "entidade": "lease 0999001-001",
+          "campo": "Lease Review!observacao de titulo (sujeito a claims dos herdeiros)"
+        }
+      ],
+      "status": "aberto",
+      "quando": "2026-08-13T18:55:34+00:00"
+    },
+    {
+      "id": "PED-004",
+      "titulo": "ATUALIZA pedido anterior: falta so a copia do lease 0999001-005 (Elisa Ramos) — o -004 chegou",
+      "o_que": "Oil and Gas Lease EOG SINTETICA LEASE NO. 0999001-005, Elisa Ramos como Lessor e EOG SINTETICA RESOURCES INC. como Lessee, datado de March 1, 2011, registrado em Vol. 100, Pg. 5, Official Records, Palo Duro County, Texas (identificacao conforme Exhibit \"A\" da DPU, p.2)",
+      "onde": "Palo Duro County Clerk (Official Records, Vol. 100, Pg. 5); alternativamente o lease file do Seller/EOG pelo numero 0999001-005",
+      "metodo": "Puxar copia certificada por volume/pagina no cartorio do condado; se o Seller entregar copia do lease file, conferir o recital RECORDED contra o Exhibit \"A\" antes de usar (o lease -003 ja divergiu: Exhibit \"A\" diz Pg. 3, o lease diz Pg. 33).",
+      "campos": [
+        {
+          "entidade": "lease 0999001-005",
+          "campo": "ROYALTY"
+        },
+        {
+          "entidade": "lease 0999001-005",
+          "campo": "TERMO"
+        }
+      ],
+      "status": "aberto",
+      "quando": "2026-08-13T19:01:47+00:00"
+    }
+  ],
+  "perguntas": [
+    {
+      "id": "P1",
+      "pergunta": "A Runsheet desta unidade deve listar os 6 instrumentos do corpus (5 leases + a DPU), ou fica VAZIA por exclusao `pre_cert_date`? Todos os instrumentos sao de registro anterior a data de certificacao do parecer controlador (June 1, 2011); a regra global `runsheet_style` manda excluir exatamente isso (\"Of record before the certification date, so the opinion already examined it\").",
+      "candidatos": [
+        "(a) Runsheet vazia — pre_cert_date exclui todos os 6; DDR traz nota explicando",
+        "(b) Runsheet lista os 6 instrumentos (5 leases + DPU) como indice da unidade",
+        "(c) Runsheet lista so a DPU (instrumento que forma a unidade), leases ficam na Lease Review"
+      ],
+      "desempate": "Saber se, em unidades onde o unico parecer e o ORIGINAL title opinion (e nao ha instrumento posterior a certificacao), a Runsheet deve (a) sair vazia com nota \"nenhum instrumento de registro posterior a 01/06/2011\", ou (b) servir de indice do que a unidade e composta, listando os instrumentos que a formam. A resposta muda o denominador desta unidade em 30 campos (89 -> 59) e vale para as 300 unidades do projeto. Ja gravei os 6 itens na memoria com citacao literal, prontos para serem projetados ou descartados conforme a decisao.",
+      "resposta": "(a) Runsheet vazia com a nota. A Runsheet e cadeia SUPLEMENTAR de titulo — so instrumentos de registro POSTERIORES a data de certificacao do parecer controlador. Quando nao ha nenhum, ela sai vazia com a nota 'nenhum instrumento de registro posterior a <data>'. Vale como regra para todas as unidades do projeto.",
+      "status": "respondida",
+      "quando": "2026-08-13T18:55:52+00:00"
+    },
+    {
+      "id": "P2",
+      "pergunta": "Em conflito de referencia de registro entre a copia do instrumento e o Exhibit \"A\" da DPU, qual fonte prevalece no DDR enquanto nao ha certidao do cartorio? Caso concreto: lease 0999001-003 (Carla Nunes) — a copia do lease recita \"Vol. 100, Pg. 33\" e o Exhibit \"A\" recita \"Vol. 100, Pg. 3\".",
+      "candidatos": [
+        "(i) prevalece o recital RECORDED da copia do instrumento (Vol. 100, Pg. 33)",
+        "(ii) prevalece o Exhibit \"A\" da DPU (Vol. 100, Pg. 3)",
+        "(iii) branco declarado ate certidao do County Clerk + item de curative (posicao atual)"
+      ],
+      "desempate": "Um precedente de precedencia de fonte para o campo REGISTRO: (i) o instrumento manda, (ii) o Exhibit \"A\" manda, ou (iii) fica branco ate certidao. Deixei branco declarado nas duas abas (Lease Review e Runsheet) e abri item de curative. Nota factual que pode orientar: os leases -001 e -002 batem (Pgs. 1 e 2) e a sequencia do Exhibit \"A\" e 1,2,3,4,5, o que sugere que \"Pg. 33\" pode ser digitacao dobrada na copia do lease — mas isso e inferencia, nao registro. A regra escolhida se repete nas 300 unidades.",
+      "resposta": "",
+      "status": "aberta",
+      "quando": "2026-08-13T18:55:52+00:00"
+    }
+  ],
+  "execucoes": [
+    {
+      "comando": "unidade",
+      "quando": "2026-08-13T18:57:15+00:00",
+      "uso": {
+        "entrada": 48,
+        "saida": 41096,
+        "cache_escrita": 57573,
+        "cache_leitura": 627545,
+        "entrada_total": 685166,
+        "custo_usd": 1.7012
+      }
+    },
+    {
+      "comando": "continuar",
+      "quando": "2026-08-13T19:02:56+00:00",
+      "uso": {
+        "entrada": 24,
+        "saida": 11871,
+        "cache_escrita": 18789,
+        "cache_leitura": 142097,
+        "entrada_total": 160910,
+        "custo_usd": 0.4854
+      }
+    },
+    {
+      "comando": "ship",
+      "quando": "2026-08-13T19:15:54+00:00",
+      "uso": {
+        "entrada": 28,
+        "saida": 29552,
+        "cache_escrita": 85920,
+        "cache_leitura": 159646,
+        "entrada_total": 245594,
+        "custo_usd": 2.2217
+      }
+    },
+    {
+      "comando": "ship",
+      "quando": "2026-08-13T19:30:47+00:00",
+      "uso": {
+        "entrada": 46,
+        "saida": 32445,
+        "cache_escrita": 61820,
+        "cache_leitura": 485511,
+        "entrada_total": 547377,
+        "custo_usd": 2.1774
+      }
+    }
+  ]
+}

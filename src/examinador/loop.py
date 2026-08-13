@@ -55,8 +55,12 @@ class Usage:
              + self.cache_read * rate["cache_read"]) / 1_000_000, 4)
 
     def to_dict(self, model: str) -> dict[str, Any]:
+        # `entrada` sozinha engana: com cache, a API reporta ali só a fatia não
+        # cacheada (dava "entrada: 2" num turno que pagou 20k). O total soma as
+        # três colunas que de fato entraram no contexto.
         return {"entrada": self.input, "saida": self.output,
                 "cache_escrita": self.cache_write, "cache_leitura": self.cache_read,
+                "entrada_total": self.input + self.cache_write + self.cache_read,
                 "custo_usd": self.cost(model)}
 
 

@@ -1,0 +1,15 @@
+1/3 projeção: a memória vira DDR…
+2/3 auditoria de 100% das células escritas…
+   LIMITACAO REGISTRADA: nenhuma chave de segundo provedor no .env — auditoria feita por claude-sonnet-5 (mesma familia do Examinador), em contexto isolado. Cabecas da mesma familia podem errar juntas.
+   rodada 1: 57 auditadas, 7 reprovadas
+   rodada 2: 6 reauditadas, 1 seguem reprovadas
+   REGRA DE EMBARQUE: 1 célula(s) rebaixada(s) a branco declarado: Runsheet!A2
+3/3 kit…
+   ddr: C:\Users\Renato\AppData\Local\Temp\claude\C--Users-Renato-ingestion-engine\1851f768-7178-4d0d-ad62-dfe3aaaba813\scratchpad\unidade_erro\_minorh\ship\DDR.xlsx
+   auditoria: C:\Users\Renato\AppData\Local\Temp\claude\C--Users-Renato-ingestion-engine\1851f768-7178-4d0d-ad62-dfe3aaaba813\scratchpad\unidade_erro\_minorh\ship\AUDITORIA.json
+   manifesto: C:\Users\Renato\AppData\Local\Temp\claude\C--Users-Renato-ingestion-engine\1851f768-7178-4d0d-ad62-dfe3aaaba813\scratchpad\unidade_erro\_minorh\ship\MANIFESTO_LACUNAS.md
+   auditor (anthropic/claude-sonnet-5): {'entrada': 164400, 'saida': 33708, 'cache_escrita': 0, 'cache_leitura': 0, 'entrada_total': 164400, 'custo_usd': 0.9988}
+
+exige 60 · escrevi 91 (com citação) · branco declarado 1 (motivo e dono) · pendente de documento 13
+custo desta execução: $2.5089 (entrada_total 478315 · saída 35803 · cache escrita 65341 · cache leitura 412934)
+acumulado da unidade: $9.0946

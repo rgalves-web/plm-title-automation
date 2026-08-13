@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# minorh — launcher for the Title Workbench. Runs from the repo root.
-#   ./minorh serve            start the local server + open the browser
-# No install needed; delegates to the src.webapp CLI on the current interpreter.
-cd "$(dirname "$0")" || exit 1
-exec python -m src.webapp "$@"
+# minorh — o comando do operador. Encaminha para o pacote Python.
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHONPATH="$DIR" exec python -X utf8 -m src.minorh "$@"

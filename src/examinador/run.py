@@ -169,7 +169,8 @@ def run(*, max_turns: int = 400, max_cost_usd: float | None = 120.0,
                        counts={**ledger.counts(), **log.usage.to_dict(model)})
 
 
-def write_workbook(ledger: Ledger, target: str | Path) -> Path:
+def write_workbook(ledger: Ledger, target: str | Path,
+                   template: str | Path | None = None) -> Path:
     """The template, plus what the Examiner wrote, minus what it blanked.
 
     Nothing else happens here. A cell the model never addressed keeps whatever
@@ -178,7 +179,8 @@ def write_workbook(ledger: Ledger, target: str | Path) -> Path:
     and this round asks whether judgement covers what the gate covered."""
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(TEMPLATE, target)
+    shutil.copyfile(Path(template) if template is not None else TEMPLATE,
+                    target)
 
     from src.examinador.ledger import BlankRecord
 
