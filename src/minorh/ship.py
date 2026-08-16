@@ -131,9 +131,11 @@ def _pagina_para_auditoria(corpus: Any, documento: str, pagina: Any
     Isto é busca de evidência para o auditor, não julgamento: texto, depois
     OCR, depois um aviso honesto de que só a imagem existe."""
     try:
-        num = int(str(pagina).strip() or 1)
+        num: int | str = int(str(pagina).strip() or 1)
     except ValueError:
-        num = 1
+        # Uma citação de planilha vem como "aba:janela" — vai crua, o corpus
+        # sabe abrir. Qualquer outra coisa ilegível vira página 1 declarada.
+        num = str(pagina) if ":" in str(pagina) else 1
     for modo in ("texto", "ocr"):
         try:
             got = corpus.read_page(documento, num, modo)

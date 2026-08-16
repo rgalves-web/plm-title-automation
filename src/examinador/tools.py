@@ -44,7 +44,11 @@ TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "documento": {"type": "string",
                               "description": "caminho como veio de list_documents"},
-                "pagina": {"type": "integer", "description": "1-indexada"},
+                "pagina": {"type": ["integer", "string"],
+                           "description": "1-indexada. Planilhas (.xlsx): 0 "
+                                          "lista as abas; N le a aba N; "
+                                          "'N:J' le a janela J (200 linhas) "
+                                          "da aba N"},
                 "modo": {"type": "string", "enum": ["texto", "ocr", "imagem"]},
             },
             "required": ["documento", "pagina", "modo"],
@@ -194,8 +198,10 @@ def build_dispatch(corpus: Any, kb: Any, ledger: Any) -> dict[str, Callable]:
         "list_documents": lambda contains="": {
             "documentos": corpus.list_documents(contains),
         },
+        # A página vai crua: "2:3" é aba 2 janela 3 numa planilha, e quem sabe
+        # interpretar é o corpus — um int() aqui quebraria a convenção.
         "read_page": lambda documento, pagina, modo: corpus.read_page(
-            documento, int(pagina), modo),
+            documento, pagina, modo),
         "search_corpus": lambda termo: corpus.search(termo),
         "read_knowledge": lambda conceito: kb.read(conceito),
         "write_knowledge": lambda conceito, ficha, tipo, fontes=None,

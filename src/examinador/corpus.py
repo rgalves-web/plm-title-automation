@@ -29,6 +29,14 @@ from src.knowledge.corpus_reader import CorpusIndex
 IMAGE_SUFFIXES = {".tif", ".tiff", ".png", ".jpg", ".jpeg", ".bmp"}
 # Files that ARE text. They have no pages: the whole file is page 1.
 TEXT_SUFFIXES = {".csv", ".txt", ".html", ".htm", ".json", ".xml", ".md"}
+# Workbooks. Their "pages" are SHEETS, windowed — an XREF runs to tens of
+# thousands of rows and the model should ask for the window it needs, not the
+# file. The convention the model uses in `pagina`:
+#     0       the listing: sheet names, row counts, window counts
+#     N       sheet N (1-based), first window
+#     "N:J"   sheet N, window J
+XLSX_SUFFIXES = {".xlsx", ".xlsm", ".xltx", ".xltm"}
+WINDOW_ROWS = 200
 RENDER_DPI = 200
 MAX_EDGE_PX = 7800
 
@@ -94,11 +102,21 @@ class Corpus:
             from PIL import Image
             img = Image.open(io.BytesIO(data))
             return int(getattr(img, "n_frames", 1))
+        if suffix in XLSX_SUFFIXES:
+            return self._xlsx_sheet_count(name, data)
         return 1
 
-    def read_page(self, name: str, page: int, mode: str = "texto"
+    def read_page(self, name: str, page: int | str, mode: str = "texto"
                   ) -> dict[str, Any]:
         data = self.read_bytes(name)
+        if Path(name).suffix.lower() in XLSX_SUFFIXES:
+            return self._read_xlsx(name, data, page, mode)
+        try:
+            page = int(str(page))
+        except ValueError:
+            raise ValueError(
+                f"pagina {page!r}: o formato aba:janela so vale para "
+                f"planilhas; {name} usa numero de pagina")
         doc_key = digest(data)
         if mode == "imagem":
             key = key_for(doc_key, page, "png", RENDER_DPI)
@@ -137,6 +155,24 @@ class Corpus:
                 if needle in body.lower():
                     in_text.append({"documento": name, "paginas": [1]})
                 continue
+            if suffix in XLSX_SUFFIXES:
+                # As "páginas" devolvidas são especificações aba:janela — o
+                # modelo as passa direto a read_page para ver as linhas.
+                try:
+                    data = self.read_bytes(name)
+                    hits: list[str] = []
+                    for i in range(1, self._xlsx_sheet_count(name, data) + 1):
+                        _, linhas = self._xlsx_sheet(name, data, i)
+                        janelas = sorted({
+                            idx // WINDOW_ROWS + 1
+                            for idx, linha in enumerate(linhas)
+                            if needle in linha.lower()})
+                        hits.extend(f"{i}:{j}" for j in janelas)
+                    if hits:
+                        in_text.append({"documento": name, "paginas": hits})
+                except Exception as exc:
+                    unsearchable.append(f"{name} ({exc.__class__.__name__})")
+                continue
             if suffix != ".pdf":
                 unsearchable.append(name)
                 continue
@@ -162,6 +198,105 @@ class Corpus:
                 "nao_pesquisavel_sem_ocr": unsearchable,
                 "nota": ("Arquivos sem camada de texto nao foram pesquisados. "
                          "Ausencia aqui nao e prova de ausencia no corpus.")}
+
+    # --- workbooks ---------------------------------------------------------
+    # Extraction is transport, not interpretation: cells joined by " | ",
+    # rows by newline, values as openpyxl computes them (data_only). Cached
+    # per (file hash, sheet) in the GLOBAL cache — an XREF read for one unit
+    # is paid once for all 300.
+
+    def _read_xlsx(self, name: str, data: bytes, page: int | str,
+                   mode: str) -> dict[str, Any]:
+        if mode != "texto":
+            return {"kind": "text", "text": "", "documento": name,
+                    "pagina": str(page), "modo": mode, "caracteres": 0,
+                    "nota": ("planilha nao tem ocr nem imagem; use modo "
+                             "`texto` — pagina 0 lista as abas, N le a aba "
+                             "N, 'N:J' le a janela J")}
+        sheet, window = _parse_sheet_spec(page)
+        total = self._xlsx_sheet_count(name, data)
+        if sheet == 0:
+            text = self._xlsx_listing(name, data)
+            return {"kind": "text", "text": text, "documento": name,
+                    "pagina": 0, "modo": "texto", "abas_total": total,
+                    "caracteres": len(text)}
+        if not 1 <= sheet <= total:
+            return {"kind": "text", "text": "", "documento": name,
+                    "pagina": f"{sheet}:{window}", "modo": "texto",
+                    "caracteres": 0,
+                    "nota": f"aba {sheet} nao existe; o arquivo tem {total} "
+                            f"aba(s) — pagina 0 lista todas"}
+        titulo, linhas = self._xlsx_sheet(name, data, sheet)
+        janelas = max(1, -(-len(linhas) // WINDOW_ROWS))
+        if not 1 <= window <= janelas:
+            return {"kind": "text", "text": "", "documento": name,
+                    "pagina": f"{sheet}:{window}", "modo": "texto",
+                    "aba": titulo, "janelas_total": janelas, "caracteres": 0,
+                    "nota": f"janela {window} nao existe; a aba {titulo!r} "
+                            f"tem {len(linhas)} linhas em {janelas} janela(s)"}
+        corpo = "\n".join(linhas[(window - 1) * WINDOW_ROWS:
+                                 window * WINDOW_ROWS])
+        return {"kind": "text", "text": corpo, "documento": name,
+                "pagina": f"{sheet}:{window}", "modo": "texto",
+                "aba": titulo, "abas_total": total, "janela": window,
+                "janelas_total": janelas, "linhas_na_aba": len(linhas),
+                "caracteres": len(corpo)}
+
+    def _xlsx_sheet_count(self, name: str, data: bytes) -> int:
+        key = key_for(digest(data), "xlsx-abas")
+        got = self.cache.get_text(key)
+        if got is not None:
+            return int(got)
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True)
+        try:
+            n = len(wb.worksheets)
+        finally:
+            wb.close()
+        self.cache.put_text(key, str(n), {"documento": name})
+        return n
+
+    def _xlsx_sheet(self, name: str, data: bytes, sheet: int
+                    ) -> tuple[str, list[str]]:
+        """(título, linhas) da aba `sheet` (1-based), do cache ou do arquivo."""
+        doc_key = digest(data)
+        key = key_for(doc_key, "xlsx-aba", sheet)
+        key_nome = key_for(doc_key, "xlsx-nome", sheet)
+        corpo = self.cache.get_text(key)
+        titulo = self.cache.get_text(key_nome)
+        if corpo is not None and titulo is not None:
+            return titulo, corpo.splitlines()
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True,
+                                    data_only=True)
+        try:
+            ws = wb.worksheets[sheet - 1]
+            titulo = ws.title
+            linhas: list[str] = []
+            for row in ws.iter_rows(values_only=True):
+                vals = ["" if v is None else str(v) for v in row]
+                while vals and vals[-1] == "":
+                    vals.pop()
+                linhas.append(" | ".join(vals))
+            while linhas and not linhas[-1].strip():
+                linhas.pop()
+        finally:
+            wb.close()
+        self.cache.put_text(key, "\n".join(linhas),
+                            {"documento": name, "aba": titulo})
+        self.cache.put_text(key_nome, titulo, {"documento": name})
+        return titulo, linhas
+
+    def _xlsx_listing(self, name: str, data: bytes) -> str:
+        total = self._xlsx_sheet_count(name, data)
+        out = [f"{name} — {total} aba(s). Leia com pagina N ou 'N:J' "
+               f"(janelas de {WINDOW_ROWS} linhas)."]
+        for i in range(1, total + 1):
+            titulo, linhas = self._xlsx_sheet(name, data, i)
+            janelas = max(1, -(-len(linhas) // WINDOW_ROWS))
+            out.append(f"  {i}. {titulo} — {len(linhas)} linhas, "
+                       f"{janelas} janela(s)")
+        return "\n".join(out)
 
     # --- the dumb transformations -----------------------------------------
     def _text_layer(self, data: bytes, name: str, page: int) -> str:
@@ -202,6 +337,15 @@ class Corpus:
         buf = io.BytesIO()
         img.convert("RGB").save(buf, format="PNG")
         return _fit(buf.getvalue())
+
+
+def _parse_sheet_spec(page: int | str) -> tuple[int, int]:
+    """'N:J' -> (aba N, janela J); N -> (N, 1); 0 -> a listagem."""
+    text = str(page).strip()
+    if ":" in text:
+        aba, janela = text.split(":", 1)
+        return int(aba), int(janela)
+    return int(text), 1
 
 
 def _fit(png: bytes) -> bytes:

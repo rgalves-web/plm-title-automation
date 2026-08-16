@@ -95,6 +95,96 @@ def test_a_text_file_is_readable_as_text(tmp_path: Path):
                                               "paginas": [1]}]
 
 
+# --- workbooks: pages are sheets, windowed ----------------------------------
+
+def _xlsx_corpus(tmp_path: Path) -> Corpus:
+    files = tmp_path / "FILES"
+    files.mkdir(exist_ok=True)
+    wb = openpyxl.Workbook()
+    ws1 = wb.active
+    ws1.title = "Sheet1"
+    ws1.append(["LEASE", "UNIT", "WELL"])
+    for i in range(1, 450):
+        ws1.append([f"0888{i:03d}", "OUTRA UNIT", f"POCO {i}"])
+    # o marcador cai na linha 351 -> janela 2 (janelas de 200 linhas)
+    ws1["B351"] = "WEBB B UNIT"
+    ws2 = wb.create_sheet("Sheet2")
+    ws2.append(["so uma linha"])
+    wb.save(files / "xref.xlsx")
+    wb.close()
+    return Corpus(files, cache=PageCache(tmp_path / "cache"))
+
+
+def test_a_workbook_reads_by_sheet_and_window(tmp_path: Path):
+    """The SOP's sources are xlsx (XREF both sheets, project log column G,
+    Well List). On the real WEBB B round, `texto` returned 0 chars and `ocr`
+    crashed — the whole SOP was blocked, and someone hand-exported sheets to
+    CSV to work around it."""
+    c = _xlsx_corpus(tmp_path)
+    listagem = c.read_page("xref.xlsx", 0, "texto")
+    assert "Sheet1 — 450 linhas, 3 janela(s)" in listagem["text"]
+    assert "Sheet2 — 1 linhas" in listagem["text"]
+
+    got = c.read_page("xref.xlsx", "1:2", "texto")
+    assert got["aba"] == "Sheet1" and got["janelas_total"] == 3
+    assert "WEBB B UNIT" in got["text"]
+    assert got["text"].count("\n") < 200
+
+    primeira = c.read_page("xref.xlsx", 1, "texto")
+    assert "LEASE | UNIT | WELL" in primeira["text"].splitlines()[0]
+    assert c.page_count("xref.xlsx") == 2
+
+
+def test_search_in_a_workbook_returns_the_window_spec(tmp_path: Path):
+    """The result is what the model passes straight back to read_page."""
+    c = _xlsx_corpus(tmp_path)
+    got = c.search("WEBB B")
+    assert got["no_texto"] == [{"documento": "xref.xlsx", "paginas": ["1:2"]}]
+    janela = c.read_page("xref.xlsx", got["no_texto"][0]["paginas"][0],
+                         "texto")
+    assert "WEBB B UNIT" in janela["text"]
+
+
+def test_a_workbook_has_no_ocr_and_says_so_instead_of_crashing(
+        tmp_path: Path):
+    c = _xlsx_corpus(tmp_path)
+    got = c.read_page("xref.xlsx", 1, "ocr")
+    assert got["text"] == ""
+    assert "use modo `texto`" in got["nota"]
+
+
+def test_a_window_that_does_not_exist_is_an_honest_note_not_an_error(
+        tmp_path: Path):
+    c = _xlsx_corpus(tmp_path)
+    got = c.read_page("xref.xlsx", "1:9", "texto")
+    assert got["text"] == "" and "3 janela(s)" in got["nota"]
+    fora = c.read_page("xref.xlsx", 7, "texto")
+    assert "aba 7 nao existe" in fora["nota"]
+
+
+WEBB_B = Path("C:/Users/Renato/PURPLE LAND MGMT/BKV122TX - Project Emirates/"
+              "WEBB B UNIT")
+
+
+@pytest.mark.skipif(not WEBB_B.is_dir(), reason="WEBB B nao esta nesta maquina")
+def test_the_real_webb_b_workbooks_are_searchable_and_readable():
+    """Aceitação do fix: search_corpus('WEBB B') acha as linhas nos XREFs
+    reais e read_page devolve a janela que as contém.
+
+    No cache GLOBAL de propósito: a primeira execução extrai os workbooks
+    (minutos) e toda execução seguinte — do teste e das 300 unidades — lê o
+    que já foi pago."""
+    c = Corpus(WEBB_B, cache=PageCache())
+    got = c.search("WEBB B")
+    hits = {h["documento"]: h["paginas"] for h in got["no_texto"]
+            if h["documento"].lower().endswith((".xlsx", ".xlsm"))}
+    xrefs = [d for d in hits if "xref" in d.lower()]
+    assert xrefs, f"nenhum XREF com WEBB B; achados: {sorted(hits)}"
+    for doc in xrefs:
+        janela = c.read_page(doc, hits[doc][0], "texto")
+        assert "webb b" in janela["text"].lower(), doc
+
+
 def test_the_image_mode_returns_pixels(corpus: Corpus):
     got = corpus.read_page("0220604-024 (walker)/lease.pdf", 1, "imagem")
     assert got["kind"] == "image"

@@ -38,7 +38,10 @@ FERRAMENTAS: list[dict[str, Any]] = [
             "vazio e diz isso — nao escala sozinho. A escolha e sua."),
         "input_schema": {"type": "object", "properties": {
             "documento": {"type": "string"},
-            "pagina": {"type": "integer"},
+            "pagina": {"type": ["integer", "string"],
+                       "description": "1-indexada. Planilhas (.xlsx): 0 lista "
+                                      "as abas; N le a aba N; 'N:J' le a "
+                                      "janela J (200 linhas) da aba N"},
             "modo": {"type": "string", "enum": ["texto", "ocr", "imagem"]}},
             "required": ["documento", "pagina", "modo"]},
     },
@@ -178,7 +181,8 @@ def montar_dispatch(corpus: Any, kb_unidade: Any, kb_global: Any,
     marca seus campos como pendentes."""
 
     def _read_page(documento: str, pagina: Any, modo: str) -> dict[str, Any]:
-        got = corpus.read_page(documento, int(pagina), modo)
+        # Crua: "2:3" é aba 2 janela 3 numa planilha; o corpus interpreta.
+        got = corpus.read_page(documento, pagina, modo)
         try:
             estado.marcar_lido(documento,
                                estado.hash_de(corpus.read_bytes(documento)))
