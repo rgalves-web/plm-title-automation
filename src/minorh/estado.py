@@ -32,6 +32,7 @@ class Estado:
         self.pedidos: list[dict[str, Any]] = data.get("pedidos", [])
         self.perguntas: list[dict[str, Any]] = data.get("perguntas", [])
         self.execucoes: list[dict[str, Any]] = data.get("execucoes", [])
+        self.horas: list[dict[str, Any]] = data.get("horas", [])
 
     @property
     def existe(self) -> bool:
@@ -95,6 +96,17 @@ class Estado:
                 q["status"] = "respondida"
         self.save()
 
+    # --- horas do operador --------------------------------------------------
+    # A medida do negócio (meta: ≤ 1h/unit, doc governante §3). Plumbing puro:
+    # grava o que o operador declarou, soma, nada mais.
+    def registrar_horas(self, horas: float, nota: str = "") -> None:
+        self.horas.append({"horas": float(horas), "nota": nota,
+                           "quando": _now()})
+        self.save()
+
+    def horas_acumuladas(self) -> float:
+        return round(sum(float(h.get("horas") or 0) for h in self.horas), 2)
+
     # --- custo --------------------------------------------------------------
     def registrar_execucao(self, comando: str, uso: dict[str, Any]) -> None:
         self.execucoes.append({"comando": comando, "quando": _now(),
@@ -116,4 +128,5 @@ class Estado:
             "unidade": str(self.unidade), "censo": self.censo,
             "lidos": self.lidos, "pedidos": self.pedidos,
             "perguntas": self.perguntas, "execucoes": self.execucoes,
+            "horas": self.horas,
         }, indent=2, ensure_ascii=False), encoding="utf-8")

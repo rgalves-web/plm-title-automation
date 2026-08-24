@@ -4,7 +4,13 @@
     minorh continuar           só o que é novo em FILES/ + respostas do operador
     minorh estado              os números, sem chamada de modelo
     minorh perguntas           as perguntas, sem chamada de modelo
-    minorh ship                projeção + auditoria de 100% + kit
+    minorh ship                projeção + auditoria de 100% + kit de submissão
+    minorh publicar            congela o kit em <UNIT>/SUBMISSION PLM/
+    minorh horas <h> ["nota"]  registra horas do operador no estado
+
+Teto duro por unidade: US$ 25 (`MINORH_TETO_UNIT_USD`). Ao bater, qualquer
+comando com modelo recusa, reporta o que falta e espera ordem — nunca estoura
+em silêncio (doc governante §3).
 
 Este arquivo não contém juízo de title: monta sessões, injeta ferramentas,
 persiste o que o modelo fez e imprime contagens.
@@ -83,6 +89,32 @@ def _template_de(pasta: Path) -> Path:
     if TEMPLATE.exists():
         return TEMPLATE
     raise SystemExit(f"sem template: nem {proprio} nem o template da casa.")
+
+
+def _teto_unit() -> float:
+    return float(os.environ.get("MINORH_TETO_UNIT_USD", "25"))
+
+
+def _orcamento(ctx: dict[str, Any], teto_comando: float) -> float:
+    """B4: o teto duro por unidade. Devolve o orçamento da sessão =
+    min(teto_do_comando, teto_unit − acumulado); com o teto batido, recusa
+    limpa — imprime o acumulado, o que está pendente e como autorizar."""
+    teto = _teto_unit()
+    gasto = ctx["estado"].custo_acumulado()["custo_usd"]
+    if gasto < teto:
+        return min(teto_comando, round(teto - gasto, 4))
+    e = ctx["estado"]
+    c = ctx["memoria"].contar()
+    pedidos = sum(1 for p in e.pedidos if p["status"] == "aberto")
+    raise SystemExit(
+        f"TETO DA UNIDADE ATINGIDO: ${gasto} acumulado ≥ teto de ${teto} "
+        f"(MINORH_TETO_UNIT_USD).\n"
+        f"O que está pendente: {c['pendentes']} campo(s) pendente(s) de "
+        f"documento · {pedidos} pedido(s) aberto(s) · "
+        f"{len(e.perguntas_abertas())} pergunta(s) aberta(s) · "
+        f"{c['escritos']} escritos · {c['brancos']} brancos.\n"
+        f"Nada foi gasto nesta execução. Para autorizar exceção, o operador "
+        f"roda: MINORH_TETO_UNIT_USD=<novo teto> minorh <comando>")
 
 
 def _numeros(ctx: dict[str, Any]) -> str:
@@ -171,7 +203,8 @@ def cmd_unidade(pasta: Path, client: Any = None) -> None:
         "pare de pedir ferramentas e resuma.")
     print("3/4 sessão do Examinador…", flush=True)
     uso = _sessao(ctx, task, "unidade",
-                  float(os.environ.get("MINORH_TETO_USD", "40")), client)
+                  _orcamento(ctx, float(os.environ.get("MINORH_TETO_USD",
+                                                       "40"))), client)
 
     print("4/4 gravando PEDIDOS.md e PERGUNTAS.md…", flush=True)
     escrever_pedidos(ctx["estado"])
@@ -215,7 +248,8 @@ def cmd_continuar(pasta: Path, client: Any = None) -> None:
     print(f"processando {len(novos)} documento(s) novo(s) e "
           f"{len(respostas)} resposta(s)…", flush=True)
     uso = _sessao(ctx, "\n\n".join(partes), "continuar",
-                  float(os.environ.get("MINORH_TETO_USD", "25")), client)
+                  _orcamento(ctx, float(os.environ.get("MINORH_TETO_USD",
+                                                       "25"))), client)
 
     for r in respostas:
         ctx["estado"].responder(r["id"], r["resposta"])
@@ -243,7 +277,9 @@ def cmd_estado(pasta: Path) -> None:
     print(f"pedidos abertos: "
           f"{sum(1 for p in e.pedidos if p['status'] == 'aberto')} · "
           f"perguntas abertas: {len(e.perguntas_abertas())}")
-    print(f"execuções: {len(e.execucoes)}")
+    print(f"execuções: {len(e.execucoes)} · horas do operador: "
+          f"{e.horas_acumuladas()}h (meta ≤ 1h/unit) · teto da unidade: "
+          f"${_teto_unit()}")
     _imprimir_fecho(ctx, "estado", None)
 
 
@@ -259,6 +295,8 @@ def cmd_perguntas(pasta: Path) -> None:
 
 
 def cmd_ship(pasta: Path, client: Any = None) -> None:
+    from src.knowledge.write_roots import write_scope
+    from src.minorh import kit as k
     from src.minorh import ship as s
     from src.minorh.auditor import Auditor
 
@@ -275,73 +313,126 @@ def cmd_ship(pasta: Path, client: Any = None) -> None:
         if nome in ("read_page", "read_knowledge", "list_documents",
                     "search_corpus")}
 
-    print("1/3 projeção: a memória vira DDR…")
-    ledger, log1 = s.projetar(
-        pasta=pasta, memoria=ctx["memoria"], template=template, modelo=MODELO,
-        dispatch_leitura=dispatch_leitura, client=client)
-    uso_total.input += log1.usage.input
-    uso_total.output += log1.usage.output
-    uso_total.cache_write += log1.usage.cache_write
-    uso_total.cache_read += log1.usage.cache_read
+    def _somar(log: Any) -> None:
+        uso_total.input += log.usage.input
+        uso_total.output += log.usage.output
+        uso_total.cache_write += log.usage.cache_write
+        uso_total.cache_read += log.usage.cache_read
 
-    ship_dir = pasta / PASTA_ESTADO / "ship"
-    ship_dir.mkdir(parents=True, exist_ok=True)
-    ddr = s.write_workbook(ledger, ship_dir / "DDR.xlsx", template=template)
+    # B3: o ship declara seu write-root ANTES de escrever; escrita fora dele
+    # é exceção, não warning.
+    with write_scope(pasta / PASTA_ESTADO, label=f"minorh ship {pasta.name}"):
+        print("1/4 projeção: a memória vira DDR…")
+        ledger, log1 = s.projetar(
+            pasta=pasta, memoria=ctx["memoria"], template=template,
+            modelo=MODELO, dispatch_leitura=dispatch_leitura, client=client,
+            max_cost_usd=_orcamento(ctx, 40.0))
+        _somar(log1)
 
-    print("2/3 auditoria de 100% das células escritas…")
-    auditor = Auditor.escolher()
-    if auditor.limitacao:
-        print(f"   {auditor.limitacao}")
-    vereditos, contagem = s.auditar_tudo(
-        unidade=pasta.name, workbook=ddr, ledger=ledger,
-        corpus=ctx["corpus"], auditor=auditor)
-    rodadas = 1
-    reprovadas = s.reprovadas_de(vereditos)
-    historico_rodada_1 = list(reprovadas)
-    print(f"   rodada 1: {contagem['auditadas']} auditadas, "
-          f"{len(reprovadas)} reprovadas"
-          + (": " + ", ".join(v.celula for v in reprovadas)
-             if reprovadas else ""))
-
-    if reprovadas:
-        marcador = len(ledger.cells)
-        log2 = s.corrigir(pasta=pasta, ledger=ledger, reprovadas=reprovadas,
-                          modelo=MODELO, dispatch_leitura=dispatch_leitura,
-                          client=client)
-        uso_total.input += log2.usage.input
-        uso_total.output += log2.usage.output
-        uso_total.cache_write += log2.usage.cache_write
-        uso_total.cache_read += log2.usage.cache_read
+        ship_dir = pasta / PASTA_ESTADO / "ship"
+        ship_dir.mkdir(parents=True, exist_ok=True)
         ddr = s.write_workbook(ledger, ship_dir / "DDR.xlsx",
                                template=template)
-        alvo = ({v.celula for v in reprovadas}
-                | {f"{c.aba}!{c.celula}" for c in ledger.cells[marcador:]})
-        segunda, _ = s.auditar_tudo(
+
+        print("2/4 auditoria de 100% das células escritas…")
+        auditor = Auditor.escolher()
+        if auditor.limitacao:
+            print(f"   {auditor.limitacao}")
+        vereditos, contagem = s.auditar_tudo(
             unidade=pasta.name, workbook=ddr, ledger=ledger,
-            corpus=ctx["corpus"], auditor=auditor, apenas=alvo)
-        rodadas = 2
-        por_celula = {v.celula: v for v in vereditos}
-        for v in segunda:
-            por_celula[v.celula] = v
-        vereditos = list(por_celula.values())
-        ainda = s.reprovadas_de(segunda)
-        print(f"   rodada 2: {len(segunda)} reauditadas, "
-              f"{len(ainda)} seguem reprovadas")
-        if ainda:
-            removidas = s.aplicar_regra_de_embarque(ledger, ainda)
+            corpus=ctx["corpus"], auditor=auditor)
+        rodadas = 1
+        reprovadas = s.reprovadas_de(vereditos)
+        historico_rodada_1 = list(reprovadas)
+        print(f"   rodada 1: {contagem['auditadas']} auditadas, "
+              f"{len(reprovadas)} reprovadas"
+              + (": " + ", ".join(v.celula for v in reprovadas)
+                 if reprovadas else ""))
+
+        if reprovadas:
+            marcador = len(ledger.cells)
+            log2 = s.corrigir(pasta=pasta, ledger=ledger,
+                              reprovadas=reprovadas, modelo=MODELO,
+                              dispatch_leitura=dispatch_leitura,
+                              template=template, client=client,
+                              max_cost_usd=_orcamento(ctx, 20.0))
+            _somar(log2)
             ddr = s.write_workbook(ledger, ship_dir / "DDR.xlsx",
                                    template=template)
-            print(f"   REGRA DE EMBARQUE: {len(removidas)} célula(s) "
-                  f"rebaixada(s) a branco declarado: {', '.join(removidas)}")
+            alvo = ({v.celula for v in reprovadas}
+                    | {f"{c.aba}!{c.celula}" for c in ledger.cells[marcador:]})
+            segunda, _ = s.auditar_tudo(
+                unidade=pasta.name, workbook=ddr, ledger=ledger,
+                corpus=ctx["corpus"], auditor=auditor, apenas=alvo)
+            rodadas = 2
+            por_celula = {v.celula: v for v in vereditos}
+            for v in segunda:
+                por_celula[v.celula] = v
+            vereditos = list(por_celula.values())
+            ainda = s.reprovadas_de(segunda)
+            print(f"   rodada 2: {len(segunda)} reauditadas, "
+                  f"{len(ainda)} seguem reprovadas")
+            if ainda:
+                removidas = s.aplicar_regra_de_embarque(ledger, ainda)
+                ddr = s.write_workbook(ledger, ship_dir / "DDR.xlsx",
+                                       template=template)
+                print(f"   REGRA DE EMBARQUE: {len(removidas)} célula(s) "
+                      f"rebaixada(s) a branco declarado: "
+                      f"{', '.join(removidas)}")
 
-    print("3/3 kit…")
-    caminhos = s.escrever_kit(
-        pasta=pasta, ledger=ledger, template=template, vereditos=vereditos,
-        contagem=contagem, auditor=auditor, memoria=ctx["memoria"],
-        estado=ctx["estado"], rodadas_auditoria=rodadas,
-        historico_rodada_1=historico_rodada_1)
-    for nome, caminho in caminhos.items():
-        print(f"   {nome}: {caminho}")
+        print("3/4 relatórios…")
+        caminhos = s.escrever_kit(
+            pasta=pasta, ledger=ledger, template=template,
+            vereditos=vereditos, contagem=contagem, auditor=auditor,
+            memoria=ctx["memoria"], estado=ctx["estado"],
+            rodadas_auditoria=rodadas,
+            historico_rodada_1=historico_rodada_1)
+        for nome, caminho in caminhos.items():
+            print(f"   {nome}: {caminho}")
+
+        print("4/4 kit de submissão (alocação é do modelo)…")
+        # Checklist: célula alguma afirma o que a rodada não computou — os
+        # Yes/No e Notes são escritos pelo modelo a partir da memória e
+        # auditados como qualquer célula. Sem template na unidade, o kit
+        # declara a ausência (nunca embarca checklist em branco).
+        checklist_final = None
+        checklist_tpl = pasta / "Phase I - Checklist.xlsx"
+        if checklist_tpl.exists():
+            print("   checklist: projeção da memória e auditoria…")
+            led_ck, log_ck = s.projetar(
+                pasta=pasta, memoria=ctx["memoria"], template=checklist_tpl,
+                modelo=MODELO, dispatch_leitura=dispatch_leitura,
+                client=client, max_cost_usd=_orcamento(ctx, 10.0))
+            _somar(log_ck)
+            checklist_final = s.write_workbook(
+                led_ck, ship_dir / "Phase I - Checklist.xlsx",
+                template=checklist_tpl)
+            ck_vereditos, _ck = s.auditar_tudo(
+                unidade=pasta.name, workbook=checklist_final, ledger=led_ck,
+                corpus=ctx["corpus"], auditor=auditor)
+            ck_reprovadas = s.reprovadas_de(ck_vereditos)
+            if ck_reprovadas:
+                removidas = s.aplicar_regra_de_embarque(led_ck, ck_reprovadas)
+                checklist_final = s.write_workbook(
+                    led_ck, ship_dir / "Phase I - Checklist.xlsx",
+                    template=checklist_tpl)
+                print(f"   checklist: {len(removidas)} célula(s) "
+                      f"reprovada(s) rebaixada(s) a branco declarado")
+
+        alocacao, log_kit = k.alocar(
+            pasta=pasta, corpus=ctx["corpus"], memoria=ctx["memoria"],
+            modelo=MODELO, dispatch_leitura=dispatch_leitura, client=client,
+            max_cost_usd=_orcamento(ctx, 10.0))
+        _somar(log_kit)
+        relatorio_kit = k.montar(
+            pasta=pasta, corpus=ctx["corpus"], alocacao=alocacao, ddr=ddr,
+            checklist=checklist_final)
+        print(f"   kit: {relatorio_kit['raiz']}")
+        print(f"   copiados (md5 conferido): "
+              f"{relatorio_kit['md5_roundtrip']} · fora do kit: "
+              f"{len(relatorio_kit['fora_do_kit'])} · sem decisão: "
+              f"{len(relatorio_kit['sem_decisao'])}")
+        print(f"   checklist: {relatorio_kit['checklist']}")
 
     uso = uso_total.to_dict(MODELO)
     uso_auditor = auditor.uso.to_dict(auditor.modelo)
@@ -352,6 +443,28 @@ def cmd_ship(pasta: Path, client: Any = None) -> None:
     print(f"   auditor ({auditor.provedor}/{auditor.modelo}): "
           f"{uso_auditor}")
     _imprimir_fecho(ctx, "ship", uso)
+
+
+def cmd_publicar(pasta: Path) -> None:
+    from src.minorh import kit as k
+
+    ctx = _abrir(pasta)
+    if not ctx["estado"].existe:
+        raise SystemExit(f"{pasta} nunca foi aberta — use `minorh unidade`.")
+    got = k.publicar(pasta)
+    print(f"publicado: {got['publicado_em']}")
+    print(f"round-trip md5: {got['md5_roundtrip']}")
+    _imprimir_fecho(ctx, "publicar", None)
+
+
+def cmd_horas(pasta: Path, horas: float, nota: str = "") -> None:
+    ctx = _abrir(pasta)
+    if not ctx["estado"].existe:
+        raise SystemExit(f"{pasta} nunca foi aberta — use `minorh unidade`.")
+    ctx["estado"].registrar_horas(horas, nota)
+    print(f"registrado: {horas}h{f' — {nota}' if nota else ''}")
+    print(f"horas acumuladas da unidade: "
+          f"{ctx['estado'].horas_acumuladas()}h")
 
 
 # --------------------------------------------------------------------------
@@ -385,7 +498,18 @@ def main(argv: list[str] | None = None) -> None:
         cmd_perguntas(_pasta_de(resto))
     elif comando == "ship":
         cmd_ship(_pasta_de(resto))
+    elif comando == "publicar":
+        cmd_publicar(_pasta_de(resto))
+    elif comando == "horas":
+        if not resto:
+            raise SystemExit('uso: minorh horas <horas> ["nota"] ["<pasta>"]')
+        try:
+            horas = float(resto[0])
+        except ValueError:
+            raise SystemExit(f"horas deve ser número, veio {resto[0]!r}")
+        nota = resto[1] if len(resto) > 1 else ""
+        cmd_horas(_pasta_de(resto[2:]), horas, nota)
     else:
         raise SystemExit(f"comando desconhecido: {comando!r}. "
                          f"Comandos: unidade, continuar, estado, perguntas, "
-                         f"ship.")
+                         f"ship, publicar, horas.")

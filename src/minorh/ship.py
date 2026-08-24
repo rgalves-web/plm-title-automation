@@ -92,6 +92,33 @@ def _mapa_template(template: Path) -> str:
     return template_map(template)
 
 
+def _dispatch_escrita(ledger: Ledger, template: Path) -> dict[str, Any]:
+    """write_cell/record_blank com a caneta protegida (B1).
+
+    Célula de fórmula do template → erro nomeado devolvido AO MODELO pelo
+    laço; a escrita não vira branco silencioso, o modelo redecide. Faixa de
+    record_blank passa — o write_workbook preserva as fórmulas dentro dela."""
+    from src.examinador.formulas import erro_celula_de_formula, formula_cells
+
+    protegidas = set(formula_cells(template))
+
+    def _checar(aba: str, celula: str) -> None:
+        coord = str(celula).upper()
+        if ":" not in coord and (aba, coord) in protegidas:
+            raise ValueError(erro_celula_de_formula(aba, coord))
+
+    def _write_cell(aba, celula, valor, documento, pagina, trecho, confianca):
+        _checar(aba, celula)
+        return ledger.write_cell(aba, celula, valor, documento, pagina,
+                                 trecho, confianca)
+
+    def _record_blank(aba, celula, motivo, dono):
+        _checar(aba, celula)
+        return ledger.record_blank(aba, celula, motivo, dono)
+
+    return {"write_cell": _write_cell, "record_blank": _record_blank}
+
+
 def projetar(*, pasta: Path, memoria: Any, template: Path, modelo: str,
              dispatch_leitura: dict[str, Any], client: Any = None,
              max_cost_usd: float = 40.0) -> tuple[Ledger, Any]:
@@ -99,11 +126,7 @@ def projetar(*, pasta: Path, memoria: Any, template: Path, modelo: str,
     ledger = Ledger()
 
     dispatch = dict(dispatch_leitura)
-    dispatch["write_cell"] = lambda aba, celula, valor, documento, pagina, \
-        trecho, confianca: ledger.write_cell(aba, celula, valor, documento,
-                                             pagina, trecho, confianca)
-    dispatch["record_blank"] = lambda aba, celula, motivo, dono: \
-        ledger.record_blank(aba, celula, motivo, dono)
+    dispatch.update(_dispatch_escrita(ledger, template))
 
     ferramentas_leitura = [t for t in _leitura_schemas()
                            if t["name"] in dispatch_leitura]
@@ -202,15 +225,11 @@ def reprovadas_de(vereditos: list[Veredito]) -> list[Veredito]:
 
 
 def corrigir(*, pasta: Path, ledger: Ledger, reprovadas: list[Veredito],
-             modelo: str, dispatch_leitura: dict[str, Any],
+             modelo: str, dispatch_leitura: dict[str, Any], template: Path,
              client: Any = None, max_cost_usd: float = 20.0) -> Any:
     """Sessão 2: as reprovadas voltam ao Examinador, com o motivo."""
     dispatch = dict(dispatch_leitura)
-    dispatch["write_cell"] = lambda aba, celula, valor, documento, pagina, \
-        trecho, confianca: ledger.write_cell(aba, celula, valor, documento,
-                                             pagina, trecho, confianca)
-    dispatch["record_blank"] = lambda aba, celula, motivo, dono: \
-        ledger.record_blank(aba, celula, motivo, dono)
+    dispatch.update(_dispatch_escrita(ledger, template))
     texto = "\n".join(
         f"- {v.celula} = {v.valor!r} (citou {v.citacao}) — REPROVADA: "
         f"{v.motivo}" for v in reprovadas)
@@ -245,6 +264,9 @@ def escrever_kit(*, pasta: Path, ledger: Ledger, template: Path,
                  rodadas_auditoria: int,
                  historico_rodada_1: list[Veredito] | None = None
                  ) -> dict[str, Path]:
+    from src.examinador.formulas import formulas_hash
+    from src.knowledge.write_roots import record_write
+
     ship_dir = pasta / "_minorh" / "ship"
     ship_dir.mkdir(parents=True, exist_ok=True)
 
@@ -252,10 +274,16 @@ def escrever_kit(*, pasta: Path, ledger: Ledger, template: Path,
 
     aprovadas = [v for v in vereditos if v.aprovada]
     reprovadas = reprovadas_de(vereditos)
+    hash_template = formulas_hash(template)
+    hash_ddr = formulas_hash(ddr)
     relatorio = {
         "auditor": {"provedor": auditor.provedor, "modelo": auditor.modelo,
                     "limitacao": auditor.limitacao or None,
                     "tokens": auditor.uso.to_dict(auditor.modelo)},
+        # B2: a prova de que a caneta não tocou fórmula — write_workbook já
+        # aborta na divergência; aqui o hash entra no relatório do kit.
+        "formulas": {"hash_template": hash_template, "hash_ddr": hash_ddr,
+                     "identico": hash_ddr == hash_template},
         "cobertura": {**contagem, "amostragem": "nenhuma — 100% das escritas",
                       "rodadas": rodadas_auditoria},
         "resultado": {"aprovadas": len(aprovadas),
@@ -267,7 +295,7 @@ def escrever_kit(*, pasta: Path, ledger: Ledger, template: Path,
                                    for v in (historico_rodada_1 or [])],
         "celulas": [v.to_dict() for v in vereditos],
     }
-    rel_path = ship_dir / "AUDITORIA.json"
+    rel_path = Path(record_write(ship_dir / "AUDITORIA.json"))
     rel_path.write_text(json.dumps(relatorio, indent=2, ensure_ascii=False),
                         encoding="utf-8")
 
@@ -293,7 +321,7 @@ def escrever_kit(*, pasta: Path, ledger: Ledger, template: Path,
                               f"{campo.pedido}")
     if auditor.limitacao:
         linhas += ["", "## Limitacao da auditoria", "", auditor.limitacao]
-    man_path = ship_dir / "MANIFESTO_LACUNAS.md"
+    man_path = Path(record_write(ship_dir / "MANIFESTO_LACUNAS.md"))
     man_path.write_text("\n".join(linhas), encoding="utf-8")
 
     return {"ddr": ddr, "auditoria": rel_path, "manifesto": man_path}

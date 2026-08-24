@@ -51,14 +51,36 @@ def is_quarantined(path: Any) -> bool:
 
 
 @contextmanager
-def quarantined(*, extra_patterns: tuple[str, ...] = ()) -> Iterator[list[str]]:
-    """Fail loudly if the block opens an answer sheet. Yields the attempt log."""
+def quarantined(*, extra_patterns: tuple[str, ...] = (),
+                allow_roots: tuple[str | Path, ...] = ()
+                ) -> Iterator[list[str]]:
+    """Fail loudly if the block opens an answer sheet. Yields the attempt log.
+
+    `allow_roots` (conserto de 23/08, C2): quarantined is an IDENTITY, not a
+    name. The delivered kit someone handed in by hand is the answer sheet; the
+    kit the run itself is assembling under its own write-roots merely shares
+    the folder name `1. Landman Submitted`. A path inside a declared root is
+    the run's own work and stays readable; everything else that matches the
+    patterns is gabarito and raises."""
     patterns = _PATTERNS + tuple(re.compile(p, re.IGNORECASE)
                                  for p in extra_patterns)
+    roots = tuple(Path(r).resolve() for r in allow_roots)
 
     def blocked(path: Any) -> bool:
         text = str(path).replace("\\", "/")
-        return any(p.search(text) for p in patterns)
+        if not any(p.search(text) for p in patterns):
+            return False
+        try:
+            resolved = Path(path).resolve()
+        except (OSError, ValueError):
+            return True
+        for root in roots:
+            try:
+                resolved.relative_to(root)
+                return False
+            except ValueError:
+                continue
+        return True
 
     attempts: list[str] = []
     real_open = builtins.open

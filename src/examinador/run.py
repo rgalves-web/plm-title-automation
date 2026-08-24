@@ -173,18 +173,30 @@ def write_workbook(ledger: Ledger, target: str | Path,
                    template: str | Path | None = None) -> Path:
     """The template, plus what the Examiner wrote, minus what it blanked.
 
-    Nothing else happens here. A cell the model never addressed keeps whatever
-    the template had — including another unit's sample data. That is not a
-    tolerated bug, it is the measurement: the old pipeline had a gate for it,
-    and this round asks whether judgement covers what the gate covered."""
-    target = Path(target)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(Path(template) if template is not None else TEMPLATE,
-                    target)
+    A cell the model never addressed keeps whatever the template had —
+    including another unit's sample data. That is not a tolerated bug, it is
+    the measurement: the old pipeline had a gate for it, and this round asks
+    whether judgement covers what the gate covered.
 
+    The one thing this function refuses is touching a template FORMULA cell
+    (S02, 13/08: never hard-key the blue cells). That is a property of the pen,
+    not title judgement — the live session already returned the named error to
+    the model; this layer keeps the bytes safe even for a stale ledger, and
+    proves it by comparing the formula-set hash of the saved file against the
+    template's."""
+    from src.examinador.formulas import (FormulaAlterada, formula_cells,
+                                         formulas_hash)
     from src.examinador.ledger import BlankRecord
+    from src.knowledge.write_roots import record_write
+
+    target = Path(record_write(target))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    template_path = Path(template) if template is not None else TEMPLATE
+    shutil.copyfile(template_path, target)
+    protegidas = set(formula_cells(template_path))
 
     unplaced: list[str] = []
+    recusadas: list[str] = []
     wb = openpyxl.load_workbook(target)
     try:
         # In the order the model acted. It cleared surplus template rows and
@@ -194,15 +206,24 @@ def write_workbook(ledger: Ledger, target: str | Path,
             if action.aba not in wb.sheetnames:
                 wb.create_sheet(action.aba)
             targets = _targets(wb[action.aba], action.celula)
+            vivos = [c for c in targets
+                     if (action.aba, c.coordinate) not in protegidas]
+            if len(vivos) < len(targets):
+                recusadas.append(f"{action.aba}!{action.celula} "
+                                 f"({len(targets) - len(vivos)} celula(s) de "
+                                 f"formula preservada(s))")
             if isinstance(action, BlankRecord):
                 # A range IS a legitimate way to say "blank all of this" — the
                 # model cleared two whole sample tabs that way. Honouring it is
                 # execution; refusing it would be the code overruling the model.
-                for cell in targets:
+                # Formula cells inside the range stay: protecting bytes.
+                for cell in vivos:
                     cell.value = None
                 continue
-            if len(targets) == 1:
-                targets[0].value = action.valor
+            if not vivos:
+                continue
+            if len(vivos) == 1 and len(targets) == 1:
+                vivos[0].value = action.valor
             else:
                 # One value does not become forty by being addressed to a
                 # range. Spreading it would be the code inventing forty facts
@@ -211,23 +232,46 @@ def write_workbook(ledger: Ledger, target: str | Path,
                                 f"({len(targets)} celulas)")
         # The trail ships INSIDE the artefact: a workbook whose sources live in
         # a side file is not auditable alone, and it is the workbook that goes
-        # to the client.
+        # to the client. `SUPERSEDIDA POR` marks an entry a later action on the
+        # same cell replaced (handover 13/08) — annotation, history kept.
+        ultima_por_celula: dict[tuple[str, str], int] = {}
+        for action in ledger.actions():
+            ultima_por_celula[(action.aba, action.celula)] = action.seq
+
+        def _supersedida(action: Any) -> str:
+            dono = ultima_por_celula.get((action.aba, action.celula))
+            return (f"supersedida_por: {dono}"
+                    if dono is not None and action.seq and dono != action.seq
+                    else "")
+
         trail = wb.create_sheet("DD_Audit_Trail")
         trail.append(["ABA", "CELULA", "VALOR", "DOCUMENTO", "PAGINA",
-                      "TRECHO", "CONFIANCA", "MOTIVO SE BRANCO", "DONO"])
+                      "TRECHO", "CONFIANCA", "MOTIVO SE BRANCO", "DONO",
+                      "SUPERSEDIDA POR"])
         for cell in ledger.cells:
             trail.append([cell.aba, cell.celula, str(cell.valor),
                           cell.citacao.documento, str(cell.citacao.pagina),
-                          cell.citacao.trecho, cell.confianca, "", ""])
+                          cell.citacao.trecho, cell.confianca, "", "",
+                          _supersedida(cell)])
         for blank in ledger.blanks:
             trail.append([blank.aba, blank.celula, "", "", "", "", "",
-                          blank.motivo, blank.dono])
+                          blank.motivo, blank.dono, _supersedida(blank)])
         wb.save(target)
     finally:
         wb.close()
     if unplaced:
         (Path(target).parent / "escritas_nao_colocadas.json").write_text(
             json.dumps(unplaced, indent=2, ensure_ascii=False), encoding="utf-8")
+    if recusadas:
+        (Path(target).parent / "formulas_preservadas.json").write_text(
+            json.dumps(recusadas, indent=2, ensure_ascii=False),
+            encoding="utf-8")
+    hash_template = formulas_hash(template_path)
+    hash_saida = formulas_hash(target)
+    if hash_saida != hash_template:
+        raise FormulaAlterada(
+            f"conjunto de formulas divergiu do template apos o save: "
+            f"{hash_saida} != {hash_template} — o ship aborta (VAL-003).")
     return target
 
 
