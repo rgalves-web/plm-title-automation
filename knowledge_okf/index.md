@@ -37,6 +37,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [censo-template-sintetico-6-abas-formula-e-linha-de-exemplo](censo-template-sintetico-6-abas-formula-e-linha-de-exemplo.md) `layout` — ## Como contar o denominador do template sintético de 6 abas
 - [custo-corpus-sintetico-6-docs-legibilidade-total](custo-corpus-sintetico-6-docs-legibilidade-total.md) `custo` — ## Corpus sintetico: camada de texto em 100% dos documentos — nunca use `ocr`/`imagem` aqui
 - [custo-legibilidade-do-corpus-montague-eog](custo-legibilidade-do-corpus-montague-eog.md) `custo` — ## O que da para ler neste corpus, e por qual modo (medido)
+- [custo-search-corpus-em-dump-multiunidade](custo-search-corpus-em-dump-multiunidade.md) `custo` — ## `search_corpus` em corpus-dump: o custo está na lista de NÃO pesquisados
 - [custo-xlsx-ilegivel-pelas-ferramentas](custo-xlsx-ilegivel-pelas-ferramentas.md) `custo` — ## .xlsx nao e legivel por nenhum dos tres modos — nao gaste chamadas
 - [ddr_template_structure: Agreements](ddr-template-structure-agreements.md) `layout` — - **sample_stripped**: 36
 - [ddr_template_structure: Disclaimer](ddr-template-structure-disclaimer.md) `layout` — - **sample_stripped**: 0
@@ -74,6 +75,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [exclusion_reasons: pre_cert_date](exclusion-reasons-pre-cert-date.md) `regra` — - **label**: Predates the controlling certification date
 - [exclusion_reasons: trade_de_terceiro](exclusion-reasons-trade-de-terceiro.md) `regra` — - **label**: Third-party trade
 - [exhibit-a-da-dpu-vs-recital-recorded-do-lease](exhibit-a-da-dpu-vs-recital-recorded-do-lease.md) `regra` — ## Sempre cotejar o Exhibit "A" da DPU com o recital RECORDED de cada lease
+- [formulario-eog-affidavit-de-extensao-de-prazo-primario](formulario-eog-affidavit-de-extensao-de-prazo-primario.md) `formulario` — ## AFFIDAVIT (EOG) de extensão de prazo primário — formulário multi-lease
 - [formulario-eog-declaration-of-pooled-unit-montague](formulario-eog-declaration-of-pooled-unit-montague.md) `formulario` — ## Declaration of Pooled Unit da EOG Resources, Inc. — Montague County (forma padrao)
 - [identity_keys: instrument](identity-keys-instrument.md) `entidade` — - **required**:
 - [identity_keys: lease](identity-keys-lease.md) `entidade` — - **required**:
@@ -83,6 +85,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [identity_keys: unit_tract](identity-keys-unit-tract.md) `entidade` — - **required**:
 - [identity_keys: unit](identity-keys-unit.md) `entidade` — - **required**:
 - [identity_keys: well](identity-keys-well.md) `entidade` — - **required**:
+- [layout-workbooks-bkv122tx-well-list-project-log-e-xref](layout-workbooks-bkv122tx-well-list-project-log-e-xref.md) `layout` — ## Workbooks do projeto BKV122TX — SÃO LEGÍVEIS por `read_page` com `pagina = "N"` ou `"N:J"`
 - [lease mineral schedule recording multi condado](lease-mineral-schedule-recording-multi-condado.md) `regra` — ## Coluna RECORDING da Lease & Mineral Schedule é multi-condado
 - [manual 10.3 categorias de missing files](manual-10-3-categorias-de-missing-files.md) `regra-cliente` — ## Missing Files além de lease — categorias e impacto mínimo
 - [manual 10.4 ciclo de vida missing files](manual-10-4-ciclo-de-vida-missing-files.md) `regra-cliente` — ## Ciclo de vida de um Missing Item
@@ -113,9 +116,12 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [precedente client bkv corp](precedente-client-bkv-corp.md) `veredito` — Summary → Client = **BKV Corp.** — a Rodada 1 perguntou; o Manual (cap. 11.2) e o SOP §9 respondem. Aplicar se
 - [precedente disclaimer abc llc vira bkv corp](precedente-disclaimer-abc-llc-vira-bkv-corp.md) `veredito` — Aba Disclaimer: substituir `ABC, LLC` por **`BKV Corp.`** (Manual cap. 11.3; SOP §9).
 - [precedente-divergencia-de-referencia-de-registro-resolve-se-no-cartorio](precedente-divergencia-de-referencia-de-registro-resolve-se-no-cartorio.md) `veredito` — ## VEREDITO DO OPERADOR (P1) — divergência de book/page: nenhuma fonte do maço prevalece; resolve-se no regist
+- [precedente-lessor-igual-numero-de-lease-diferente-nao-funde](precedente-lessor-igual-numero-de-lease-diferente-nao-funde.md) `veredito` — ## VEREDITO (operador, 24/08/2026) — mesmo lessor + número de lease que não casa = leases DISTINTOS até prova 
 - [precedente memo only missing lease em potential defects](precedente-memo-only-missing-lease-em-potential-defects.md) `veredito` — Lease memo-only: preencher só o que o memorandum comprova; royalty/termos materiais em branco; o full OGL entr
 - [precedente missing documents no summary](precedente-missing-documents-no-summary.md) `veredito` — O Summary carrega um bloco **MISSING DOCUMENTS espelhando o Missing Files log** — ausências materiais aparecem
 - [precedente operator eog ou project log](precedente-operator-eog-ou-project-log.md) `veredito` — Operator = **EOG Resources, Inc.**, salvo o project log (`Well List – Prelim AV%`) indicar outro operador para
+- [precedente-recording-manuscrito-fora-de-sequencia-fica-branco](precedente-recording-manuscrito-fora-de-sequencia-fica-branco.md) `veredito` — ## VEREDITO (operador, 24/08/2026) — Vol/Page MANUSCRITO sobre campo impresso no Exhibit "A": recording fica B
+- [precedente-template-da-casa-chega-preenchido-com-outra-unidade](precedente-template-da-casa-chega-preenchido-com-outra-unidade.md) `veredito` — ## VEREDITO (operador, 24/08/2026) — template mapeado que descreve OUTRO ativo = dados de exemplo, não troca d
 - [project log aba missing files formato](project-log-aba-missing-files-formato.md) `regra` — ## Aba Missing Files do Project Log — formato de escrita
 - [protocolo captura viewer cartorio](protocolo-captura-viewer-cartorio.md) `regra` — ## Protocolo de captura do viewer do cartório
 - [resolver_identity_by_key/fixture](resolver-identity-by-key-fixture.md) `regra` — - **lesson_id**: resolver_identity_by_key

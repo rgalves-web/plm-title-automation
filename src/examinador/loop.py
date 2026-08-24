@@ -18,6 +18,15 @@ from pathlib import Path
 from typing import Any, Callable
 
 MAX_TOKENS = 8000
+# Cortes seguidos de max_tokens sem conteúdo aproveitável antes de declarar a
+# rodada incompleta.
+MAX_CORTES = 3
+
+
+def _uso_do_turno(message: Any, model: str) -> dict[str, Any]:
+    uso = Usage()
+    uso.add(message.usage)
+    return uso.to_dict(model)
 
 # Public list prices, USD per million tokens. Kept in one place and declared,
 # not buried: if a rate is wrong every cost number below is wrong with it.
@@ -151,6 +160,7 @@ def run_loop(*, system: str, task: str, tools: list[dict[str, Any]],
     finished one would poison the measurement this whole round exists for."""
     client = client or _client()
     log = RunLog(model=model)
+    cortes = 0
     # The assignment carries the whole template map — 17k tokens that never
     # change. It is pinned in the cache; the rolling breakpoint below then
     # covers everything the conversation has accumulated since.
@@ -170,6 +180,38 @@ def run_loop(*, system: str, task: str, tools: list[dict[str, Any]],
         text = "".join(b.text for b in message.content
                        if getattr(b, "type", "") == "text")
         uses = [b for b in message.content if getattr(b, "type", "") == "tool_use"]
+
+        # Resposta cortada no teto de saída SEM nenhuma chamada aproveitável:
+        # o SDK descarta o tool_use incompleto e o conteúdo chega vazio. Tratar
+        # isso como "o modelo parou" embarcou um DDR vazio no replay da Josh B
+        # (24/08). O corte vira instrução de refazer em passos menores — com
+        # teto próprio, para um modelo que só produz cortes não rodar à toa.
+        if (getattr(message, "stop_reason", "") == "max_tokens"
+                and not uses and not text.strip()):
+            cortes += 1
+            registro = TurnRecord(
+                turn=turn, text=f"[resposta cortada em {MAX_TOKENS} tokens "
+                                f"sem conteudo aproveitavel — corte "
+                                f"{cortes}/{MAX_CORTES}]")
+            registro.usage = _uso_do_turno(message, model)
+            log.turns.append(registro)
+            if on_turn:
+                on_turn(registro)
+            if cortes >= MAX_CORTES:
+                log.stop_reason = (f"{MAX_CORTES} respostas seguidas cortadas "
+                                   f"no teto de {MAX_TOKENS} tokens — "
+                                   f"RODADA INCOMPLETA")
+                break
+            messages.append({"role": "user", "content": [{
+                "type": "text",
+                "text": ("Sua ultima resposta estourou o teto de "
+                         f"{MAX_TOKENS} tokens de saida e chegou vazia — "
+                         "NADA foi aplicado. Refaca em passos menores: "
+                         "poucas chamadas de ferramenta por vez, trechos "
+                         "curtos, sem listas gigantes num turno so. "
+                         "Continue de onde parou.")}]})
+            continue
+        cortes = 0
         # The cache columns are most of the bill in a long loop; a per-turn line
         # without them reads as an order of magnitude cheaper than the run is.
         turn_usage = Usage()

@@ -458,3 +458,48 @@ def test_nao_alocar_por_prefixo_de_pasta(tmp_path: Path):
     assert len(alocacao["fora_do_kit"]) == 2      # a pasta inteira, expandida
     assert alocacao["sem_decisao"] == []
     assert sum(1 for t in log.turns for c in t.calls if c["erro"]) == 1
+
+
+# --- corte de max_tokens no laço ---------------------------------------------
+
+@dataclass
+class _MsgCortavel:
+    content: list[Any]
+    stop_reason: str = "end_turn"
+    usage: _Uso = field(default_factory=_Uso)
+
+
+class _ClientCortavel:
+    def __init__(self, roteiro):
+        self.roteiro = roteiro
+        self.messages = self
+
+    def create(self, **kw):
+        return self.roteiro.pop(0)
+
+
+def test_corte_de_max_tokens_vira_instrucao_e_o_laco_segue():
+    from src.examinador.loop import run_loop
+    visto = []
+    client = _ClientCortavel([
+        _MsgCortavel(content=[], stop_reason="max_tokens"),
+        _MsgCortavel(content=[_Use("f", {"x": 1})], stop_reason="tool_use"),
+        _MsgCortavel(content=[_Texto("fim")]),
+    ])
+    log, _ = run_loop(system="s", task="t",
+                      tools=[{"name": "f", "input_schema": {}}],
+                      dispatch={"f": lambda x: visto.append(x) or {"ok": x}},
+                      model="claude-opus-5", max_turns=10, client=client)
+    assert visto == [1]                          # a chamada pós-corte rodou
+    assert log.stop_reason == "o modelo parou de pedir ferramentas"
+    assert "[resposta cortada" in log.turns[0].text
+
+
+def test_so_cortes_declara_rodada_incompleta():
+    from src.examinador.loop import MAX_CORTES, run_loop
+    client = _ClientCortavel([
+        _MsgCortavel(content=[], stop_reason="max_tokens")
+        for _ in range(MAX_CORTES)])
+    log, _ = run_loop(system="s", task="t", tools=[], dispatch={},
+                      model="claude-opus-5", max_turns=10, client=client)
+    assert "cortadas" in log.stop_reason and "INCOMPLETA" in log.stop_reason
