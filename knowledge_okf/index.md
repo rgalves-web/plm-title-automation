@@ -55,6 +55,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [entities: unit_tract](entities-unit-tract.md) `entidade` — - **label**: Unit Tract
 - [entities: unit](entities-unit.md) `entidade` — - **label**: Unit
 - [entities: well](entities-well.md) `entidade` — - **label**: Well
+- [escopo-cruzado-quando-xref-e-schedule-nao-estao-no-corpus](escopo-cruzado-quando-xref-e-schedule-nao-estao-no-corpus.md) `regra` — ## Unidade sem XREF e sem Lease & Mineral Schedule: o escopo cruzado NÃO se fecha — declare isso
 - [exclusion_reasons: captura_de_tela](exclusion-reasons-captura-de-tela.md) `regra` — - **label**: Screen capture — evidence of a document, not the document
 - [exclusion_reasons: confirmar_no_cartorio](exclusion-reasons-confirmar-no-cartorio.md) `regra` — - **label**: Confirm at the courthouse
 - [exclusion_reasons: doc_nao_localizado](exclusion-reasons-doc-nao-localizado.md) `regra` — - **label**: Document not located
@@ -126,5 +127,6 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [sources: third_party_request](sources-third-party-request.md) `regra` — - **label**: Third party (Clerk, Seller, examining attorney)
 - [submission-example-e-pacote-modelo-knox-nao-e-evidencia](submission-example-e-pacote-modelo-knox-nao-e-evidencia.md) `regra` — ## A pasta `submission example/` e material de formato, nao registro da unidade — e vem com 0 bytes
 - [template-dados-de-exemplo-a-e-carroll](template-dados-de-exemplo-a-e-carroll.md) `regra` — ## O template da casa chega preenchido com dados de OUTRA unidade
+- [template-ddr-sintetico-semeado-com-linha-de-outra-unidade](template-ddr-sintetico-semeado-com-linha-de-outra-unidade.md) `formulario` — ## O template do DDR chega com a linha 2 da aba `Lease Review` SEMEADA
 - [transmittal_cover_is_not_the_document/fixture](transmittal-cover-is-not-the-document-fixture.md) `regra` — - **lesson_id**: transmittal_cover_is_not_the_document
 - [unidade-josh-b-unit-montague](unidade-josh-b-unit-montague.md) `unidade` — ## JOSH B UNIT — Montague County, Texas
