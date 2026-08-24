@@ -49,7 +49,10 @@ documento novo mudar a conta, declare de novo.
 Voce NAO escreve celulas agora. Trabalha na MEMORIA da unidade:
 
   gravar_campo      valor + citacao literal (documento, pagina, trecho)
+  gravar_campos     o mesmo, em LOTE — uma leitura que provou N campos
+                    descarrega numa chamada, nao num turno por campo
   declarar_branco   motivo + dono, quando o registro nao diz
+  declarar_brancos  em lote, para faixas com o mesmo motivo e dono
   pedir_documento   quando falta documento — vira item de PEDIDOS.md e os
                     campos ficam PENDENTES
   perguntar         quando so o operador resolve — vira PERGUNTAS.md
@@ -144,6 +147,12 @@ def _imprimir_fecho(ctx: dict[str, Any], comando: str,
               f"{uso.get('cache_leitura')})")
     total = ctx["estado"].custo_acumulado()
     print(f"acumulado da unidade: ${total['custo_usd']}")
+    cache = ctx["corpus"].cache.stats()
+    consultas = cache["hits"] + cache["misses"]
+    if consultas:
+        print(f"cache global de páginas: {cache['hits']} hit(s) / "
+              f"{consultas} consulta(s) "
+              f"({100 * cache['hits'] // consultas}%)")
 
 
 def _sessao(ctx: dict[str, Any], task: str, comando: str,
@@ -193,13 +202,35 @@ def cmd_unidade(pasta: Path, client: Any = None) -> None:
 
     print(f"    corpus indexado: {len(ctx['corpus'].names())} documentos",
           flush=True)
-    print("2/4 mapeando o template do entregável…", flush=True)
+    ctx["estado"].marcar_vistos(ctx["corpus"])
+
+    # F2: o Triador (cabeça barata) faz o mapa do corpus antes do Examinador.
+    from src.minorh import triador as tri
+    dispatch_leitura = {
+        nome: fn for nome, fn in montar_dispatch(
+            ctx["corpus"], ctx["kb_unidade"], ctx["kb_global"],
+            ctx["memoria"], ctx["estado"]).items()
+        if nome in ("read_page", "list_documents", "search_corpus")}
+    print(f"2/5 triagem do corpus ({tri.modelo_triador()})…", flush=True)
+    triagem, log_tri = tri.triar(
+        pasta=pasta, corpus=ctx["corpus"], dispatch_leitura=dispatch_leitura,
+        client=client, max_cost_usd=_orcamento(ctx, 3.0))
+    if log_tri is not None:
+        uso_tri = log_tri.usage.to_dict(tri.modelo_triador())
+        ctx["estado"].registrar_execucao("triador", uso_tri)
+        log_tri.save(pasta / PASTA_ESTADO / "log_triador.json")
+        print(f"    {len(triagem)} documentos rotulados · "
+              f"${uso_tri.get('custo_usd')}", flush=True)
+
+    print("3/5 mapeando o template do entregável…", flush=True)
     from src.examinador.run import template_map
     template = _template_de(pasta)
+    mapa_tri = tri.mapa_markdown(triagem)
     task = (
         f"UNIDADE: {pasta.name}\n\n"
         f"O corpus está nas ferramentas ({len(ctx['corpus'].names())} "
-        f"documentos em FILES/).\n\n"
+        f"documentos em FILES/)."
+        + (f"\n\n{mapa_tri}" if mapa_tri else "") + "\n\n"
         f"MAPA DO TEMPLATE do entregável, célula a célula:\n"
         f"{template_map(template)}\n\n"
         "Abra a unidade. O dia 1 tem três entregas, nesta ordem:\n\n"
@@ -226,12 +257,12 @@ def cmd_unidade(pasta: Path, client: Any = None) -> None:
         "peça o que falta, pergunte o que só o operador resolve. Quando o "
         "que há de legível estiver na memória, pare de pedir ferramentas e "
         "resuma.")
-    print("3/4 sessão do Examinador…", flush=True)
+    print("4/5 sessão do Examinador…", flush=True)
     uso = _sessao(ctx, task, "unidade",
                   _orcamento(ctx, float(os.environ.get("MINORH_TETO_USD",
                                                        "40"))), client)
 
-    print("4/4 gravando PEDIDOS.md e PERGUNTAS.md…", flush=True)
+    print("5/5 gravando PEDIDOS.md e PERGUNTAS.md…", flush=True)
     escrever_pedidos(ctx["estado"])
     escrever_perguntas(ctx["estado"])
     _imprimir_fecho(ctx, "unidade", uso)
@@ -244,19 +275,30 @@ def cmd_continuar(pasta: Path, client: Any = None) -> None:
 
     antes = {"censo": ctx["estado"].censo.get("exige"),
              **ctx["memoria"].contar()}
-    novos = ctx["estado"].novos_documentos(ctx["corpus"])
+    # F1: o prompt apresenta o DELTA (entrados desde o último comando), nunca
+    # o inventário — que segue acessível por list_documents e pelo mapa do
+    # Triador. `novos_documentos` (abertos por hash) vira contagem agregada.
+    novos = ctx["estado"].documentos_ineditos(ctx["corpus"])
     respostas = ler_respostas(ctx["estado"])
-    if not novos and not respostas:
-        print("nada novo: nenhum documento inédito em FILES/ e nenhuma "
-              "resposta nova em PERGUNTAS.md.")
+    if not novos and not respostas and antes["pendentes"] == 0:
+        print("nada novo: nenhum documento inédito em FILES/, nenhuma "
+              "resposta nova em PERGUNTAS.md e nenhum campo pendente.")
         _imprimir_fecho(ctx, "continuar", None)
         return
 
+    total_docs = len(ctx["corpus"].names())
+    nao_abertos = len(ctx["estado"].novos_documentos(ctx["corpus"]))
     partes = [f"UNIDADE: {pasta.name} — continuação. NÃO releia o que já "
               f"está na memória; trabalhe só no que segue."]
     if novos:
-        partes.append("DOCUMENTOS NOVOS EM FILES/ (nunca abertos):\n"
-                      + "\n".join(f"- {n}" for n in novos))
+        partes.append("DOCUMENTOS NOVOS EM FILES/ (entrados desde o último "
+                      "comando):\n" + "\n".join(f"- {n}" for n in novos))
+    partes.append(
+        f"INVENTÁRIO AGREGADO: {total_docs} documentos no corpus · "
+        f"{total_docs - nao_abertos} já abertos · censo {antes['censo']} · "
+        f"{antes['escritos']} escritos · {antes['brancos']} brancos · "
+        f"{antes['pendentes']} pendentes. A lista completa está em "
+        f"`list_documents`; o mapa do Triador está na memória da abertura.")
     if respostas:
         partes.append(
             "RESPOSTAS DO OPERADOR EM PERGUNTAS.md:\n" + "\n".join(
@@ -278,6 +320,7 @@ def cmd_continuar(pasta: Path, client: Any = None) -> None:
 
     for r in respostas:
         ctx["estado"].responder(r["id"], r["resposta"])
+    ctx["estado"].marcar_vistos(ctx["corpus"])
     escrever_pedidos(ctx["estado"])
     escrever_perguntas(ctx["estado"])
 

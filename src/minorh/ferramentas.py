@@ -35,14 +35,20 @@ FERRAMENTAS: list[dict[str, Any]] = [
             "Le UMA pagina de UM documento. Modos: `texto` (camada de texto ou "
             "arquivo de texto, o mais barato), `ocr` (digitalizacoes), "
             "`imagem` (pixels, ~4x o custo). Modo que nao produz nada devolve "
-            "vazio e diz isso — nao escala sozinho. A escolha e sua."),
+            "vazio e diz isso — nao escala sozinho. Pedindo `ocr`/`imagem` "
+            "numa pagina com camada de texto legivel, o texto volta no lugar "
+            "(mais barato); se os pixels forem indispensaveis, repita com "
+            "`forcar: true`."),
         "input_schema": {"type": "object", "properties": {
             "documento": {"type": "string"},
             "pagina": {"type": ["integer", "string"],
                        "description": "1-indexada. Planilhas (.xlsx): 0 lista "
                                       "as abas; N le a aba N; 'N:J' le a "
                                       "janela J (200 linhas) da aba N"},
-            "modo": {"type": "string", "enum": ["texto", "ocr", "imagem"]}},
+            "modo": {"type": "string", "enum": ["texto", "ocr", "imagem"]},
+            "forcar": {"type": "boolean",
+                       "description": "true = quero exatamente o modo pedido, "
+                                      "mesmo havendo texto"}},
             "required": ["documento", "pagina", "modo"]},
     },
     {
@@ -131,6 +137,44 @@ FERRAMENTAS: list[dict[str, Any]] = [
                          "trecho", "confianca"]},
     },
     {
+        "name": "gravar_campos",
+        "description": (
+            "Grava VARIOS campos na memoria numa chamada so — mesma semantica "
+            "do gravar_campo, campo a campo, cada um com valor + citacao "
+            "literal + confianca proprios. Use para descarregar uma leitura "
+            "que provou N campos sem gastar um turno por campo."),
+        "input_schema": {"type": "object", "properties": {
+            "campos": {"type": "array", "items": {
+                "type": "object", "properties": {
+                    "entidade": {"type": "string"},
+                    "campo": {"type": "string"},
+                    "valor": {"type": "string"},
+                    "documento": {"type": "string"},
+                    "pagina": {"type": "string"},
+                    "trecho": {"type": "string"},
+                    "confianca": {"type": "string",
+                                  "enum": ["alta", "media", "baixa"]}},
+                "required": ["entidade", "campo", "valor", "documento",
+                             "pagina", "trecho", "confianca"]}}},
+            "required": ["campos"]},
+    },
+    {
+        "name": "declarar_brancos",
+        "description": (
+            "Declara VARIOS campos em branco com o MESMO motivo e dono — para "
+            "faixas de campos que o registro nao diz pela mesma razao. Mesma "
+            "semantica do declarar_branco."),
+        "input_schema": {"type": "object", "properties": {
+            "campos": {"type": "array", "items": {
+                "type": "object", "properties": {
+                    "entidade": {"type": "string"},
+                    "campo": {"type": "string"}},
+                "required": ["entidade", "campo"]}},
+            "motivo": {"type": "string"},
+            "dono": {"type": "string"}},
+            "required": ["campos", "motivo", "dono"]},
+    },
+    {
         "name": "declarar_branco",
         "description": (
             "Deixa um campo em branco COM motivo e dono. Branco declarado e "
@@ -181,9 +225,26 @@ def montar_dispatch(corpus: Any, kb_unidade: Any, kb_global: Any,
     toda página lida marca o documento como lido (por hash), e todo pedido
     marca seus campos como pendentes."""
 
-    def _read_page(documento: str, pagina: Any, modo: str) -> dict[str, Any]:
-        # Crua: "2:3" é aba 2 janela 3 numa planilha; o corpus interpreta.
-        got = corpus.read_page(documento, pagina, modo)
+    def _read_page(documento: str, pagina: Any, modo: str,
+                   forcar: bool = False) -> dict[str, Any]:
+        # F2: texto antes de imagem. Pixels custam ~4x; se a página tem camada
+        # de texto legível, ela volta no lugar do modo caro — com nota, e com
+        # `forcar` preservando a escolha final do modelo. Propriedade de custo
+        # da caneta, não julgamento: nenhum conteúdo é decidido aqui.
+        if modo in ("ocr", "imagem") and not forcar \
+                and str(documento).lower().endswith(".pdf"):
+            texto = corpus.read_page(documento, pagina, "texto")
+            if len(texto.get("text") or "") >= 200:
+                texto["nota"] = (
+                    "pagina tem camada de texto legivel — devolvido `texto` "
+                    f"no lugar de `{modo}` (mais barato). Se os pixels forem "
+                    "indispensaveis, repita com forcar=true.")
+                got = texto
+            else:
+                got = corpus.read_page(documento, pagina, modo)
+        else:
+            # Crua: "2:3" é aba 2 janela 3 numa planilha; o corpus interpreta.
+            got = corpus.read_page(documento, pagina, modo)
         try:
             estado.marcar_lido(documento,
                                estado.hash_de(corpus.read_bytes(documento)))
@@ -261,8 +322,16 @@ def montar_dispatch(corpus: Any, kb_unidade: Any, kb_global: Any,
         "gravar_campo": lambda entidade, campo, valor, documento, pagina,
         trecho, confianca: memoria.gravar(entidade, campo, valor, documento,
                                           pagina, trecho, confianca),
+        "gravar_campos": lambda campos: {
+            "gravados": [memoria.gravar(
+                c["entidade"], c["campo"], c["valor"], c["documento"],
+                c["pagina"], c["trecho"], c["confianca"])["gravado"]
+                for c in campos]},
         "declarar_branco": lambda entidade, campo, motivo, dono:
             memoria.branco(entidade, campo, motivo, dono),
+        "declarar_brancos": lambda campos, motivo, dono: {
+            "brancos": [memoria.branco(c["entidade"], c["campo"], motivo,
+                                       dono)["branco"] for c in campos]},
         "pedir_documento": _pedir,
         "perguntar": _perguntar,
     }

@@ -503,3 +503,88 @@ def test_so_cortes_declara_rodada_incompleta():
     log, _ = run_loop(system="s", task="t", tools=[], dispatch={},
                       model="claude-opus-5", max_turns=10, client=client)
     assert "cortadas" in log.stop_reason and "INCOMPLETA" in log.stop_reason
+
+
+# --- ETAPA F: delta, triador, leitura em camadas, memoria em lote ------------
+
+def test_ineditos_sao_o_delta_apresentado_nao_o_inventario(tmp_path: Path):
+    corpus = _corpus(tmp_path, {"a.csv": b"aa", "b.csv": b"bb"})
+    estado = Estado(tmp_path)
+    assert sorted(estado.documentos_ineditos(corpus)) == ["a.csv", "b.csv"]
+    estado.marcar_vistos(corpus)
+    assert estado.documentos_ineditos(corpus) == []
+    corpus2 = _corpus(tmp_path, {"c.csv": b"cc"})       # chega um novo
+    assert estado.documentos_ineditos(corpus2) == ["c.csv"]
+    relido = Estado(tmp_path)                            # sobrevive
+    assert relido.documentos_ineditos(corpus2) == ["c.csv"]
+
+
+def test_memoria_em_lote_grava_n_campos_numa_chamada(tmp_path: Path):
+    from src.examinador.okf import KnowledgeBase
+    from src.minorh.ferramentas import montar_dispatch
+    from src.minorh.memoria import Memoria
+    corpus = _corpus(tmp_path, {"d.csv": b"x"})
+    memoria = Memoria(tmp_path / "_minorh" / "memoria.json")
+    d = montar_dispatch(corpus, KnowledgeBase(tmp_path / "u"),
+                        KnowledgeBase(tmp_path / "g"), memoria,
+                        Estado(tmp_path))
+    got = d["gravar_campos"](campos=[
+        {"entidade": "lease 1", "campo": "royalty", "valor": "1/8",
+         "documento": "d.csv", "pagina": "1", "trecho": "t",
+         "confianca": "alta"},
+        {"entidade": "lease 1", "campo": "termo", "valor": "3 anos",
+         "documento": "d.csv", "pagina": "1", "trecho": "t",
+         "confianca": "alta"}])
+    assert len(got["gravados"]) == 2
+    got2 = d["declarar_brancos"](campos=[
+        {"entidade": "lease 2", "campo": "royalty"},
+        {"entidade": "lease 2", "campo": "termo"}],
+        motivo="sem instrumento", dono="cartorio")
+    assert len(got2["brancos"]) == 2
+    assert memoria.contar() == {"escritos": 2, "brancos": 2, "pendentes": 0}
+
+
+def test_read_page_devolve_texto_no_lugar_de_imagem_quando_ha_camada(
+        tmp_path: Path):
+    import fitz
+    from src.examinador.okf import KnowledgeBase
+    from src.minorh.ferramentas import montar_dispatch
+    from src.minorh.memoria import Memoria
+    doc = fitz.open()
+    page = doc.new_page()
+    corpo = "linha com texto legivel o suficiente para o limiar. " * 8
+    for i in range(6):
+        page.insert_text((50, 60 + 15 * i), corpo[:90])
+    pdf = doc.tobytes()
+    doc.close()
+    corpus = _corpus(tmp_path, {"com texto.pdf": pdf})
+    d = montar_dispatch(corpus, KnowledgeBase(tmp_path / "u"),
+                        KnowledgeBase(tmp_path / "g"),
+                        Memoria(tmp_path / "_minorh" / "memoria.json"),
+                        Estado(tmp_path))
+    got = d["read_page"](documento="com texto.pdf", pagina=1, modo="imagem")
+    assert got["kind"] == "text" and "forcar=true" in got["nota"]
+    forcado = d["read_page"](documento="com texto.pdf", pagina=1,
+                             modo="imagem", forcar=True)
+    assert forcado["kind"] == "image"            # a escolha final e do modelo
+
+
+def test_triador_rotula_em_lote_e_nao_reroda_completo(tmp_path: Path):
+    from src.minorh import triador as tri
+    corpus = _corpus(tmp_path, {"a.csv": b"a", "b.csv": b"b"})
+    client = _ClientRoteirizado([
+        [_Use("rotular_documentos", {"rotulos": [
+            {"documento": "a.csv", "rotulo": "planilha-projeto",
+             "resumo": "aba de teste", "confianca": "alta"},
+            {"documento": "b.csv", "rotulo": "recibo",
+             "resumo": "recibo de teste", "confianca": "media"}]})],
+        [_Texto("mapeado")],
+    ])
+    triagem, log = tri.triar(pasta=tmp_path, corpus=corpus,
+                             dispatch_leitura={}, client=client)
+    assert set(triagem) == {"a.csv", "b.csv"}
+    de_novo, log2 = tri.triar(pasta=tmp_path, corpus=corpus,
+                              dispatch_leitura={}, client=None)
+    assert log2 is None and set(de_novo) == {"a.csv", "b.csv"}
+    mapa = tri.mapa_markdown(triagem)
+    assert "planilha-projeto (1)" in mapa and "a.csv" in mapa

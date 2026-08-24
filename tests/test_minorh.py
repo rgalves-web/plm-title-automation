@@ -404,6 +404,15 @@ def test_o_comando_unidade_fecha_com_os_tres_numeros(tmp_path: Path,
     origem = Path("tests/fixtures/unidade_sintetica")
     shutil.copytree(origem / "FILES", unidade / "FILES")
     shutil.copyfile(origem / "template.xlsx", unidade / "template.xlsx")
+    # triagem completa pré-existente: a fase do Triador (F2) não roda e o
+    # roteiro abaixo alimenta só o Examinador.
+    from src.examinador.cache import PageCache as _PC
+    from src.examinador.corpus import Corpus as _Corpus
+    nomes = _Corpus(unidade / "FILES", cache=_PC(tmp_path / "cache")).names()
+    (unidade / "_minorh").mkdir(parents=True, exist_ok=True)
+    (unidade / "_minorh" / "triagem.json").write_text(json.dumps(
+        {n: {"rotulo": "doc", "resumo": "fixture", "confianca": "alta",
+             "quando": ""} for n in nomes}), encoding="utf-8")
 
     client = _ClientRoteirizado([
         [_Use("declarar_censo", {"exige": 35, "resumo": "5 leases x 7"})],

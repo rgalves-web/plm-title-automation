@@ -33,6 +33,10 @@ class Estado:
         self.perguntas: list[dict[str, Any]] = data.get("perguntas", [])
         self.execucoes: list[dict[str, Any]] = data.get("execucoes", [])
         self.horas: list[dict[str, Any]] = data.get("horas", [])
+        # F1: o que já foi APRESENTADO ao modelo (por hash de conteúdo) — o
+        # prompt do `continuar` lista só o delta, nunca o inventário inteiro.
+        # Diferente de `lidos` (o que foi ABERTO via read_page).
+        self.vistos: dict[str, dict[str, str]] = data.get("vistos", {})
 
     @property
     def existe(self) -> bool:
@@ -64,6 +68,29 @@ class Estado:
             if digest not in self.lidos:
                 out.append(nome)
         return out
+
+    def documentos_ineditos(self, corpus: Any) -> list[str]:
+        """Documentos cujo conteúdo nunca foi APRESENTADO num prompt — o
+        delta do `continuar` (F1). Renomeado não é inédito; substituído é."""
+        out = []
+        for nome in corpus.names():
+            try:
+                digest = self.hash_de(corpus.read_bytes(nome))
+            except Exception:
+                continue
+            if digest not in self.vistos:
+                out.append(nome)
+        return out
+
+    def marcar_vistos(self, corpus: Any) -> None:
+        for nome in corpus.names():
+            try:
+                digest = self.hash_de(corpus.read_bytes(nome))
+            except Exception:
+                continue
+            if digest not in self.vistos:
+                self.vistos[digest] = {"documento": nome, "quando": _now()}
+        self.save()
 
     # --- pedidos e perguntas ------------------------------------------------
     def novo_pedido(self, titulo: str, o_que: str, onde: str, metodo: str,
@@ -128,5 +155,5 @@ class Estado:
             "unidade": str(self.unidade), "censo": self.censo,
             "lidos": self.lidos, "pedidos": self.pedidos,
             "perguntas": self.perguntas, "execucoes": self.execucoes,
-            "horas": self.horas,
+            "horas": self.horas, "vistos": self.vistos,
         }, indent=2, ensure_ascii=False), encoding="utf-8")
