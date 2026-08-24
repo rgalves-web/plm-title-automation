@@ -268,9 +268,14 @@ RETRY_BASE_S = 2.0
 
 
 def _transitorio(exc: Exception) -> bool:
-    """Erro que vale repetir: sobrecarga, rate limit, 5xx. Nada de conteúdo."""
+    """Erro que vale repetir: sobrecarga, rate limit, 5xx, timeout/conexão.
+    Nada de conteúdo — erro definitivo (400/401/403) não se repete."""
     status = getattr(exc, "status_code", None)
-    return status in (429, 500, 502, 503, 504, 529)
+    if status in (429, 500, 502, 503, 504, 529):
+        return True
+    # Timeout e queda de conexão não carregam status; o nome da classe é o
+    # contrato do SDK (APITimeoutError derrubou o ship do replay 2 em 24/08).
+    return exc.__class__.__name__ in ("APITimeoutError", "APIConnectionError")
 
 
 def _create_com_retry(client: Any, **kwargs: Any) -> Any:

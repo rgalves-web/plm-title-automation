@@ -119,6 +119,23 @@ def _dispatch_escrita(ledger: Ledger, template: Path) -> dict[str, Any]:
     return {"write_cell": _write_cell, "record_blank": _record_blank}
 
 
+def _flush_de(pasta: Path, fase: str) -> Any:
+    """Escreve cada turno em `_minorh/ship/progresso_<fase>.jsonl` na hora —
+    uma sessão que cai no meio (timeout, limite) não pode sumir com a
+    contabilidade do que já foi pago (aconteceu 2x em 24/08)."""
+    import json as _json
+    caminho = pasta / "_minorh" / "ship" / f"progresso_{fase}.jsonl"
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+
+    def flush(rec: Any) -> None:
+        with caminho.open("a", encoding="utf-8") as fh:
+            fh.write(_json.dumps(
+                {"turno": rec.turn, "chamadas": [c["tool"] for c in rec.calls],
+                 "uso": rec.usage, "texto": rec.text[:200]},
+                ensure_ascii=False) + "\n")
+    return flush
+
+
 def projetar(*, pasta: Path, memoria: Any, template: Path, modelo: str,
              dispatch_leitura: dict[str, Any], client: Any = None,
              max_cost_usd: float = 40.0) -> tuple[Ledger, Any]:
@@ -136,7 +153,8 @@ def projetar(*, pasta: Path, memoria: Any, template: Path, modelo: str,
     log, _ = run_loop(system=SISTEMA_PROJECAO, task=task,
                       tools=FERRAMENTAS_PROJECAO + ferramentas_leitura,
                       dispatch=dispatch, model=modelo, max_turns=200,
-                      max_cost_usd=max_cost_usd, client=client)
+                      max_cost_usd=max_cost_usd, client=client,
+                      on_turn=_flush_de(pasta, "projecao"))
     return ledger, log
 
 
@@ -238,7 +256,8 @@ def corrigir(*, pasta: Path, ledger: Ledger, reprovadas: list[Veredito],
     log, _ = run_loop(
         system=SISTEMA_PROJECAO, task=REAUDITORIA.format(reprovadas=texto),
         tools=FERRAMENTAS_PROJECAO + ferramentas_leitura, dispatch=dispatch,
-        model=modelo, max_turns=60, max_cost_usd=max_cost_usd, client=client)
+        model=modelo, max_turns=60, max_cost_usd=max_cost_usd, client=client,
+        on_turn=_flush_de(pasta, "correcao"))
     return log
 
 

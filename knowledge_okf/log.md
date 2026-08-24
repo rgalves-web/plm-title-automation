@@ -143,3 +143,6 @@ Uma linha por escrita. Quem escreveu foi o modelo; este arquivo e o rastro.
 - criou `layout-workbooks-bkv122tx-well-list-project-log-e-xref` (layout)
 - criou `formulario-eog-affidavit-de-extensao-de-prazo-primario` (formulario)
 - criou `custo-search-corpus-em-dump-multiunidade` (custo)
+- criou `pull-list-de-cartorio-derivada-do-exhibit-a-vs-pastas-de-files` (regra)
+- criou `veredito-grao-da-aba-ownership-worksheet-uma-linha-por-lease` (veredito)
+- criou `layout-xref-lease-to-well-ordenacao-e-custo` (layout)

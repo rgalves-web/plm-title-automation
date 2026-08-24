@@ -86,6 +86,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [identity_keys: unit](identity-keys-unit.md) `entidade` — - **required**:
 - [identity_keys: well](identity-keys-well.md) `entidade` — - **required**:
 - [layout-workbooks-bkv122tx-well-list-project-log-e-xref](layout-workbooks-bkv122tx-well-list-project-log-e-xref.md) `layout` — ## Workbooks do projeto BKV122TX — SÃO LEGÍVEIS por `read_page` com `pagina = "N"` ou `"N:J"`
+- [layout-xref-lease-to-well-ordenacao-e-custo](layout-xref-lease-to-well-ordenacao-e-custo.md) `layout` — ## `lease to well and contract xref 06-16-2026 (1).xlsx` — anatomia, ordenação e CUSTO
 - [lease mineral schedule recording multi condado](lease-mineral-schedule-recording-multi-condado.md) `regra` — ## Coluna RECORDING da Lease & Mineral Schedule é multi-condado
 - [manual 10.3 categorias de missing files](manual-10-3-categorias-de-missing-files.md) `regra-cliente` — ## Missing Files além de lease — categorias e impacto mínimo
 - [manual 10.4 ciclo de vida missing files](manual-10-4-ciclo-de-vida-missing-files.md) `regra-cliente` — ## Ciclo de vida de um Missing Item
@@ -124,6 +125,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [precedente-template-da-casa-chega-preenchido-com-outra-unidade](precedente-template-da-casa-chega-preenchido-com-outra-unidade.md) `veredito` — ## VEREDITO (operador, 24/08/2026) — template mapeado que descreve OUTRO ativo = dados de exemplo, não troca d
 - [project log aba missing files formato](project-log-aba-missing-files-formato.md) `regra` — ## Aba Missing Files do Project Log — formato de escrita
 - [protocolo captura viewer cartorio](protocolo-captura-viewer-cartorio.md) `regra` — ## Protocolo de captura do viewer do cartório
+- [pull-list-de-cartorio-derivada-do-exhibit-a-vs-pastas-de-files](pull-list-de-cartorio-derivada-do-exhibit-a-vs-pastas-de-files.md) `regra` — ## Como derivar a pull list de cartório no dia 1, sem abrir um único lease
 - [resolver_identity_by_key/fixture](resolver-identity-by-key-fixture.md) `regra` — - **lesson_id**: resolver_identity_by_key
 - [runsheet-e-cadeia-suplementar-vazia-quando-nada-e-posterior-a-cert-date](runsheet-e-cadeia-suplementar-vazia-quando-nada-e-posterior-a-cert-date.md) `veredito` — ## VEREDITO DO OPERADOR (P1) — a Runsheet e cadeia SUPLEMENTAR de titulo
 - [runsheet_style](runsheet-style.md) `regra` — - **version**: 1
@@ -139,3 +141,4 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [template-ddr-sintetico-semeado-com-linha-de-outra-unidade](template-ddr-sintetico-semeado-com-linha-de-outra-unidade.md) `formulario` — ## O template do DDR chega com a linha 2 da aba `Lease Review` SEMEADA
 - [transmittal_cover_is_not_the_document/fixture](transmittal-cover-is-not-the-document-fixture.md) `regra` — - **lesson_id**: transmittal_cover_is_not_the_document
 - [unidade-josh-b-unit-montague](unidade-josh-b-unit-montague.md) `unidade` — ## JOSH B UNIT — Montague County, Texas
+- [veredito-grao-da-aba-ownership-worksheet-uma-linha-por-lease](veredito-grao-da-aba-ownership-worksheet-uma-linha-por-lease.md) `veredito` — ## VEREDITO — grão de linha da aba `Ownership - Worksheet`

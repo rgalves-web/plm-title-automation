@@ -153,10 +153,12 @@ def alocar(*, pasta: Path, corpus: Any, memoria: Any, modelo: str,
             + "\n\nMEMORIA DA UNIDADE (para reconhecer o que cada arquivo "
               "e):\n" + memoria.dump_markdown()
             + "\n\nDecida o destino de cada arquivo.")
+    from src.minorh.ship import _flush_de
     log, _ = run_loop(system=SISTEMA_KIT, task=task,
                       tools=FERRAMENTAS_KIT + ferramentas_leitura,
                       dispatch=dispatch, model=modelo, max_turns=80,
-                      max_cost_usd=max_cost_usd, client=client)
+                      max_cost_usd=max_cost_usd, client=client,
+                      on_turn=_flush_de(pasta, "alocacao"))
     sem_decisao = sorted(nomes - {a["documento"] for a in alocados}
                          - {f["documento"] for f in fora})
     return {"alocados": alocados, "fora_do_kit": fora,
