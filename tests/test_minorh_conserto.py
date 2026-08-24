@@ -614,3 +614,137 @@ def test_auditoria_ignora_escrita_em_faixa(tmp_path: Path):
         unidade="X", workbook=out, ledger=ledger, corpus=corpus,
         auditor=_AuditorFake())
     assert [v.celula for v in vereditos] == ["Ownership - Worksheet!F2"]
+
+
+# --- ETAPA G: projeção em lote, delta e retomada ----------------------------
+
+def test_projecao_em_lote_grava_o_que_pode_e_recusa_formula(tmp_path: Path):
+    from src.minorh.ship import _dispatch_escrita
+    tpl = _template_com_formula(tmp_path / "tpl.xlsx")
+    ledger = Ledger()
+    d = _dispatch_escrita(ledger, tpl)
+    got = d["write_cells"](celulas=[
+        {"aba": "Ownership - Worksheet", "celula": "E2", "valor": "0.80",
+         "documento": "d.pdf", "pagina": "1", "trecho": "t",
+         "confianca": "alta"},
+        {"aba": "Ownership - Worksheet", "celula": "B2", "valor": "nao entra",
+         "documento": "d.pdf", "pagina": "1", "trecho": "t",
+         "confianca": "alta"},
+        {"aba": "Ownership - Worksheet", "celula": "F2", "valor": "1/8",
+         "documento": "d.pdf", "pagina": "2", "trecho": "t",
+         "confianca": "alta"}])
+    # a fórmula recusada NÃO derruba o lote
+    assert got["gravadas"] == 2
+    assert len(got["recusadas"]) == 1
+    assert "contém fórmula do template" in got["recusadas"][0]
+    assert [c.celula for c in ledger.cells] == ["E2", "F2"]
+    b = d["record_blanks"](celulas=[
+        {"aba": "Ownership - Worksheet", "celula": "A8:X8"},
+        {"aba": "Ownership - Worksheet", "celula": "A9",
+         "motivo": "proprio", "dono": "eu"}],
+        motivo="sobras do template", dono="operador")
+    assert b["brancos"] == 2
+    assert ledger.blanks[0].motivo == "sobras do template"   # geral
+    assert ledger.blanks[1].motivo == "proprio"              # do item
+
+
+def test_memoria_em_delta_omite_o_que_ja_tem_celula(tmp_path: Path):
+    from src.minorh.memoria import Memoria
+    from src.minorh.ship import memoria_em_delta
+    m = Memoria(tmp_path / "memoria.json")
+    m.gravar("lease 1", "royalty", "1/8", "l1.pdf", 1, "one-eighth", "alta")
+    m.gravar("lease 2", "royalty", "3/16", "l2.pdf", 1, "three", "alta")
+    m.branco("lease 3", "termo", "sem instrumento", "cartorio")
+    ledger = Ledger()
+    ledger.write_cell("Lease Review", "F2", "1/8", "l1.pdf", 1, "one-eighth",
+                      "alta")
+    delta, ja = memoria_em_delta(m, ledger)
+    assert "lease 2" in delta and "3/16" in delta
+    assert "lease 3" in delta and "BRANCO" in delta      # branco sempre volta
+    assert "lease 1" not in delta                        # já tem célula
+    assert "Lease Review!F2" in ja
+
+
+def test_ship_continuar_retoma_do_ledger_salvo(tmp_path: Path, monkeypatch,
+                                               capsys):
+    """Queda simulada no meio: a 1ª sessão projeta 1 célula e morre; a
+    retomada não refaz o que já está e completa o resto."""
+    import shutil
+
+    from src.minorh import cli, ship as s
+    from src.minorh.memoria import Memoria
+
+    monkeypatch.setenv("PLM_PAGE_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("MINORH_TETO_UNIT_USD", "50")
+    unidade = tmp_path / "unidade"
+    origem = Path("tests/fixtures/unidade_sintetica")
+    shutil.copytree(origem / "FILES", unidade / "FILES")
+    shutil.copyfile(origem / "template.xlsx", unidade / "template.xlsx")
+    estado = Estado(unidade)
+    estado.declarar_censo(2, "conta")
+    m = Memoria(unidade / "_minorh" / "memoria.json")
+    m.gravar("lease 1", "royalty", "1/8", "d.pdf", "1", "one-eighth", "alta")
+    m.gravar("lease 2", "royalty", "3/16", "d.pdf", "1", "three", "alta")
+
+    ship_dir = unidade / "_minorh" / "ship"
+    ship_dir.mkdir(parents=True)
+    parcial = Ledger()
+    parcial.write_cell("Lease Review", "F2", "1/8", "d.pdf", "1",
+                       "one-eighth", "alta")
+    parcial.save(ship_dir / "ledger.json")
+
+    vistos: list[str] = []
+
+    def _projetar_fake(*, pasta, memoria, template, modelo, dispatch_leitura,
+                       client=None, max_cost_usd=40.0, ledger=None):
+        delta, ja = s.memoria_em_delta(memoria, ledger)
+        vistos.append(delta)
+        ledger.write_cell("Lease Review", "F3", "3/16", "d.pdf", "1",
+                          "three", "alta")
+
+        class _Log:
+            usage = type("U", (), {"input": 0, "output": 0, "cache_write": 0,
+                                   "cache_read": 0})()
+            def save(self, path):        # noqa: ANN001
+                return path
+        return ledger, _Log()
+
+    monkeypatch.setattr(s, "projetar", _projetar_fake)
+    monkeypatch.setattr(s, "auditar_tudo",
+                        lambda **kw: ([], {"nao_vazias": 0, "auditadas": 0,
+                                           "vivas": 0,
+                                           "estrutura_do_template": 0}))
+    monkeypatch.setattr(cli, "MODELO", "claude-opus-5")
+
+    class _AuditorFake:
+        provedor, modelo, limitacao = "openai", "gpt-5.6-terra", ""
+        uso = type("U", (), {"to_dict": lambda self, m: {"custo_usd": 0.0}})()
+    monkeypatch.setattr("src.minorh.auditor.Auditor.escolher",
+                        classmethod(lambda cls: _AuditorFake()))
+    monkeypatch.setattr("src.minorh.kit.alocar",
+                        lambda **kw: ({"alocados": [], "fora_do_kit": [],
+                                       "sem_decisao": []},
+                                      type("L", (), {
+                                          "usage": type("U", (), {
+                                              "input": 0, "output": 0,
+                                              "cache_write": 0,
+                                              "cache_read": 0})(),
+                                          "save": lambda self, p: p})()))
+
+    cli.cmd_ship(unidade, continuar=True)
+    saida = capsys.readouterr().out
+    assert "RETOMADA de 1 célula(s)" in saida
+    # o campo já projetado não voltou ao contexto; o pendente sim
+    assert "3/16" in vistos[0] and "one-eighth" not in vistos[0]
+    final = Ledger.load(ship_dir / "ledger.json")
+    assert sorted(c.celula for c in final.cells) == ["F2", "F3"]
+
+
+def test_ship_continuar_sem_ledger_recusa(tmp_path: Path):
+    from src.minorh import cli
+    estado = Estado(tmp_path)
+    estado.declarar_censo(1, "x")
+    (tmp_path / "template.xlsx").write_bytes(
+        Path("tests/fixtures/unidade_sintetica/template.xlsx").read_bytes())
+    with pytest.raises(SystemExit, match="nao ha ledger salvo"):
+        cli.cmd_ship(tmp_path, continuar=True)

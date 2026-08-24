@@ -56,21 +56,61 @@ FERRAMENTAS_PROJECAO = [
             "motivo": {"type": "string"}, "dono": {"type": "string"}},
             "required": ["aba", "celula", "motivo", "dono"]},
     },
+    {
+        "name": "write_cells",
+        "description": (
+            "Escreve VARIAS celulas numa chamada — mesma semantica do "
+            "write_cell, celula a celula, cada uma com valor + citacao + "
+            "confianca proprios. Uma celula de formula recusada nao derruba "
+            "as outras: a resposta lista o que entrou e o que foi recusado, "
+            "e voce redecide so as recusadas. USE ESTA, em lotes grandes."),
+        "input_schema": {"type": "object", "properties": {
+            "celulas": {"type": "array", "items": {
+                "type": "object", "properties": {
+                    "aba": {"type": "string"}, "celula": {"type": "string"},
+                    "valor": {"type": "string"},
+                    "documento": {"type": "string"},
+                    "pagina": {"type": "string"}, "trecho": {"type": "string"},
+                    "confianca": {"type": "string",
+                                  "enum": ["alta", "media", "baixa"]}},
+                "required": ["aba", "celula", "valor", "documento", "pagina",
+                             "trecho", "confianca"]}}},
+            "required": ["celulas"]},
+    },
+    {
+        "name": "record_blanks",
+        "description": (
+            "Declara VARIAS celulas em branco numa chamada. Cada item traz "
+            "aba, celula (ou faixa) e, opcionalmente, motivo/dono proprios; "
+            "sem eles valem o `motivo` e o `dono` gerais da chamada."),
+        "input_schema": {"type": "object", "properties": {
+            "celulas": {"type": "array", "items": {
+                "type": "object", "properties": {
+                    "aba": {"type": "string"}, "celula": {"type": "string"},
+                    "motivo": {"type": "string"}, "dono": {"type": "string"}},
+                "required": ["aba", "celula"]}},
+            "motivo": {"type": "string"}, "dono": {"type": "string"}},
+            "required": ["celulas"]},
+    },
 ]
 
 SISTEMA_PROJECAO = """Voce e o landman responsavel pela unidade e vai agora
 projetar a MEMORIA (fichas campo a campo, todas com citacao) no workbook do
 DDR. Regras:
 
-1. Todo campo ESCRITO da memoria vira write_cell na celula correta do
-   template, com a citacao da ficha. Nao invente valor novo: se nao esta na
-   memoria, nao existe.
-2. Todo campo BRANCO ou PENDENTE vira record_blank na celula correspondente,
-   com o motivo e o dono da ficha. Nunca deixe buraco silencioso.
+1. Todo campo ESCRITO da memoria vira celula do template, com a citacao da
+   ficha. Nao invente valor novo: se nao esta na memoria, nao existe.
+2. Todo campo BRANCO ou PENDENTE vira branco declarado na celula
+   correspondente, com o motivo e o dono da ficha. Nunca deixe buraco
+   silencioso.
 3. Sobras do template (dados de exemplo de outra unidade) sao limpas com
-   record_blank, motivo dizendo o que eram.
+   branco declarado, motivo dizendo o que eram.
 4. Toda celula escrita sera auditada por outro modelo, que vai reabrir a
    pagina citada. Uma citacao que nao sustenta o valor sera reprovada.
+5. TRABALHE EM LOTE: `write_cells` e `record_blanks` levam dezenas de celulas
+   por chamada. Uma linha inteira do Lease Review, uma aba inteira de sobras
+   do template — tudo numa chamada so. Os singulares existem so para o caso
+   avulso. Um turno por celula desperdicia o orcamento da unidade.
 
 Quando terminar, pare de pedir ferramentas e resuma o que projetou."""
 
@@ -116,7 +156,47 @@ def _dispatch_escrita(ledger: Ledger, template: Path) -> dict[str, Any]:
         _checar(aba, celula)
         return ledger.record_blank(aba, celula, motivo, dono)
 
-    return {"write_cell": _write_cell, "record_blank": _record_blank}
+    # G1: o lote não é tudo-ou-nada. Uma célula de fórmula recusada volta
+    # nomeada, as demais entram — senão um lote de 40 morreria por causa de 1,
+    # e o modelo refaria 40 decisões já tomadas.
+    def _write_cells(celulas):
+        gravadas, recusadas = [], []
+        for c in celulas:
+            try:
+                _checar(c["aba"], c["celula"])
+            except ValueError as exc:
+                recusadas.append(str(exc))
+                continue
+            ledger.write_cell(c["aba"], c["celula"], c["valor"],
+                              c["documento"], c["pagina"], c["trecho"],
+                              c["confianca"])
+            gravadas.append(f"{c['aba']}!{str(c['celula']).upper()}")
+        out = {"gravadas": len(gravadas), "celulas": gravadas[:80]}
+        if recusadas:
+            out["recusadas"] = recusadas
+            out["nota"] = ("as recusadas NAO entraram — redecida cada uma "
+                           "(o valor verificado vai na celula branca).")
+        return out
+
+    def _record_blanks(celulas, motivo="", dono=""):
+        marcadas, recusadas = [], []
+        for c in celulas:
+            try:
+                _checar(c["aba"], c["celula"])
+            except ValueError as exc:
+                recusadas.append(str(exc))
+                continue
+            ledger.record_blank(c["aba"], c["celula"],
+                                c.get("motivo") or motivo,
+                                c.get("dono") or dono)
+            marcadas.append(f"{c['aba']}!{str(c['celula']).upper()}")
+        out = {"brancos": len(marcadas), "celulas": marcadas[:80]}
+        if recusadas:
+            out["recusadas"] = recusadas
+        return out
+
+    return {"write_cell": _write_cell, "record_blank": _record_blank,
+            "write_cells": _write_cells, "record_blanks": _record_blanks}
 
 
 def _flush_de(pasta: Path, fase: str, ledger: Ledger | None = None) -> Any:
@@ -140,20 +220,78 @@ def _flush_de(pasta: Path, fase: str, ledger: Ledger | None = None) -> Any:
     return flush
 
 
+def _norm(valor: Any) -> str:
+    return " ".join(str(valor if valor is not None else "").split()).lower()
+
+
+def memoria_em_delta(memoria: Any, ledger: Ledger) -> tuple[str, str]:
+    """G2: (campos ainda sem célula, resumo do que já está no ledger).
+
+    O casamento é por (valor, documento citado) — o par que a projeção
+    carrega da memória para a célula. Montagem de prompt é plumbing; se a
+    heurística errar por excesso, o modelo vê o campo de novo e decide (a
+    lista do que já está no DDR vai junto, curta, para ele conferir). Nada é
+    omitido em silêncio: o que não casa aparece."""
+    ja = {(_norm(c.valor), _norm(c.citacao.documento)) for c in ledger.cells}
+    linhas: list[str] = []
+    pendentes = 0
+    for ent, campos in sorted(memoria.entidades.items()):
+        do_ente: list[str] = []
+        for nome, c in sorted(campos.items()):
+            if c.estado == "escrito":
+                if (_norm(c.valor), _norm(c.documento)) in ja:
+                    continue
+                do_ente.append(
+                    f"- {nome} = {c.valor!r}  [{c.documento} p.{c.pagina} — "
+                    f"{c.trecho[:80]!r}] (confiança {c.confianca})")
+            elif c.estado == "branco":
+                do_ente.append(f"- {nome} = BRANCO — motivo: {c.motivo} — "
+                               f"dono: {c.dono}")
+            else:
+                do_ente.append(f"- {nome} = PENDENTE — aguarda documento "
+                               f"(pedido {c.pedido})")
+        if do_ente:
+            pendentes += len(do_ente)
+            linhas.append(f"\n### {ent}")
+            linhas.extend(do_ente)
+    delta = "\n".join(linhas)
+    ja_feito = "\n".join(
+        f"  {c.aba}!{c.celula} = {str(c.valor)[:50]!r}"
+        for c in sorted(ledger.cells, key=lambda x: (x.aba, x.celula)))
+    if ledger.blanks:
+        ja_feito += (f"\n  (+ {len(ledger.blanks)} branco(s) declarado(s) já "
+                     f"aplicado(s))")
+    return delta, ja_feito
+
+
 def projetar(*, pasta: Path, memoria: Any, template: Path, modelo: str,
              dispatch_leitura: dict[str, Any], client: Any = None,
-             max_cost_usd: float = 40.0) -> tuple[Ledger, Any]:
-    """Sessão 1: a memória no template. Devolve o ledger e o log do laço."""
-    ledger = Ledger()
+             max_cost_usd: float = 40.0,
+             ledger: Ledger | None = None) -> tuple[Ledger, Any]:
+    """Sessão 1: a memória no template. Devolve o ledger e o log do laço.
+
+    Com `ledger` (G3, retomada), continua de onde parou: o contexto recebe só
+    os campos ainda sem célula (G2) e o resumo do que já foi projetado."""
+    retomada = ledger is not None
+    ledger = ledger if ledger is not None else Ledger()
 
     dispatch = dict(dispatch_leitura)
     dispatch.update(_dispatch_escrita(ledger, template))
 
     ferramentas_leitura = [t for t in _leitura_schemas()
                            if t["name"] in dispatch_leitura]
+    delta, ja_feito = memoria_em_delta(memoria, ledger)
+    contagens = memoria.contar()
     task = (f"MAPA DO TEMPLATE, celula a celula:\n{_mapa_template(template)}"
-            f"\n\nMEMORIA DA UNIDADE (o que voce provou, campo a campo):\n"
-            f"{memoria.dump_markdown()}\n\nProjete a memoria no template.")
+            f"\n\nMEMORIA DA UNIDADE — o que AINDA NAO tem celula "
+            f"(a memoria inteira tem {contagens['escritos']} escritos, "
+            f"{contagens['brancos']} brancos, {contagens['pendentes']} "
+            f"pendentes):\n{delta}")
+    if retomada:
+        task += (f"\n\nJA PROJETADO NESTA UNIDADE (nao refaca; conferir e "
+                 f"seguir):\n{ja_feito}\n\nContinue a projecao do que falta.")
+    else:
+        task += "\n\nProjete a memoria no template."
     log, _ = run_loop(system=SISTEMA_PROJECAO, task=task,
                       tools=FERRAMENTAS_PROJECAO + ferramentas_leitura,
                       dispatch=dispatch, model=modelo, max_turns=200,

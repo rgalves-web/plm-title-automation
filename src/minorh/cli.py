@@ -5,6 +5,7 @@
     minorh estado              os números, sem chamada de modelo
     minorh perguntas           as perguntas, sem chamada de modelo
     minorh ship                projeção + auditoria de 100% + kit de submissão
+    minorh ship --continuar    retoma o ship do ledger salvo (queda ou teto)
     minorh publicar            congela o kit em <UNIT>/SUBMISSION PLM/
     minorh horas <h> ["nota"]  registra horas do operador no estado
     minorh painel "<pasta-mãe>"  uma linha por unidade aberta, sem modelo
@@ -364,7 +365,7 @@ def cmd_perguntas(pasta: Path) -> None:
     _imprimir_fecho(ctx, "perguntas", None)
 
 
-def cmd_ship(pasta: Path, client: Any = None) -> None:
+def cmd_ship(pasta: Path, client: Any = None, continuar: bool = False) -> None:
     from src.knowledge.write_roots import write_scope
     from src.minorh import kit as k
     from src.minorh import ship as s
@@ -395,11 +396,24 @@ def cmd_ship(pasta: Path, client: Any = None) -> None:
         ship_dir = pasta / PASTA_ESTADO / "ship"
         ship_dir.mkdir(parents=True, exist_ok=True)
 
-        print("1/4 projeção: a memória vira DDR…")
+        # G3: retomada do ledger salvo — nunca mais re-projetar do zero
+        # depois de uma queda ou de uma parada no teto.
+        anterior = None
+        salvo = ship_dir / "ledger.json"
+        if continuar:
+            if not salvo.exists():
+                raise SystemExit(
+                    f"nao ha ledger salvo em {salvo} — rode `minorh ship` "
+                    f"sem --continuar para começar a projeção.")
+            anterior = s.Ledger.load(salvo)
+            print(f"1/4 projeção: RETOMADA de {len(anterior.cells)} célula(s) "
+                  f"e {len(anterior.blanks)} branco(s) já projetados…")
+        else:
+            print("1/4 projeção: a memória vira DDR…")
         ledger, log1 = s.projetar(
             pasta=pasta, memoria=ctx["memoria"], template=template,
             modelo=MODELO, dispatch_leitura=dispatch_leitura, client=client,
-            max_cost_usd=_orcamento(ctx, 40.0))
+            max_cost_usd=_orcamento(ctx, 40.0), ledger=anterior)
         _somar(log1)
         # Cada sessão do ship flui para o disco na hora: um crash depois do
         # último token pago não pode apagar a contabilidade (23/08).
@@ -616,7 +630,9 @@ def main(argv: list[str] | None = None) -> None:
     elif comando == "perguntas":
         cmd_perguntas(_pasta_de(resto))
     elif comando == "ship":
-        cmd_ship(_pasta_de(resto))
+        continuar = "--continuar" in resto
+        resto = [a for a in resto if a != "--continuar"]
+        cmd_ship(_pasta_de(resto), continuar=continuar)
     elif comando == "publicar":
         cmd_publicar(_pasta_de(resto))
     elif comando == "painel":
