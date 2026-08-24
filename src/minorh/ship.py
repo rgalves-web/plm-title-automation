@@ -119,10 +119,12 @@ def _dispatch_escrita(ledger: Ledger, template: Path) -> dict[str, Any]:
     return {"write_cell": _write_cell, "record_blank": _record_blank}
 
 
-def _flush_de(pasta: Path, fase: str) -> Any:
+def _flush_de(pasta: Path, fase: str, ledger: Ledger | None = None) -> Any:
     """Escreve cada turno em `_minorh/ship/progresso_<fase>.jsonl` na hora —
-    uma sessão que cai no meio (timeout, limite) não pode sumir com a
-    contabilidade do que já foi pago (aconteceu 2x em 24/08)."""
+    e, quando a fase carrega um ledger, salva o ledger junto. Uma sessão que
+    cai no meio (timeout, limite, crédito) não pode sumir nem com a
+    contabilidade nem com o trabalho já pago (aconteceu 3x em 24/08; a
+    terceira levou 205 escritas de projeção)."""
     import json as _json
     caminho = pasta / "_minorh" / "ship" / f"progresso_{fase}.jsonl"
     caminho.parent.mkdir(parents=True, exist_ok=True)
@@ -133,6 +135,8 @@ def _flush_de(pasta: Path, fase: str) -> Any:
                 {"turno": rec.turn, "chamadas": [c["tool"] for c in rec.calls],
                  "uso": rec.usage, "texto": rec.text[:200]},
                 ensure_ascii=False) + "\n")
+        if ledger is not None:
+            ledger.save(pasta / "_minorh" / "ship" / "ledger.json")
     return flush
 
 
@@ -154,7 +158,7 @@ def projetar(*, pasta: Path, memoria: Any, template: Path, modelo: str,
                       tools=FERRAMENTAS_PROJECAO + ferramentas_leitura,
                       dispatch=dispatch, model=modelo, max_turns=200,
                       max_cost_usd=max_cost_usd, client=client,
-                      on_turn=_flush_de(pasta, "projecao"))
+                      on_turn=_flush_de(pasta, "projecao", ledger))
     return ledger, log
 
 
@@ -257,7 +261,7 @@ def corrigir(*, pasta: Path, ledger: Ledger, reprovadas: list[Veredito],
         system=SISTEMA_PROJECAO, task=REAUDITORIA.format(reprovadas=texto),
         tools=FERRAMENTAS_PROJECAO + ferramentas_leitura, dispatch=dispatch,
         model=modelo, max_turns=60, max_cost_usd=max_cost_usd, client=client,
-        on_turn=_flush_de(pasta, "correcao"))
+        on_turn=_flush_de(pasta, "correcao", ledger))
     return log
 
 
