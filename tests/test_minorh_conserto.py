@@ -348,3 +348,83 @@ def test_escrita_do_ship_fora_do_root_e_excecao(tmp_path: Path):
         write_workbook(ledger, dentro / "ship" / "DDR.xlsx", template=tpl)
         with pytest.raises(WriteOutsideRoots):
             write_workbook(ledger, tmp_path / "fora.xlsx", template=tpl)
+
+
+# --- retry de erro transitorio da API ----------------------------------------
+
+def test_erro_transitorio_da_api_e_repetido_e_o_definitivo_nao(monkeypatch):
+    from src.examinador import loop as loop_mod
+
+    class _Erro(Exception):
+        def __init__(self, status):
+            self.status_code = status
+
+    monkeypatch.setattr(loop_mod, "RETRY_BASE_S", 0.0)
+
+    class _Client:
+        def __init__(self, falhas):
+            self.falhas = falhas
+            self.chamadas = 0
+            self.messages = self
+
+        def create(self, **kw):
+            self.chamadas += 1
+            if self.falhas:
+                raise self.falhas.pop(0)
+            return "ok"
+
+    c = _Client([_Erro(529), _Erro(429)])
+    assert loop_mod._create_com_retry(c) == "ok"
+    assert c.chamadas == 3
+
+    c2 = _Client([_Erro(400)])           # erro definitivo: nao repete
+    with pytest.raises(_Erro):
+        loop_mod._create_com_retry(c2)
+    assert c2.chamadas == 1
+
+
+# --- D2: PEDIDOS.md empacotado por sentada -----------------------------------
+
+def test_pedidos_agrupados_por_sentada(tmp_path: Path):
+    from src.minorh.arquivos import escrever_pedidos
+    estado = Estado(tmp_path)
+    estado.novo_pedido("Lease A", "instrumento A",
+                       "cartório de Cooke — CourthouseDirect", "pull",
+                       [{"entidade": "lease a", "campo": "royalty"}])
+    estado.novo_pedido("Lease B", "instrumento B",
+                       "cartório de Cooke — CourthouseDirect", "pull",
+                       [{"entidade": "lease b", "campo": "royalty"}])
+    estado.novo_pedido("W-1 do poço", "W-1 mais recente",
+                       "RRC — gis.rrc.texas.gov", "consulta",
+                       [{"entidade": "poco 1", "campo": "w1"}])
+    texto = escrever_pedidos(estado).read_text(encoding="utf-8")
+    assert "## Sentada: cartório de Cooke — CourthouseDirect — 2 item(ns)" \
+        in texto
+    assert "## Sentada: RRC — gis.rrc.texas.gov — 1 item(ns)" in texto
+    assert texto.count("## Sentada:") == 2       # 3 itens, 2 sentadas
+    assert "### PED-001 — Lease A" in texto
+
+
+# --- D3: painel — leitura pura ----------------------------------------------
+
+def test_painel_uma_linha_por_unidade_sem_modelo(tmp_path: Path, capsys):
+    from src.minorh.cli import cmd_painel
+    from src.minorh.memoria import Memoria
+    for nome, exige in (("unidade um", 10), ("unidade dois", 20)):
+        u = tmp_path / nome
+        e = Estado(u)
+        e.declarar_censo(exige, "conta")
+        e.registrar_execucao("unidade", {"entrada": 1, "saida": 1,
+                                         "cache_escrita": 0,
+                                         "cache_leitura": 0,
+                                         "custo_usd": 2.5})
+        e.registrar_horas(0.5)
+        m = Memoria(u / "_minorh" / "memoria.json")
+        m.gravar("x", "y", "v", "d.pdf", 1, "t", "alta")
+    (tmp_path / "sem estado").mkdir()            # pasta sem unidade: ignorada
+    cmd_painel(tmp_path)
+    saida = capsys.readouterr().out.strip().splitlines()
+    assert len(saida) == 2
+    assert any("unidade um: censo 10" in l and "$2.5" in l and "0.5h" in l
+               and "último: unidade" in l for l in saida)
+    assert any("unidade dois: censo 20" in l for l in saida)

@@ -130,3 +130,5 @@ Uma linha por escrita. Quem escreveu foi o modelo; este arquivo e o rastro.
 - atualizou `exhibit-a-da-dpu-vs-recital-recorded-do-lease` (regra)
 - atualizou `exhibit-a-da-dpu-vs-recital-recorded-do-lease` (regra)
 - criou `documento-que-chega-depois-regravar-sob-chave-canonica` (regra)
+- criou `precedente-divergencia-de-referencia-de-registro-resolve-se-no-cartorio` (veredito)
+- atualizou `exhibit-a-da-dpu-vs-recital-recorded-do-lease` (regra)

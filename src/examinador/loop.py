@@ -151,8 +151,8 @@ def run_loop(*, system: str, task: str, tools: list[dict[str, Any]],
 
     for turn in range(1, max_turns + 1):
         _roll_cache_breakpoint(messages)
-        message = client.messages.create(
-            model=model, max_tokens=MAX_TOKENS,
+        message = _create_com_retry(
+            client, model=model, max_tokens=MAX_TOKENS,
             system=[{"type": "text", "text": system,
                      "cache_control": {"type": "ephemeral"}}],
             tools=tools, messages=messages)
@@ -210,6 +210,37 @@ def run_loop(*, system: str, task: str, tools: list[dict[str, Any]],
         log.stop_reason = f"teto de {max_turns} turnos — RODADA INCOMPLETA"
 
     return log, messages
+
+
+RETRY_TENTATIVAS = 5
+RETRY_BASE_S = 2.0
+
+
+def _transitorio(exc: Exception) -> bool:
+    """Erro que vale repetir: sobrecarga, rate limit, 5xx. Nada de conteúdo."""
+    status = getattr(exc, "status_code", None)
+    return status in (429, 500, 502, 503, 504, 529)
+
+
+def _create_com_retry(client: Any, **kwargs: Any) -> Any:
+    """`messages.create` com backoff exponencial para erro transitório.
+
+    Dois 529 seguidos mataram sessões no turno 1 em 24/08; num turno 40 o
+    mesmo erro perderia uma conversa inteira já paga. Repetir sobrecarga da
+    API é plumbing — não muda o que o modelo responde, só quando."""
+    import time
+
+    for tentativa in range(RETRY_TENTATIVAS):
+        try:
+            return client.messages.create(**kwargs)
+        except Exception as exc:
+            if not _transitorio(exc) or tentativa == RETRY_TENTATIVAS - 1:
+                raise
+            espera = RETRY_BASE_S * (2 ** tentativa)
+            print(f"   API {getattr(exc, 'status_code', '?')} transitório — "
+                  f"tentativa {tentativa + 1}/{RETRY_TENTATIVAS}, aguardando "
+                  f"{espera:.0f}s…", flush=True)
+            time.sleep(espera)
 
 
 def _roll_cache_breakpoint(messages: list[dict[str, Any]]) -> None:

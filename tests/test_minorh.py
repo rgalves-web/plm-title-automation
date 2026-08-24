@@ -189,8 +189,12 @@ def test_write_knowledge_roteia_pelo_escopo(ctx):
 
 # --- auditor ----------------------------------------------------------------
 
-def test_sem_segunda_chave_o_auditor_reserva_e_declarado(monkeypatch):
+def test_sem_segunda_chave_o_auditor_reserva_e_declarado(monkeypatch,
+                                                         tmp_path):
     from src.minorh.auditor import MODELO_RESERVA, Auditor
+    # chdir: `escolher` recarrega ".env" do cwd, e o .env real do repo pode
+    # ter a chave do segundo provedor — o teste é sobre a AUSÊNCIA dela.
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "chave-de-teste")
     auditor = Auditor.escolher()

@@ -7,6 +7,7 @@
     minorh ship                projeção + auditoria de 100% + kit de submissão
     minorh publicar            congela o kit em <UNIT>/SUBMISSION PLM/
     minorh horas <h> ["nota"]  registra horas do operador no estado
+    minorh painel "<pasta-mãe>"  uma linha por unidade aberta, sem modelo
 
 Teto duro por unidade: US$ 25 (`MINORH_TETO_UNIT_USD`). Ao bater, qualquer
 comando com modelo recusa, reporta o que falta e espera ordem — nunca estoura
@@ -201,10 +202,30 @@ def cmd_unidade(pasta: Path, client: Any = None) -> None:
         f"documentos em FILES/).\n\n"
         f"MAPA DO TEMPLATE do entregável, célula a célula:\n"
         f"{template_map(template)}\n\n"
-        "Abra a unidade: declare o censo, leia o que o corpus tem, grave a "
-        "memória campo a campo, peça o que falta, pergunte o que só o "
-        "operador resolve. Quando o que há de legível estiver na memória, "
-        "pare de pedir ferramentas e resuma.")
+        "Abra a unidade. O dia 1 tem três entregas, nesta ordem:\n\n"
+        "1. CENSO (`declarar_censo`), como sempre — o denominador primeiro.\n\n"
+        "2. ESCOPO CRUZADO: cruze o Exhibit \"A\" da DPU com AS DUAS abas do "
+        "Lease-to-Well XREF e com a Lease & Mineral Schedule, county-aware "
+        "(a coluna RECORDING é multi-condado e leases podem ser "
+        "dual-recorded — ficha "
+        "`lease-mineral-schedule-recording-multi-condado`). Toda divergência "
+        "entre as fontes vira pergunta ou pedido — nunca uma escolha em "
+        "silêncio. Se uma dessas fontes não existir no corpus, declare isso "
+        "na memória e peça-a.\n\n"
+        "3. PULL LIST DE CARTÓRIO DESDE O DIA 1: todo instrumento do "
+        "perímetro sem arquivo em FILES/ mas com Book/Page (ou reception "
+        "number + ano) determinístico na Schedule/Exhibit vira item de "
+        "PEDIDOS.md (`pedir_documento`) com a referência exata, o condado e "
+        "o caminho provável do viewer (ficha "
+        "`cartorio-courthousedirect-arvore-e-busca`). Um item por decisão. "
+        "Itens do mesmo lugar recebem o MESMO texto em `onde` (ex. "
+        "\"cartório de Cooke — CourthouseDirect\"): o PEDIDOS.md é "
+        "empacotado por esse campo em sentadas de busca, e a meta é ≤ 1h de "
+        "operador por unidade.\n\n"
+        "Depois: leia o que o corpus tem, grave a memória campo a campo, "
+        "peça o que falta, pergunte o que só o operador resolve. Quando o "
+        "que há de legível estiver na memória, pare de pedir ferramentas e "
+        "resuma.")
     print("3/4 sessão do Examinador…", flush=True)
     uso = _sessao(ctx, task, "unidade",
                   _orcamento(ctx, float(os.environ.get("MINORH_TETO_USD",
@@ -472,6 +493,32 @@ def cmd_publicar(pasta: Path) -> None:
     _imprimir_fecho(ctx, "publicar", None)
 
 
+def cmd_painel(mae: Path) -> None:
+    """D3 — leitura pura: varre a pasta-mãe e imprime uma linha por unidade
+    com `_minorh/estado.json`. Zero chamada de modelo, zero escrita."""
+    achadas = sorted(p.parent.parent
+                     for p in mae.glob(f"*/{PASTA_ESTADO}/estado.json"))
+    if not achadas:
+        print(f"nenhuma unidade aberta sob {mae} (procuro "
+              f"<unidade>/{PASTA_ESTADO}/estado.json).")
+        return
+    for unidade in achadas:
+        e = Estado(unidade)
+        m = Memoria(unidade / PASTA_ESTADO / "memoria.json")
+        c = m.contar()
+        ultima = e.execucoes[-1] if e.execucoes else None
+        print(f"{unidade.name}: "
+              f"censo {e.censo.get('exige', '?')} · "
+              f"escritos {c['escritos']} · brancos {c['brancos']} · "
+              f"pendentes {c['pendentes']} · "
+              f"pedidos {sum(1 for p in e.pedidos if p['status'] == 'aberto')}"
+              f" · perguntas {len(e.perguntas_abertas())} · "
+              f"${e.custo_acumulado()['custo_usd']} · "
+              f"{e.horas_acumuladas()}h · "
+              + (f"último: {ultima['comando']} {ultima['quando'][:10]}"
+                 if ultima else "último: (nenhum comando com modelo)"))
+
+
 def cmd_horas(pasta: Path, horas: float, nota: str = "") -> None:
     ctx = _abrir(pasta)
     if not ctx["estado"].existe:
@@ -522,6 +569,10 @@ def main(argv: list[str] | None = None) -> None:
         cmd_ship(_pasta_de(resto))
     elif comando == "publicar":
         cmd_publicar(_pasta_de(resto))
+    elif comando == "painel":
+        if not resto:
+            raise SystemExit('uso: minorh painel "<pasta-mãe das unidades>"')
+        cmd_painel(Path(resto[0]))
     elif comando == "horas":
         if not resto:
             raise SystemExit('uso: minorh horas <horas> ["nota"] ["<pasta>"]')
@@ -534,4 +585,4 @@ def main(argv: list[str] | None = None) -> None:
     else:
         raise SystemExit(f"comando desconhecido: {comando!r}. "
                          f"Comandos: unidade, continuar, estado, perguntas, "
-                         f"ship, publicar, horas.")
+                         f"ship, publicar, horas, painel.")

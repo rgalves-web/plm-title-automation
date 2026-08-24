@@ -18,26 +18,37 @@ PLACEHOLDER = "_(escreva aqui e rode `minorh continuar`)_"
 
 
 def escrever_pedidos(estado: Estado) -> Path:
+    """Empacotado por SENTADA (D2): itens com o mesmo `onde` saem juntos,
+    para o operador resolver cada lugar numa ida só — a meta do doc
+    governante é ≤ 1h de operador por unidade. Agrupar por string igual é
+    plumbing; decidir o `onde` de cada item é do modelo."""
     path = estado.unidade / "PEDIDOS.md"
     abertos = [p for p in estado.pedidos if p["status"] == "aberto"]
     atendidos = [p for p in estado.pedidos if p["status"] != "aberto"]
     lines = [
         f"# PEDIDOS — {estado.unidade.name}",
         "",
-        "O que falta buscar para fechar o censo. Um item por decisão. Quando o",
-        "documento chegar, coloque-o em `FILES/` e rode `minorh continuar` — o",
-        "sistema lê só o que é novo e atualiza os números.",
+        "O que falta buscar para fechar o censo. Um item por decisão,",
+        "agrupado por sentada de busca — cada seção abaixo se resolve numa",
+        "ida a um lugar só. Quando o documento chegar, coloque-o em `FILES/`",
+        "e rode `minorh continuar` — o sistema lê só o que é novo e atualiza",
+        "os números.",
         "",
     ]
+    sentadas: dict[str, list[dict[str, Any]]] = {}
     for p in abertos:
-        lines += [f"## {p['id']} — {p['titulo']}",
-                  f"- **O que buscar:** {p['o_que']}",
-                  f"- **Onde:** {p['onde']}",
-                  f"- **Método:** {p['metodo']}",
-                  "- **Responde aos campos:** "
-                  + "; ".join(f"{c.get('entidade')} :: {c.get('campo')}"
-                              for c in p["campos"]),
-                  ""]
+        sentadas.setdefault(str(p.get("onde") or "(sem lugar)"), []).append(p)
+    for onde, itens in sentadas.items():
+        lines += [f"## Sentada: {onde} — {len(itens)} item(ns)", ""]
+        for p in itens:
+            lines += [f"### {p['id']} — {p['titulo']}",
+                      f"- **O que buscar:** {p['o_que']}",
+                      f"- **Onde:** {p['onde']}",
+                      f"- **Método:** {p['metodo']}",
+                      "- **Responde aos campos:** "
+                      + "; ".join(f"{c.get('entidade')} :: {c.get('campo')}"
+                                  for c in p["campos"]),
+                      ""]
     if not abertos:
         lines += ["_Nenhum pedido aberto._", ""]
     if atendidos:
