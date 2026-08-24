@@ -376,6 +376,13 @@ def cmd_ship(pasta: Path, client: Any = None) -> None:
         rodadas = 1
         reprovadas = s.reprovadas_de(vereditos)
         historico_rodada_1 = list(reprovadas)
+        # Vereditos fluem para o disco na hora — a rodada 1 do replay se
+        # perdeu quando os créditos da API acabaram no meio da correção.
+        (ship_dir / "vereditos_rodada1.json").write_text(
+            json.dumps({"contagem": contagem,
+                        "auditor_tokens": auditor.uso.to_dict(auditor.modelo),
+                        "vereditos": [v.to_dict() for v in vereditos]},
+                       indent=2, ensure_ascii=False), encoding="utf-8")
         print(f"   rodada 1: {contagem['auditadas']} auditadas, "
               f"{len(reprovadas)} reprovadas"
               + (": " + ", ".join(v.celula for v in reprovadas)
