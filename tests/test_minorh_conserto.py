@@ -428,3 +428,33 @@ def test_painel_uma_linha_por_unidade_sem_modelo(tmp_path: Path, capsys):
     assert any("unidade um: censo 10" in l and "$2.5" in l and "0.5h" in l
                and "último: unidade" in l for l in saida)
     assert any("unidade dois: censo 20" in l for l in saida)
+
+
+def test_nao_alocar_por_prefixo_de_pasta(tmp_path: Path):
+    from src.minorh.kit import alocar
+    from src.minorh.memoria import Memoria
+    import zipfile
+    files = tmp_path / "FILES"
+    files.mkdir(parents=True)
+    # Como no corpus real: nomes com "/" vêm de membros de zip lidos in-place.
+    with zipfile.ZipFile(files / "lease x.zip", "w") as z:
+        z.writestr("lease x/rascunho.tif", b"a")
+        z.writestr("lease x/recibo.tif", b"b")
+    (files / "dpu.pdf").write_bytes(b"c")
+    corpus = Corpus(files, cache=PageCache(tmp_path / "cache"))
+    memoria = Memoria(tmp_path / "_minorh" / "memoria.json")
+    client = _ClientRoteirizado([
+        [_Use("nao_alocar", {"documento": "lease x/",
+                             "motivo": "papelada interna"})],
+        [_Use("nao_alocar", {"documento": "nao-existe/", "motivo": "x"})],
+        [_Use("alocar_arquivo", {"documento": "dpu.pdf",
+                                 "destino": "Unit Designation",
+                                 "por_que": "dpu"})],
+        [_Texto("fim")],
+    ])
+    alocacao, log = alocar(pasta=tmp_path, corpus=corpus, memoria=memoria,
+                           modelo="claude-opus-5", dispatch_leitura={},
+                           client=client)
+    assert len(alocacao["fora_do_kit"]) == 2      # a pasta inteira, expandida
+    assert alocacao["sem_decisao"] == []
+    assert sum(1 for t in log.turns for c in t.calls if c["erro"]) == 1

@@ -6,6 +6,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [bpm-plm-due-diligence-leasehold-escopo](bpm-plm-due-diligence-leasehold-escopo.md) `formulario` — ## BPM: Due Diligence (Leasehold) — o memorando que define o escopo de cada aba do DDR
 - [cadeia-bra-de-oil-and-gas-para-eog-montague](cadeia-bra-de-oil-and-gas-para-eog-montague.md) `cadeia` — ## Bra-De Oil & Gas, Inc. → EOG Resources, Inc. (Montague County)
 - [cartorio courthousedirect arvore e busca](cartorio-courthousedirect-arvore-e-busca.md) `regra` — ## Cartório de Cooke via CourthouseDirect — como achar um instrumento
+- [cartorio-montague-courthousedirect](cartorio-montague-courthousedirect.md) `regra` — ## Cartório de Montague — pull list e faixa de volumes
 - [categories: agreement](categories-agreement.md) `regra` — - **label**: Agreement (JOA / farmout / ratification)
 - [categories: assignment](categories-assignment.md) `regra` — - **label**: Assignment / conveyance
 - [categories: correspondence](categories-correspondence.md) `regra` — - **label**: Correspondence / internal paperwork
@@ -47,6 +48,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [ddr_template_structure: Summary](ddr-template-structure-summary.md) `layout` — - **sample_stripped**: 12
 - [ddr_template_structure: Unit and Pooling Agreements](ddr-template-structure-unit-and-pooling-agreements.md) `layout` — - **sample_stripped**: 7
 - [documento-que-chega-depois-regravar-sob-chave-canonica](documento-que-chega-depois-regravar-sob-chave-canonica.md) `regra` — ## Documento pendente que chega depois: regrave sob chave canônica e cheque `substituiu`
+- [dpu-eog-exhibit-a-layout-e-custo-ocr-vs-imagem](dpu-eog-exhibit-a-layout-e-custo-ocr-vs-imagem.md) `layout` — ## Declaration of Pooled Unit da EOG — layout fixo e a armadilha de custo
 - [engagement](engagement.md) `unidade` — - **version**: 1
 - [entities: instrument](entities-instrument.md) `entidade` — - **label**: Recorded Instrument
 - [entities: lease](entities-lease.md) `entidade` — - **label**: Lease

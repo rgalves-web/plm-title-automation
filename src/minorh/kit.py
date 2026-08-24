@@ -58,8 +58,10 @@ FERRAMENTAS_KIT: list[dict[str, Any]] = [
         "description": (
             "Declara que um arquivo do corpus fica FORA do kit, com motivo "
             "(ex. duplicata, screenshot, correspondencia interna, fora do "
-            "escopo). Arquivo sem decisao aparece no relatorio como "
-            "pendencia — decida todos."),
+            "escopo). `documento` terminado em '/' e um PREFIXO de pasta: "
+            "exclui todos os arquivos sob ele com o mesmo motivo — para "
+            "descartar uma pasta inteira sem 1 chamada por arquivo. Arquivo "
+            "sem decisao aparece no relatorio como pendencia — decida todos."),
         "input_schema": {"type": "object", "properties": {
             "documento": {"type": "string"},
             "motivo": {"type": "string"}},
@@ -73,7 +75,10 @@ pronto e sera colocado em 'PLM Report/' pelo sistema — seu trabalho e decidir
 o destino de CADA arquivo do corpus:
 
 1. Para cada arquivo: `alocar_arquivo` (pasta certa + nome conforme a spec)
-   ou `nao_alocar` (com motivo). Nenhum arquivo fica sem decisao.
+   ou `nao_alocar` (com motivo). Nenhum arquivo fica sem decisao. Num corpus
+   grande, `nao_alocar` com prefixo terminado em '/' descarta uma pasta
+   inteira de uma vez (ex. rascunhos internos de um lease ja representado
+   pelo instrumento alocado).
 2. Consulte as fichas (`read_knowledge`): `sop-10-formato-e-empacotamento`,
    `category-to-ddr-*` e as `categories-*` dizem o que vai onde e como nomear.
 3. Leases: 'L# - book.page - Lessor OGL' (L# = ordem no Lease Review).
@@ -121,6 +126,14 @@ def alocar(*, pasta: Path, corpus: Any, memoria: Any, modelo: str,
         return {"alocado": documento, "destino": destino}
 
     def _nao_alocar(documento: str, motivo: str) -> dict[str, Any]:
+        if documento.endswith("/"):
+            # Prefixo de pasta: exclui tudo sob ele. Expandir a lista é
+            # plumbing; escolher o prefixo e o motivo é do modelo.
+            atingidos = [n for n in nomes if n.startswith(documento)]
+            if not atingidos:
+                raise ValueError(f"nenhum arquivo do corpus sob {documento!r}")
+            fora.extend({"documento": n, "motivo": motivo} for n in atingidos)
+            return {"fora_do_kit": documento, "arquivos": len(atingidos)}
         if documento not in nomes:
             raise ValueError(f"{documento!r} nao esta no corpus")
         fora.append({"documento": documento, "motivo": motivo})

@@ -135,3 +135,5 @@ Uma linha por escrita. Quem escreveu foi o modelo; este arquivo e o rastro.
 - criou `template-ddr-sintetico-semeado-com-linha-de-outra-unidade` (formulario)
 - criou `escopo-cruzado-quando-xref-e-schedule-nao-estao-no-corpus` (regra)
 - criou `auditoria-celulas-ordinais-sao-estrutura` (regra)
+- criou `dpu-eog-exhibit-a-layout-e-custo-ocr-vs-imagem` (layout)
+- criou `cartorio-montague-courthousedirect` (regra)
