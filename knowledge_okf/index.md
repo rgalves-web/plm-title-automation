@@ -4,6 +4,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 
 - [bpm-plm-due-diligence-leasehold-escopo](bpm-plm-due-diligence-leasehold-escopo.md) `formulario` — ## BPM: Due Diligence (Leasehold) — o memorando que define o escopo de cada aba do DDR
 - [cadeia-bra-de-oil-and-gas-para-eog-montague](cadeia-bra-de-oil-and-gas-para-eog-montague.md) `cadeia` — ## Bra-De Oil & Gas, Inc. → EOG Resources, Inc. (Montague County)
+- [cartorio courthousedirect arvore e busca](cartorio-courthousedirect-arvore-e-busca.md) `regra` — ## Cartório de Cooke via CourthouseDirect — como achar um instrumento
 - [categories: agreement](categories-agreement.md) `regra` — - **label**: Agreement (JOA / farmout / ratification)
 - [categories: assignment](categories-assignment.md) `regra` — - **label**: Assignment / conveyance
 - [categories: correspondence](categories-correspondence.md) `regra` — - **label**: Correspondence / internal paperwork
@@ -76,10 +77,45 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [identity_keys: unit_tract](identity-keys-unit-tract.md) `entidade` — - **required**:
 - [identity_keys: unit](identity-keys-unit.md) `entidade` — - **required**:
 - [identity_keys: well](identity-keys-well.md) `entidade` — - **required**:
+- [lease mineral schedule recording multi condado](lease-mineral-schedule-recording-multi-condado.md) `regra` — ## Coluna RECORDING da Lease & Mineral Schedule é multi-condado
+- [manual 10.3 categorias de missing files](manual-10-3-categorias-de-missing-files.md) `regra-cliente` — ## Missing Files além de lease — categorias e impacto mínimo
+- [manual 10.4 ciclo de vida missing files](manual-10-4-ciclo-de-vida-missing-files.md) `regra-cliente` — ## Ciclo de vida de um Missing Item
+- [manual 10 missing files](manual-10-missing-files.md) `regra-cliente` — ## Missing Files — o que entra (critério controlador, S05/S06 de 14/08)
+- [manual 11.1 plm title review](manual-11-1-plm-title-review.md) `regra-cliente` — ## PLM Title Review
+- [manual 11.2 summary](manual-11-2-summary.md) `regra-cliente` — ## Summary — campo a campo
+- [manual 11.3 outras abas](manual-11-3-outras-abas.md) `regra-cliente` — ## Agreements, Unit and Pooling, Disclaimer, headers
+- [manual 12 producao e well data](manual-12-producao-e-well-data.md) `regra-cliente` — ## Produção e well data
+- [manual 15 catalogo de validacoes](manual-15-catalogo-de-validacoes.md) `regra-cliente` — ## VAL-001..017 — o que conferir antes de submeter (perguntas, não gates de código)
+- [manual 16 excecoes e roteamento humano](manual-16-excecoes-e-roteamento-humano.md) `regra-cliente` — ## Exceções — resposta esperada
+- [manual 19 testes de aceite](manual-19-testes-de-aceite.md) `regra-cliente` — ## AT-01..18 — comportamento esperado (precedentes de conduta do Examinador)
+- [manual 6.1 expediente da unidade](manual-6-1-expediente-da-unidade.md) `regra-cliente` — ## Abrir o expediente da unidade
+- [manual 6.2 ordem de coleta](manual-6-2-ordem-de-coleta.md) `regra-cliente` — ## Ordem de coleta das fontes
+- [manual 6.3 gate de dpu e to](manual-6-3-gate-de-dpu-e-to.md) `regra-cliente` — ## O que fazer quando DPU ou TO faltam
+- [manual 7.2 classificacoes de lease](manual-7-2-classificacoes-de-lease.md) `regra-cliente` — ## Classes obrigatórias de lease e tratamento
+- [manual 7.3 chaves de reconciliacao](manual-7-3-chaves-de-reconciliacao.md) `regra-cliente` — ## Como reconciliar identidades de lease
+- [manual 7 universo de leases](manual-7-universo-de-leases.md) `regra-cliente` — ## Lease Universe — inclusão e regra de completude
+- [manual 8.1 periodo de pesquisa suplementar](manual-8-1-periodo-de-pesquisa-suplementar.md) `regra-cliente` — ## Período da pesquisa suplementar
+- [manual 8.2 cadeias obrigatorias](manual-8-2-cadeias-obrigatorias.md) `regra-cliente` — ## Cadeias que a pesquisa suplementar DEVE rodar
+- [manual 8.3 linha do runsheet](manual-8-3-linha-do-runsheet.md) `regra-cliente` — ## O que cada linha do runsheet carrega
+- [manual 8.4 curative](manual-8-4-curative.md) `regra-cliente` — ## Curative — o destino de cada requirement
+- [manual 9.1 ownership report](manual-9-1-ownership-report.md) `regra-cliente` — ## Ownership Report
+- [manual 9.2 calculo wi nri](manual-9-2-calculo-wi-nri.md) `regra-cliente` — ## Conta de WI/NRI
+- [manual 9.3 lease review](manual-9-3-lease-review.md) `regra-cliente` — ## Lease Review — fonte preferencial por campo
+- [precedente acquisition project emirates](precedente-acquisition-project-emirates.md) `veredito` — Summary → Acquisition = **Project Emirates** (Manual cap. 11.2; SOP §9). Aplicar sem perguntar de novo.
+- [precedente advisory only fora de outstanding curative](precedente-advisory-only-fora-de-outstanding-curative.md) `veredito` — Requirement marcado **Advisory only** NÃO entra em Material Outstanding Title Requirements nem em Outstanding 
+- [precedente agreements sem joa na e dashes](precedente-agreements-sem-joa-na-e-dashes.md) `veredito` — Aba Agreements: nenhum JOA/farmout localizado ou referido → **`N/A`** e **dashes** nas linhas da Column B (Man
+- [precedente client bkv corp](precedente-client-bkv-corp.md) `veredito` — Summary → Client = **BKV Corp.** — a Rodada 1 perguntou; o Manual (cap. 11.2) e o SOP §9 respondem. Aplicar se
+- [precedente disclaimer abc llc vira bkv corp](precedente-disclaimer-abc-llc-vira-bkv-corp.md) `veredito` — Aba Disclaimer: substituir `ABC, LLC` por **`BKV Corp.`** (Manual cap. 11.3; SOP §9).
+- [precedente memo only missing lease em potential defects](precedente-memo-only-missing-lease-em-potential-defects.md) `veredito` — Lease memo-only: preencher só o que o memorandum comprova; royalty/termos materiais em branco; o full OGL entr
+- [precedente missing documents no summary](precedente-missing-documents-no-summary.md) `veredito` — O Summary carrega um bloco **MISSING DOCUMENTS espelhando o Missing Files log** — ausências materiais aparecem
+- [precedente operator eog ou project log](precedente-operator-eog-ou-project-log.md) `veredito` — Operator = **EOG Resources, Inc.**, salvo o project log (`Well List – Prelim AV%`) indicar outro operador para
+- [project log aba missing files formato](project-log-aba-missing-files-formato.md) `regra` — ## Aba Missing Files do Project Log — formato de escrita
+- [protocolo captura viewer cartorio](protocolo-captura-viewer-cartorio.md) `regra` — ## Protocolo de captura do viewer do cartório
 - [resolver_identity_by_key/fixture](resolver-identity-by-key-fixture.md) `regra` — - **lesson_id**: resolver_identity_by_key
 - [runsheet-e-cadeia-suplementar-vazia-quando-nada-e-posterior-a-cert-date](runsheet-e-cadeia-suplementar-vazia-quando-nada-e-posterior-a-cert-date.md) `veredito` — ## VEREDITO DO OPERADOR (P1) — a Runsheet e cadeia SUPLEMENTAR de titulo
 - [runsheet_style](runsheet-style.md) `regra` — - **version**: 1
 - [runsheet-vazia-por-pre-cert-date-em-unidade-so-com-original-opinion](runsheet-vazia-por-pre-cert-date-em-unidade-so-com-original-opinion.md) `regra` — ## RESOLVIDO — unidade cujo unico parecer e o ORIGINAL title opinion
+- [sop 10 formato e empacotamento](sop-10-formato-e-empacotamento.md) `regra-cliente` — ## Formato do DDR e pacote de submissão
 - [sources: county_clerk_records](sources-county-clerk-records.md) `regra` — - **label**: County Clerk — real property records
 - [sources: county_records_portal](sources-county-records-portal.md) `regra` — - **label**: TexasFile / CourthouseDirect
 - [sources: drive_plm](sources-drive-plm.md) `regra` — - **label**: PLM Drive

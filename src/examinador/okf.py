@@ -26,8 +26,10 @@ DEFAULT_ROOT = Path("knowledge_okf")
 RESERVED = ("index.md", "log.md")
 
 # The routing field. A card's type decides who reads it, not what it means.
+# `regra-cliente` (ordem de 23/08) marca regra vinda do cliente — Manual
+# Técnico ou SOP — com fonte S##/capítulo e data na ficha.
 TYPES = ("cadeia", "formulario", "layout", "entidade", "veredito", "regra",
-         "unidade", "custo")
+         "regra-cliente", "unidade", "custo")
 
 
 def slug(concept: str) -> str:
