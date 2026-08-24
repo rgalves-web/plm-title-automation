@@ -2,6 +2,7 @@
 
 Uma ficha por conceito. Lida uma vez, consultada sempre.
 
+- [auditoria celulas ordinais sao estrutura](auditoria-celulas-ordinais-sao-estrutura.md) `regra` — ## Célula ordinal é ESTRUTURA do artefato, não fato de title
 - [bpm-plm-due-diligence-leasehold-escopo](bpm-plm-due-diligence-leasehold-escopo.md) `formulario` — ## BPM: Due Diligence (Leasehold) — o memorando que define o escopo de cada aba do DDR
 - [cadeia-bra-de-oil-and-gas-para-eog-montague](cadeia-bra-de-oil-and-gas-para-eog-montague.md) `cadeia` — ## Bra-De Oil & Gas, Inc. → EOG Resources, Inc. (Montague County)
 - [cartorio courthousedirect arvore e busca](cartorio-courthousedirect-arvore-e-busca.md) `regra` — ## Cartório de Cooke via CourthouseDirect — como achar um instrumento

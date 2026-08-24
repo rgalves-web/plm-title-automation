@@ -43,6 +43,13 @@ Conteudo da pagina citada ({modo}):
 Valores das demais celulas do arquivo (para checar contradicao):
 {listagem}
 
+Distincao que importa: celula ORDINAL/ESTRUTURAL (numero de ordem ou de
+sequencia — o "1"/"2" de uma lista, o NO. de uma linha, o L# de um lease na
+ordem do arquivo) nao afirma fato de title; o ordinal nasce do ARQUIVO, nao da
+pagina. Para essas, "sustenta" = a ordem/contagem e consistente com as demais
+celulas listadas e a pagina nao a contradiz — nunca exija que a pagina
+"prove" o numero de ordem. O que e ou nao ordinal e julgamento seu.
+
 Responda APENAS um objeto JSON:
 {{"sustenta": true|false,        // a pagina citada sustenta o valor escrito?
   "contradiz": null|"<celula>",  // contradiz alguma outra celula listada?
@@ -142,9 +149,15 @@ class Auditor:
             resp = self._client.chat.completions.create(
                 model=self.modelo,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=900)
+                max_completion_tokens=900)
             usage = resp.usage
-            self.uso.input += int(getattr(usage, "prompt_tokens", 0) or 0)
+            # prompt_tokens INCLUI os cacheados; separar para a tarifa de
+            # cache lido não superestimar o custo do ramo B.
+            detalhes = getattr(usage, "prompt_tokens_details", None)
+            cacheados = int(getattr(detalhes, "cached_tokens", 0) or 0)
+            self.uso.input += int(getattr(usage, "prompt_tokens", 0) or 0) \
+                - cacheados
+            self.uso.cache_read += cacheados
             self.uso.output += int(getattr(usage, "completion_tokens", 0) or 0)
             return resp.choices[0].message.content or ""
         msg = self._client.messages.create(
@@ -155,10 +168,9 @@ class Auditor:
                        if getattr(b, "type", "") == "text")
 
     def custo(self) -> float | None:
-        if self.provedor == "anthropic":
-            return self.uso.cost(self.modelo)
-        # Fora da tabela RATES: reporta tokens e diz que o custo nao esta nela.
-        return None
+        # Qualquer provedor: a tabela RATES decide. Modelo fora dela devolve
+        # None — tokens sempre reportados, custo nunca inventado.
+        return self.uso.cost(self.modelo)
 
 
 _JSON = re.compile(r"\{.*\}", re.DOTALL)

@@ -28,6 +28,15 @@ RATES: dict[str, dict[str, float]] = {
                         "cache_write": 3.75, "cache_read": 0.3},
     "claude-haiku-4-5-20251001": {"input": 1.0, "output": 5.0,
                                   "cache_write": 1.25, "cache_read": 0.1},
+    # Ramo B (auditor OpenAI) — tarifa Standard em 24/08/2026, de
+    # developers.openai.com/api/docs/pricing. A OpenAI não cobra escrita de
+    # cache à parte (entra como input normal); "cached input" é só leitura.
+    "gpt-5.6-terra": {"input": 2.0, "output": 12.0,
+                      "cache_write": 2.0, "cache_read": 0.2},
+    "gpt-5.4-mini": {"input": 0.75, "output": 4.5,
+                     "cache_write": 0.75, "cache_read": 0.075},
+    "gpt-4o-mini": {"input": 0.15, "output": 0.6,
+                    "cache_write": 0.15, "cache_read": 0.075},
 }
 
 

@@ -134,3 +134,4 @@ Uma linha por escrita. Quem escreveu foi o modelo; este arquivo e o rastro.
 - atualizou `exhibit-a-da-dpu-vs-recital-recorded-do-lease` (regra)
 - criou `template-ddr-sintetico-semeado-com-linha-de-outra-unidade` (formulario)
 - criou `escopo-cruzado-quando-xref-e-schedule-nao-estao-no-corpus` (regra)
+- criou `auditoria-celulas-ordinais-sao-estrutura` (regra)
