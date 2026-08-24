@@ -126,3 +126,7 @@ Uma linha por escrita. Quem escreveu foi o modelo; este arquivo e o rastro.
 - criou `lease-mineral-schedule-recording-multi-condado` (regra)
 - criou `protocolo-captura-viewer-cartorio` (regra)
 - criou `project-log-aba-missing-files-formato` (regra)
+- criou `censo-template-sintetico-6-abas-formula-e-linha-de-exemplo` (layout)
+- atualizou `exhibit-a-da-dpu-vs-recital-recorded-do-lease` (regra)
+- atualizou `exhibit-a-da-dpu-vs-recital-recorded-do-lease` (regra)
+- criou `documento-que-chega-depois-regravar-sob-chave-canonica` (regra)

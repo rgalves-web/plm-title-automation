@@ -153,7 +153,9 @@ def alocar(*, pasta: Path, corpus: Any, memoria: Any, modelo: str,
 def montar(*, pasta: Path, corpus: Any, alocacao: dict[str, Any],
            ddr: Path, checklist: Path | None = None) -> dict[str, Any]:
     """A caneta: árvore da spec + cópias com md5 round-trip. Zero decisão."""
-    kit_dir = pasta / "_minorh" / "ship" / "kit" / RAIZ_KIT
+    # Resolvido: record_write devolve caminho absoluto, e relative_to entre
+    # absoluto e relativo estoura (pego na primeira rodada real, 23/08).
+    kit_dir = (Path(pasta).resolve() / "_minorh" / "ship" / "kit" / RAIZ_KIT)
     if kit_dir.exists():
         shutil.rmtree(kit_dir)
     for nome in PASTAS:

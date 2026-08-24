@@ -32,6 +32,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [category_to_ddr: runsheet](category-to-ddr-runsheet.md) `regra` — - **resolves_to**:
 - [category_to_ddr: unit_and_pooling_agreements](category-to-ddr-unit-and-pooling-agreements.md) `regra` — - **resolves_to**:
 - [category_to_ddr: well_files](category-to-ddr-well-files.md) `regra` — - **resolves_to**:
+- [censo-template-sintetico-6-abas-formula-e-linha-de-exemplo](censo-template-sintetico-6-abas-formula-e-linha-de-exemplo.md) `layout` — ## Como contar o denominador do template sintético de 6 abas
 - [custo-corpus-sintetico-6-docs-legibilidade-total](custo-corpus-sintetico-6-docs-legibilidade-total.md) `custo` — ## Corpus sintetico: camada de texto em 100% dos documentos — nunca use `ocr`/`imagem` aqui
 - [custo-legibilidade-do-corpus-montague-eog](custo-legibilidade-do-corpus-montague-eog.md) `custo` — ## O que da para ler neste corpus, e por qual modo (medido)
 - [custo-xlsx-ilegivel-pelas-ferramentas](custo-xlsx-ilegivel-pelas-ferramentas.md) `custo` — ## .xlsx nao e legivel por nenhum dos tres modos — nao gaste chamadas
@@ -44,6 +45,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [ddr_template_structure: Runsheet](ddr-template-structure-runsheet.md) `layout` — - **sample_stripped**: 63
 - [ddr_template_structure: Summary](ddr-template-structure-summary.md) `layout` — - **sample_stripped**: 12
 - [ddr_template_structure: Unit and Pooling Agreements](ddr-template-structure-unit-and-pooling-agreements.md) `layout` — - **sample_stripped**: 7
+- [documento-que-chega-depois-regravar-sob-chave-canonica](documento-que-chega-depois-regravar-sob-chave-canonica.md) `regra` — ## Documento pendente que chega depois: regrave sob chave canônica e cheque `substituiu`
 - [engagement](engagement.md) `unidade` — - **version**: 1
 - [entities: instrument](entities-instrument.md) `entidade` — - **label**: Recorded Instrument
 - [entities: lease](entities-lease.md) `entidade` — - **label**: Lease

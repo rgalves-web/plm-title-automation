@@ -128,10 +128,14 @@ def _numeros(ctx: dict[str, Any]) -> str:
 
 def _imprimir_fecho(ctx: dict[str, Any], comando: str,
                     uso: dict[str, Any] | None) -> None:
+    # O custo é registrado ANTES de qualquer print: um console que engasga
+    # num caractere não pode apagar a contabilidade do que já foi gasto
+    # (aconteceu em 23/08 — UnicodeEncodeError no delta engoliu $0.53).
+    if uso:
+        ctx["estado"].registrar_execucao(comando, uso)
     print()
     print(_numeros(ctx))
     if uso:
-        ctx["estado"].registrar_execucao(comando, uso)
         print(f"custo desta execução: ${uso.get('custo_usd')} "
               f"(entrada_total {uso.get('entrada_total')} · "
               f"saída {uso.get('saida')} · cache escrita "
@@ -258,9 +262,11 @@ def cmd_continuar(pasta: Path, client: Any = None) -> None:
 
     depois = {"censo": ctx["estado"].censo.get("exige"),
               **ctx["memoria"].contar()}
-    print(f"\ndelta: censo {antes['censo']} → {depois['censo']} · "
-          f"escritos {antes['escritos']} → {depois['escritos']} · "
-          f"pendentes {antes['pendentes']} → {depois['pendentes']} · "
+    # "->" e não "→": um console Windows em cp1252 não codifica U+2192, e um
+    # print que estoura depois da sessão perderia o registro do custo.
+    print(f"\ndelta: censo {antes['censo']} -> {depois['censo']} · "
+          f"escritos {antes['escritos']} -> {depois['escritos']} · "
+          f"pendentes {antes['pendentes']} -> {depois['pendentes']} · "
           f"documentos novos processados: {len(novos)} · "
           f"respostas processadas: {len(respostas)}")
     _imprimir_fecho(ctx, "continuar", uso)
@@ -322,15 +328,20 @@ def cmd_ship(pasta: Path, client: Any = None) -> None:
     # B3: o ship declara seu write-root ANTES de escrever; escrita fora dele
     # é exceção, não warning.
     with write_scope(pasta / PASTA_ESTADO, label=f"minorh ship {pasta.name}"):
+        ship_dir = pasta / PASTA_ESTADO / "ship"
+        ship_dir.mkdir(parents=True, exist_ok=True)
+
         print("1/4 projeção: a memória vira DDR…")
         ledger, log1 = s.projetar(
             pasta=pasta, memoria=ctx["memoria"], template=template,
             modelo=MODELO, dispatch_leitura=dispatch_leitura, client=client,
             max_cost_usd=_orcamento(ctx, 40.0))
         _somar(log1)
+        # Cada sessão do ship flui para o disco na hora: um crash depois do
+        # último token pago não pode apagar a contabilidade (23/08).
+        log1.save(ship_dir / "log_projecao.json")
+        ledger.save(ship_dir / "ledger.json")
 
-        ship_dir = pasta / PASTA_ESTADO / "ship"
-        ship_dir.mkdir(parents=True, exist_ok=True)
         ddr = s.write_workbook(ledger, ship_dir / "DDR.xlsx",
                                template=template)
 
@@ -357,6 +368,8 @@ def cmd_ship(pasta: Path, client: Any = None) -> None:
                               template=template, client=client,
                               max_cost_usd=_orcamento(ctx, 20.0))
             _somar(log2)
+            log2.save(ship_dir / "log_correcao.json")
+            ledger.save(ship_dir / "ledger.json")
             ddr = s.write_workbook(ledger, ship_dir / "DDR.xlsx",
                                    template=template)
             alvo = ({v.celula for v in reprovadas}
@@ -404,6 +417,7 @@ def cmd_ship(pasta: Path, client: Any = None) -> None:
                 modelo=MODELO, dispatch_leitura=dispatch_leitura,
                 client=client, max_cost_usd=_orcamento(ctx, 10.0))
             _somar(log_ck)
+            log_ck.save(ship_dir / "log_checklist.json")
             checklist_final = s.write_workbook(
                 led_ck, ship_dir / "Phase I - Checklist.xlsx",
                 template=checklist_tpl)
@@ -424,6 +438,7 @@ def cmd_ship(pasta: Path, client: Any = None) -> None:
             modelo=MODELO, dispatch_leitura=dispatch_leitura, client=client,
             max_cost_usd=_orcamento(ctx, 10.0))
         _somar(log_kit)
+        log_kit.save(ship_dir / "log_alocacao.json")
         relatorio_kit = k.montar(
             pasta=pasta, corpus=ctx["corpus"], alocacao=alocacao, ddr=ddr,
             checklist=checklist_final)
@@ -479,6 +494,13 @@ def _pasta_de(args: list[str]) -> Path:
 
 
 def main(argv: list[str] | None = None) -> None:
+    # Console Windows sem UTF-8 não pode derrubar um comando por causa de um
+    # caractere: substituir é melhor que perder a contabilidade da sessão.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     args = list(sys.argv[1:] if argv is None else argv)
     if not args:
         print(__doc__)

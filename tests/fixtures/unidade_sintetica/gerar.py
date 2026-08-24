@@ -178,6 +178,10 @@ def _template_xlsx(path: Path) -> None:
     ow = wb.create_sheet("Ownership - Worksheet")
     for col, titulo in zip("ABCD", ["TRACT", "ACRES", "LEASES", "SURVEY"]):
         ow[f"{col}1"] = titulo
+    # A "célula azul" do template real: um total por fórmula. A caneta recusa
+    # escrita aqui (S02) — a fixture existe para exercitar essa recusa.
+    ow["E1"] = "TOTAL ACRES"
+    ow["E2"] = "=SUM(B2:B99)"
 
     rs = wb.create_sheet("Runsheet")
     for col, titulo in zip("ABCDE", ["NO.", "INSTRUMENTO", "REGISTRO",

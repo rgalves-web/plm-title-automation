@@ -80,8 +80,12 @@ def template_map(path: str | Path = TEMPLATE, per_cell: int = 60) -> str:
     is already written in them. This function transcribes; it does not decide
     which cells are structure, which are another unit's leftovers, or which
     should survive into the deliverable. That judgement is the examiner's, and
-    round 1 measures whether it gets made."""
-    wb = openpyxl.load_workbook(Path(path), data_only=True)
+    round 1 measures whether it gets made.
+
+    `data_only=False` so a formula cell shows as `=SUM(...)` instead of a
+    cached number: the blue cells exist and the model needs to see them for
+    what they are — the pen refuses writes there (S02)."""
+    wb = openpyxl.load_workbook(Path(path), data_only=False)
     lines: list[str] = []
     try:
         for ws in wb.worksheets:

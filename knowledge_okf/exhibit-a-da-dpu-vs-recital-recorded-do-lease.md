@@ -2,25 +2,49 @@
 concept: exhibit-a-da-dpu-vs-recital-recorded-do-lease
 type: regra
 sources:
-- 'dpu - josh sintetico unit - rec.pdf p.2 (Exhibit "A": 0999001-003 ... Vol. 100,
-  Pg. 3)'
-- '0999001-003 (carla nunes) lease.pdf p.1 (RECORDED: Vol. 100, Pg. 33)'
+- dpu - josh sintetico unit - rec.pdf p.2 (Exhibit "A", linhas -001 a -005)
+- 0999001-001 lease.pdf p.1 (Pg. 1 — confere)
+- 0999001-002 lease.pdf p.1 (Pg. 2 — confere)
+- '0999001-003 (carla nunes) lease.pdf p.1 (RECORDED: Vol. 100, Pg. 33 × Exhibit "A"
+  Pg. 3 — DIVERGE)'
+- 0999001-004 (daniel prado) lease.pdf p.1 (Pg. 4 — confere)
+- '0999001-005 (elisa ramos) lease.pdf p.1 (RECORDED: Vol. 100, Pg. 5 — confere) [_cp1_sintetica]'
 links:
 - formulario-eog-declaration-of-pooled-unit-montague
 - category-to-ddr-lease-review
+- censo-template-sintetico-6-abas-formula-e-linha-de-exemplo
+- manual-7-3-chaves-de-reconciliacao
 unit: ''
-confidence: media — padrao observado em 1 unidade; a regra de precedencia esta em
-  aberto com o operador (P2)
+confidence: alta — cotejo COMPLETO (5/5) numa unidade; precedência de desempate ainda
+  pendente do operador (P1)
 ---
 
 ## Sempre cotejar o Exhibit "A" da DPU com o recital RECORDED de cada lease
 
-O Exhibit "A" da Declaration of Pooled Unit lista LEASE NO. | LESSOR | LESSEE | DATE | RECORDING para todos os leases da unidade — inclusive os que **nao tem copia no corpus**. E a fonte que salva a linha do Lease Review quando falta o instrumento (4 dos 7 campos), mas **e uma transcricao feita pelo operador, nao o registro em si**.
+O Exhibit "A" da Declaration of Pooled Unit lista LEASE NO. | LESSOR | LESSEE | DATE | RECORDING para **todos** os leases da unidade — inclusive os sem cópia no corpus. É a fonte que salva a linha do Lease Review quando falta o instrumento (5 dos 7 campos), mas **é transcrição feita pelo operador, não o registro em si**.
 
-**Achado:** na unidade JOSH SINTETICO (Palo Duro), o lease 0999001-003 aparece como "Vol. 100, Pg. 3" no Exhibit "A" e como "Vol. 100, Pg. 33" no proprio lease. Os vizinhos (-001 Pg.1, -002 Pg.2) batem, o que faz a sequencia 1,2,3,4,5 do Exhibit parecer limpa demais — exatamente o tipo de "limpeza" que uma transcricao produz.
+### Placar do cotejo — agora COMPLETO (JOSH SINTETICO, Palo Duro)
+Com a chegada da cópia do **-005 (Elisa Ramos)**, os **5 leases** do Exhibit "A" têm cópia e foram cotejados um a um:
 
-**Procedimento adotado (ate precedente do operador):**
+| Lease | Exhibit "A" | Recital do lease | Resultado |
+|---|---|---|---|
+| -001 Ana Souza | Vol. 100, Pg. 1 | Pg. 1 | confere |
+| -002 Bruno Lima | Vol. 100, Pg. 2 | Pg. 2 | confere |
+| -003 Carla Nunes | Vol. 100, Pg. 3 | **Pg. 33** | **DIVERGE** |
+| -004 Daniel Prado | Vol. 100, Pg. 4 | Pg. 4 | confere |
+| -005 Elisa Ramos | Vol. 100, Pg. 5 | Pg. 5 | confere |
+
+**4 acertos, 1 divergência, 0 pontos cegos.** Também conferem, em todas as 5 linhas, LESSOR, LESSEE e DATE.
+
+### Hipótese anterior — corrigida
+Eu havia escrito que "a sequência 1,2,3,4,5 é limpa demais exatamente onde não há cópia para conferir" — sugerindo que o Exhibit "A" seria menos confiável nas linhas sem instrumento. **O cotejo completo desmente isso**: as duas últimas linhas que faltavam (-004, -005) bateram. O Exhibit "A" é uma transcrição **boa, com erro pontual**, e o erro está na página de **dois dígitos** (33→3), não onde falta cópia. Perfil de erro: truncamento/queda de dígito na transcrição, não fabricação de linha. Isso reforça priorizar o cotejo em recitais com página de 2+ dígitos, sem dispensar os demais.
+
+### Procedimento (até precedente do operador)
 1. Cotejar lease a lease os dois recitais. Custa 1 leitura por lease e pega o defeito.
-2. Divergiu: **REGISTRO fica branco declarado** nas abas Lease Review e Runsheet (nunca escolher o "mais bonito"), abre-se item de **Curative** ("Conciliar referencia de registro") e **pedido de certidao ao County Clerk**.
-3. Campos vindos SO do Exhibit "A" (leases sem copia) entram com confianca **media** e o valor diz "conforme Exhibit \"A\"; copia do lease nao consta do corpus".
-4. ROYALTY e TERMO **nunca** se extrapolam dos leases irmaos, mesmo quando -001/-002/-003 sao identicos (1/8, 3 anos). Formulario igual nao e prova de conteudo igual.
+2. Divergiu: **REGISTRO fica branco declarado** em Lease Review e Runsheet (nunca escolher o "mais bonito"), abre-se item de **Curative** ("Conciliar referência de registro") e **pedido de certidão ao County Clerk pelas DUAS páginas** (Pg. 3 e Pg. 33 — pedir só uma volta sem resposta).
+3. Coincidiu: REGISTRO entra com confiança **alta** e o valor registra que houve cotejo ("Exhibit \"A\" e recital coincidem"). Cotejo que bate é evidência, e o auditor precisa saber que foi feito.
+4. Campos vindos só do Exhibit "A" (leases sem cópia) entram com confiança **média**, valor com a ressalva "conforme Exhibit \"A\"; cópia do lease não consta do corpus", e REGISTRO marcado **não cotejado**.
+5. ROYALTY e TERMO **nunca** se extrapolam dos leases irmãos.
+
+### Nota de método sobre a regra 5 (o teste que ela passou)
+Quando a cópia do -005 chegou, ROYALTY e TERMO vieram **1/8 e 3 anos** — idênticos aos quatro irmãos. Quem tivesse extrapolado teria acertado. **Isso não valida extrapolar: valida a regra.** O acerto teria sido sorte de formulário, indistinguível, no papel entregue ao cliente, de um chute errado — e a única forma de o auditor saber a diferença é a citação. Branco declarado por 1 ciclo custou 1 pedido; um 3/16 não visto custaria royalty errado em 20% da unidade. Mantida a regra 5 sem exceção.
