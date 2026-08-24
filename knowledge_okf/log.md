@@ -87,3 +87,6 @@ Uma linha por escrita. Quem escreveu foi o modelo; este arquivo e o rastro.
 - criou `custo-corpus-sintetico-6-docs-legibilidade-total` (custo)
 - criou `runsheet-e-cadeia-suplementar-vazia-quando-nada-e-posterior-a-cert-date` (veredito)
 - atualizou `runsheet-vazia-por-pre-cert-date-em-unidade-so-com-original-opinion` (regra)
+- criou `custo-xlsx-ilegivel-pelas-ferramentas` (custo)
+- criou `submission-example-e-pacote-modelo-knox-nao-e-evidencia` (regra)
+- criou `bpm-plm-due-diligence-leasehold-escopo` (formulario)

@@ -2,6 +2,7 @@
 
 Uma ficha por conceito. Lida uma vez, consultada sempre.
 
+- [bpm-plm-due-diligence-leasehold-escopo](bpm-plm-due-diligence-leasehold-escopo.md) `formulario` — ## BPM: Due Diligence (Leasehold) — o memorando que define o escopo de cada aba do DDR
 - [cadeia-bra-de-oil-and-gas-para-eog-montague](cadeia-bra-de-oil-and-gas-para-eog-montague.md) `cadeia` — ## Bra-De Oil & Gas, Inc. → EOG Resources, Inc. (Montague County)
 - [categories: agreement](categories-agreement.md) `regra` — - **label**: Agreement (JOA / farmout / ratification)
 - [categories: assignment](categories-assignment.md) `regra` — - **label**: Assignment / conveyance
@@ -32,6 +33,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [category_to_ddr: well_files](category-to-ddr-well-files.md) `regra` — - **resolves_to**:
 - [custo-corpus-sintetico-6-docs-legibilidade-total](custo-corpus-sintetico-6-docs-legibilidade-total.md) `custo` — ## Corpus sintetico: camada de texto em 100% dos documentos — nunca use `ocr`/`imagem` aqui
 - [custo-legibilidade-do-corpus-montague-eog](custo-legibilidade-do-corpus-montague-eog.md) `custo` — ## O que da para ler neste corpus, e por qual modo (medido)
+- [custo-xlsx-ilegivel-pelas-ferramentas](custo-xlsx-ilegivel-pelas-ferramentas.md) `custo` — ## .xlsx nao e legivel por nenhum dos tres modos — nao gaste chamadas
 - [ddr_template_structure: Agreements](ddr-template-structure-agreements.md) `layout` — - **sample_stripped**: 36
 - [ddr_template_structure: Disclaimer](ddr-template-structure-disclaimer.md) `layout` — - **sample_stripped**: 0
 - [ddr_template_structure: Lease Review](ddr-template-structure-lease-review.md) `layout` — - **sample_stripped**: 288
@@ -83,6 +85,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [sources: drive_plm](sources-drive-plm.md) `regra` — - **label**: PLM Drive
 - [sources: rrc](sources-rrc.md) `regra` — - **label**: Texas Railroad Commission
 - [sources: third_party_request](sources-third-party-request.md) `regra` — - **label**: Third party (Clerk, Seller, examining attorney)
+- [submission-example-e-pacote-modelo-knox-nao-e-evidencia](submission-example-e-pacote-modelo-knox-nao-e-evidencia.md) `regra` — ## A pasta `submission example/` e material de formato, nao registro da unidade — e vem com 0 bytes
 - [template-dados-de-exemplo-a-e-carroll](template-dados-de-exemplo-a-e-carroll.md) `regra` — ## O template da casa chega preenchido com dados de OUTRA unidade
 - [transmittal_cover_is_not_the_document/fixture](transmittal-cover-is-not-the-document-fixture.md) `regra` — - **lesson_id**: transmittal_cover_is_not_the_document
 - [unidade-josh-b-unit-montague](unidade-josh-b-unit-montague.md) `unidade` — ## JOSH B UNIT — Montague County, Texas

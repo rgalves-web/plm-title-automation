@@ -123,7 +123,13 @@ def _sessao(ctx: dict[str, Any], task: str, comando: str,
                 {"turno": rec.turn, "chamadas": [c["tool"] for c in rec.calls],
                  "uso": rec.usage, "texto": rec.text[:300]},
                 ensure_ascii=False) + "\n")
+        chamadas = ", ".join(c["tool"] for c in rec.calls) or "(sem chamadas)"
+        custo = (rec.usage or {}).get("custo_usd")
+        print(f"   turno {rec.turn}: {chamadas}"
+              + (f" · ${custo}" if custo is not None else ""), flush=True)
 
+    print("   modelo chamado — a primeira resposta pode levar de 1 a 3 "
+          "minutos; cada turno imprime uma linha abaixo.", flush=True)
     log, _ = run_loop(system=SISTEMA, task=task, tools=FERRAMENTAS,
                       dispatch=dispatch, model=MODELO, max_turns=250,
                       max_cost_usd=max_cost, on_turn=flush, client=client)
@@ -140,6 +146,7 @@ def _sessao(ctx: dict[str, Any], task: str, comando: str,
 # --------------------------------------------------------------------------
 
 def cmd_unidade(pasta: Path, client: Any = None) -> None:
+    print(f"1/4 abrindo {pasta.name} e indexando o corpus…", flush=True)
     ctx = _abrir(pasta)
     if ctx["estado"].existe:
         print(f"{pasta} já foi aberta — use `minorh continuar`.")
@@ -147,6 +154,9 @@ def cmd_unidade(pasta: Path, client: Any = None) -> None:
         return
     ULTIMA.write_text(str(pasta.resolve()), encoding="utf-8")
 
+    print(f"    corpus indexado: {len(ctx['corpus'].names())} documentos",
+          flush=True)
+    print("2/4 mapeando o template do entregável…", flush=True)
     from src.examinador.run import template_map
     template = _template_de(pasta)
     task = (
@@ -159,9 +169,11 @@ def cmd_unidade(pasta: Path, client: Any = None) -> None:
         "memória campo a campo, peça o que falta, pergunte o que só o "
         "operador resolve. Quando o que há de legível estiver na memória, "
         "pare de pedir ferramentas e resuma.")
+    print("3/4 sessão do Examinador…", flush=True)
     uso = _sessao(ctx, task, "unidade",
                   float(os.environ.get("MINORH_TETO_USD", "40")), client)
 
+    print("4/4 gravando PEDIDOS.md e PERGUNTAS.md…", flush=True)
     escrever_pedidos(ctx["estado"])
     escrever_perguntas(ctx["estado"])
     _imprimir_fecho(ctx, "unidade", uso)
@@ -200,6 +212,8 @@ def cmd_continuar(pasta: Path, client: Any = None) -> None:
         "Se um documento novo destravar campos PENDENTES, grave-os. Se a "
         "conta do censo mudar, declare o censo de novo. Ao final, pare e "
         "resuma o delta.")
+    print(f"processando {len(novos)} documento(s) novo(s) e "
+          f"{len(respostas)} resposta(s)…", flush=True)
     uso = _sessao(ctx, "\n\n".join(partes), "continuar",
                   float(os.environ.get("MINORH_TETO_USD", "25")), client)
 
