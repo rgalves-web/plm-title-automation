@@ -28,3 +28,4 @@ here.
 - Projeção com memória em delta (dump completo de 318 campos + mapa do template a cada sessão custa ~metade da projeção). Alavanca nº2 do CP3 §6.
 - `minorh ship --continuar`: retomar do ledger salvo por turno em vez de re-projetar do zero após queda/teto. Alavanca nº3 do CP3 §6.
 - Driver de replay: gravar a prova de quarentena em finally (hoje um crash no comando pula o registro da sonda — a proteção fica, o registro não).
+- Projecao pode introduzir escape HTML no valor (&amp; onde a memoria tem &): 2-3 celulas no replay 2, ausente na memoria, nasce na sessao de projecao. A auditoria de 100% pega (o trecho citado nao sustenta o escape) — mas vale um teste de regressao quando a auditoria rodar no corpus real.
