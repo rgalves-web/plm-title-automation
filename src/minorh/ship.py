@@ -213,9 +213,12 @@ def auditar_tudo(*, unidade: str, workbook: Path, ledger: Ledger,
             1 for ws in wb.worksheets if ws.title != "DD_Audit_Trail"
             for row in ws.iter_rows() for cell in row
             if cell.value not in (None, ""))
+        # Faixa em write_cell nunca chega ao arquivo (um valor não vira
+        # quarenta — write_workbook a reporta como não colocada); auditar
+        # `wb[aba]["A2:X2"]` devolve tuple e estourava (replay 2, 24/08).
         vivas = {
             (aba, coord): cell for (aba, coord), cell in finais.items()
-            if aba in wb.sheetnames
+            if ":" not in coord and aba in wb.sheetnames
             and wb[aba][coord].value not in (None, "")}
     finally:
         wb.close()

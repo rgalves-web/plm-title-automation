@@ -1,5 +1,17 @@
 # Workbench — status de implementação
-_Acompanha `WORKBENCH_BLUEPRINT.md`. Atualizar a cada fase concluída. Snapshot copiado do projeto Claude (Cowork) em 2026-08-11; a cópia canônica vive no projeto._
+_Dono: o Code (ordem de 23/08). Baseline vigente abaixo; tudo sob "HISTÓRICO" descreve o estado PRÉ-CONSERTO e vale como registro, não como mapa do sistema._
+
+## BASELINE — conserto definitivo · 2026-08-24 (branch `conserto-definitivo`)
+
+**O caminho único de produção é o `minorh`** (LLM-first puro, doc governante `ARQUITETURA_GOVERNANTE.md`): `unidade` (Triador Haiku + Examinador Opus) → `continuar` (delta) → `ship` (projeção + auditoria 100% família B OpenAI + regra de embarque + kit carbon-copy) → `publicar` (congelado) · `estado`/`perguntas`/`horas`/`painel`. A esteira determinística (`src/dd`, `src/knowledge`) está congelada — histórico e fonte de plumbing.
+
+- **Etapas A–D + pré-E entregues e aceitas** (CP1 23/08, CP2 24/08): fichas do Manual/SOP + precedentes; caneta protegida (recusa de célula de fórmula com erro nomeado, hash de fórmulas em todo save, write-roots, teto de $25/unit, horas); kit com md5 round-trip e publicar congelado; quarentena por identidade; trilha com supersessão; pull list por sentada no dia 1; `painel`; auditor B `gpt-5.6-terra` calibrado (células ordinais) com tarifa na tabela.
+- **Etapa E/F (replays da Josh B)**: CP3-medição — replay 1 (fluxo antigo) 26,7% de cobertura por $19,83; replay 2 (fluxo F: corpus completo dedup, continuar em delta, Triador, texto-antes-de-imagem, memória em lote) 31,7% por $25,21 com **teto cortando a projeção** — detalhes e o que NÃO ficou provado em `CONSERTO_CP3_REPORT.md`. Robustez comprada pelos replays: retry de transitórios, corte de max_tokens tratado, ledger/vereditos/logs fluem ao disco por turno.
+- Suíte: **926 verdes**. Unidades sintéticas de prova em `data/units/_cp1_sintetica` e `_cp2_sintetica`; replays em `data/units/_josh_b_replay{,2}` (artefatos preservados, gitignored).
+
+---
+# HISTÓRICO (pré-conserto — não descreve o sistema vigente)
+_Snapshot copiado do projeto Claude (Cowork) em 2026-08-11; mantido como registro._
 
 ## Fase 1 — Flow spine · **CONCLUÍDA 2026-07-23**
 - Commit `2771c7c` em `main`. `src/flow/`: config, evidence_ledger (`derive_allowlist()` só de evidência CONFIRMADA), unit_state (case file versionado), checklist_builder, runner. Aceitação: Maxwell v13 revalidada só do state.yaml → 0 FAIL / 0 MISMATCH. Testes 494→516. ⚠ Backup de `data/units/` fora do git.

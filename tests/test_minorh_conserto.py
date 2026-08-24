@@ -588,3 +588,29 @@ def test_triador_rotula_em_lote_e_nao_reroda_completo(tmp_path: Path):
     assert log2 is None and set(de_novo) == {"a.csv", "b.csv"}
     mapa = tri.mapa_markdown(triagem)
     assert "planilha-projeto (1)" in mapa and "a.csv" in mapa
+
+
+def test_auditoria_ignora_escrita_em_faixa(tmp_path: Path):
+    from src.examinador.run import write_workbook as _ww
+    from src.minorh.ship import auditar_tudo
+    tpl = _template_com_formula(tmp_path / "tpl.xlsx")
+    ledger = Ledger()
+    ledger.write_cell("Ownership - Worksheet", "F2", "vale", "d.csv", 1, "t",
+                      "alta")
+    ledger.write_cell("Ownership - Worksheet", "A5:X5", "um-valor-em-faixa",
+                      "d.csv", 1, "t", "alta")
+    out = _ww(ledger, tmp_path / "ddr.xlsx", template=tpl)
+
+    class _AuditorFake:
+        def auditar(self, **kw):
+            from src.minorh.auditor import Veredito
+            return Veredito(celula=kw["celula"], valor=kw["valor"],
+                            citacao="d.csv p.1", aprovada=True, sustenta=True,
+                            contradiz=None, unidade_certa=True, motivo="ok")
+
+    corpus = _corpus(tmp_path, {"d.csv": b"conteudo longo o bastante para "
+                                         b"os quarenta caracteres do modo"})
+    vereditos, contagem = auditar_tudo(
+        unidade="X", workbook=out, ledger=ledger, corpus=corpus,
+        auditor=_AuditorFake())
+    assert [v.celula for v in vereditos] == ["Ownership - Worksheet!F2"]
