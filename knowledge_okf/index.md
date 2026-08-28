@@ -35,6 +35,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [category_to_ddr: unit_and_pooling_agreements](category-to-ddr-unit-and-pooling-agreements.md) `regra` — - **resolves_to**:
 - [category_to_ddr: well_files](category-to-ddr-well-files.md) `regra` — - **resolves_to**:
 - [censo-template-sintetico-6-abas-formula-e-linha-de-exemplo](censo-template-sintetico-6-abas-formula-e-linha-de-exemplo.md) `layout` — ## Como contar o denominador do template sintético de 6 abas
+- [coleta courthousedirect receita provada](coleta-courthousedirect-receita-provada.md) `regra` — ## H2 — Coleta no CourthouseDirect: a receita provada (Webb B: 41 docs/172 págs por ~US$ 33 vs ~US$ 63 do cami
 - [custo-corpus-sintetico-6-docs-legibilidade-total](custo-corpus-sintetico-6-docs-legibilidade-total.md) `custo` — ## Corpus sintetico: camada de texto em 100% dos documentos — nunca use `ocr`/`imagem` aqui
 - [custo-legibilidade-do-corpus-montague-eog](custo-legibilidade-do-corpus-montague-eog.md) `custo` — ## O que da para ler neste corpus, e por qual modo (medido)
 - [custo-search-corpus-em-dump-multiunidade](custo-search-corpus-em-dump-multiunidade.md) `custo` — ## `search_corpus` em corpus-dump: o custo está na lista de NÃO pesquisados
@@ -60,6 +61,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [entities: unit](entities-unit.md) `entidade` — - **label**: Unit
 - [entities: well](entities-well.md) `entidade` — - **label**: Well
 - [escopo-cruzado-quando-xref-e-schedule-nao-estao-no-corpus](escopo-cruzado-quando-xref-e-schedule-nao-estao-no-corpus.md) `regra` — ## Unidade sem XREF e sem Lease & Mineral Schedule: o escopo cruzado NÃO se fecha — declare isso
+- [escopo phase i runsheet pos certificacao](escopo-phase-i-runsheet-pos-certificacao.md) `regra-cliente` — ## H1 — O escopo vem do spec, e o Runsheet é PÓS-certificação
 - [exclusion_reasons: captura_de_tela](exclusion-reasons-captura-de-tela.md) `regra` — - **label**: Screen capture — evidence of a document, not the document
 - [exclusion_reasons: confirmar_no_cartorio](exclusion-reasons-confirmar-no-cartorio.md) `regra` — - **label**: Confirm at the courthouse
 - [exclusion_reasons: doc_nao_localizado](exclusion-reasons-doc-nao-localizado.md) `regra` — - **label**: Document not located
@@ -111,6 +113,8 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [manual 9.1 ownership report](manual-9-1-ownership-report.md) `regra-cliente` — ## Ownership Report
 - [manual 9.2 calculo wi nri](manual-9-2-calculo-wi-nri.md) `regra-cliente` — ## Conta de WI/NRI
 - [manual 9.3 lease review](manual-9-3-lease-review.md) `regra-cliente` — ## Lease Review — fonte preferencial por campo
+- [missing files rotulos canonicos](missing-files-rotulos-canonicos.md) `regra-cliente` — ## H4 — Disciplina do Missing Files (Project Log do time)
+- [padrao montagem pacote phase i](padrao-montagem-pacote-phase-i.md) `regra-cliente` — ## H3 — Montagem do pacote (os detalhes que o spec não escreve)
 - [precedente acquisition project emirates](precedente-acquisition-project-emirates.md) `veredito` — Summary → Acquisition = **Project Emirates** (Manual cap. 11.2; SOP §9). Aplicar sem perguntar de novo.
 - [precedente advisory only fora de outstanding curative](precedente-advisory-only-fora-de-outstanding-curative.md) `veredito` — Requirement marcado **Advisory only** NÃO entra em Material Outstanding Title Requirements nem em Outstanding 
 - [precedente agreements sem joa na e dashes](precedente-agreements-sem-joa-na-e-dashes.md) `veredito` — Aba Agreements: nenhum JOA/farmout localizado ou referido → **`N/A`** e **dashes** nas linhas da Column B (Man

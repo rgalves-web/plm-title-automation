@@ -9,6 +9,8 @@
     minorh publicar            congela o kit em <UNIT>/SUBMISSION PLM/
     minorh horas <h> ["nota"]  registra horas do operador no estado
     minorh painel "<pasta-mãe>"  uma linha por unidade aberta, sem modelo
+    minorh escopo [aceitar]    mostra/aceita o ESCOPO.md (H1) — gate do ship
+    minorh coletar             executa a pull list no CourthouseDirect (H2)
 
 Teto duro por unidade: US$ 25 (`MINORH_TETO_UNIT_USD`). Ao bater, qualquer
 comando com modelo recusa, reporta o que falta e espera ordem — nunca estoura
@@ -374,6 +376,17 @@ def cmd_ship(pasta: Path, client: Any = None, continuar: bool = False) -> None:
     ctx = _abrir(pasta)
     if not ctx["estado"].existe:
         raise SystemExit(f"{pasta} nunca foi aberta — use `minorh unidade`.")
+    # H1: com ESCOPO.md declarado, o ship só começa após o aceite do
+    # operador. Unidade antiga sem escopo passa com aviso (legado).
+    escopo = ctx["estado"].escopo
+    if escopo.get("declarado") and not escopo.get("aceito"):
+        raise SystemExit(
+            f"ESCOPO.md declarado em {escopo['declarado']} e AINDA NÃO "
+            f"aceito — checkpoint H1. Leia {pasta / 'ESCOPO.md'} e rode "
+            f"`minorh escopo aceitar` antes do ship.")
+    if not escopo.get("declarado"):
+        print("AVISO: unidade sem ESCOPO.md (padrão H1) — ship prossegue "
+              "por ser fluxo anterior à ordem H.")
     template = _template_de(pasta)
     uso_total = Usage()
 
@@ -583,6 +596,44 @@ def cmd_painel(mae: Path) -> None:
                  if ultima else "último: (nenhum comando com modelo)"))
 
 
+def cmd_escopo(pasta: Path, aceitar: bool = False) -> None:
+    ctx = _abrir(pasta)
+    if not ctx["estado"].existe:
+        raise SystemExit(f"{pasta} nunca foi aberta — use `minorh unidade`.")
+    if aceitar:
+        ctx["estado"].aceitar_escopo()
+        print(f"ESCOPO aceito pelo operador em "
+              f"{ctx['estado'].escopo['aceito']} — o ship está liberado.")
+        return
+    e = ctx["estado"].escopo
+    print(f"escopo declarado: {e.get('declarado') or 'NÃO'} · aceito: "
+          f"{e.get('aceito') or 'NÃO'}")
+    caminho = pasta / "ESCOPO.md"
+    if caminho.exists():
+        print(f"--- {caminho} ---")
+        print(caminho.read_text(encoding="utf-8"))
+
+
+def cmd_coletar(pasta: Path, cdp_url: str = "http://localhost:9222") -> None:
+    from src.minorh import coleta as c
+
+    ctx = _abrir(pasta)
+    if not ctx["estado"].existe:
+        raise SystemExit(f"{pasta} nunca foi aberta — use `minorh unidade`.")
+    rel = c.coletar(pasta, cdp_url=cdp_url)
+    print(f"pull list: {rel['pull_list']} item(ns) · já no disco: "
+          f"{rel['ja_no_disco']} · coletados agora: {len(rel['coletados'])}"
+          f" · falhas: {len(rel['falhas'])} · carimbo inválido: "
+          f"{len(rel['carimbo_invalido'])}")
+    print(f"aberturas: {rel['aberturas']} · custo de coleta: "
+          f"${rel['custo_coleta_usd']} (teto ${c.teto_coleta()})")
+    comp = rel["completude"]
+    print(f"completude da pull list no disco: {comp['no_disco']}/"
+          f"{comp['total']}")
+    for f in rel["falhas"]:
+        print(f"   FALHA {f['arquivo']}: {f['erro'][:100]}")
+
+
 def cmd_horas(pasta: Path, horas: float, nota: str = "") -> None:
     ctx = _abrir(pasta)
     if not ctx["estado"].existe:
@@ -635,6 +686,14 @@ def main(argv: list[str] | None = None) -> None:
         cmd_ship(_pasta_de(resto), continuar=continuar)
     elif comando == "publicar":
         cmd_publicar(_pasta_de(resto))
+    elif comando == "escopo":
+        aceitar = bool(resto) and resto[0] == "aceitar"
+        cmd_escopo(_pasta_de(resto[1:] if aceitar else resto), aceitar)
+    elif comando == "coletar":
+        cdp = next((a.split("=", 1)[1] for a in resto
+                    if a.startswith("--cdp=")), "http://localhost:9222")
+        resto = [a for a in resto if not a.startswith("--cdp=")]
+        cmd_coletar(_pasta_de(resto), cdp)
     elif comando == "painel":
         if not resto:
             raise SystemExit('uso: minorh painel "<pasta-mãe das unidades>"')
@@ -651,4 +710,4 @@ def main(argv: list[str] | None = None) -> None:
     else:
         raise SystemExit(f"comando desconhecido: {comando!r}. "
                          f"Comandos: unidade, continuar, estado, perguntas, "
-                         f"ship, publicar, horas, painel.")
+                         f"ship, publicar, horas, painel, escopo, coletar.")

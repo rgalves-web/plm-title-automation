@@ -37,6 +37,9 @@ class Estado:
         # prompt do `continuar` lista só o delta, nunca o inventário inteiro.
         # Diferente de `lidos` (o que foi ABERTO via read_page).
         self.vistos: dict[str, dict[str, str]] = data.get("vistos", {})
+        # H1: o escopo declarado pelo modelo (ESCOPO.md) e o aceite do
+        # operador — o ship não começa sem os dois.
+        self.escopo: dict[str, Any] = data.get("escopo", {})
 
     @property
     def existe(self) -> bool:
@@ -90,6 +93,18 @@ class Estado:
                 continue
             if digest not in self.vistos:
                 self.vistos[digest] = {"documento": nome, "quando": _now()}
+        self.save()
+
+    # --- escopo (H1) --------------------------------------------------------
+    def declarar_escopo(self) -> None:
+        self.escopo = {"declarado": _now(), "aceito": self.escopo.get("aceito")}
+        self.save()
+
+    def aceitar_escopo(self) -> None:
+        if not self.escopo.get("declarado"):
+            raise SystemExit("não há ESCOPO.md declarado para aceitar — o "
+                             "Examinador o escreve com `declarar_escopo`.")
+        self.escopo["aceito"] = _now()
         self.save()
 
     # --- pedidos e perguntas ------------------------------------------------
@@ -156,4 +171,5 @@ class Estado:
             "lidos": self.lidos, "pedidos": self.pedidos,
             "perguntas": self.perguntas, "execucoes": self.execucoes,
             "horas": self.horas, "vistos": self.vistos,
+            "escopo": self.escopo,
         }, indent=2, ensure_ascii=False), encoding="utf-8")

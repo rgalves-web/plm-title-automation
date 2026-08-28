@@ -205,6 +205,65 @@ FERRAMENTAS: list[dict[str, Any]] = [
             "required": ["titulo", "o_que", "onde", "metodo", "campos"]},
     },
     {
+        "name": "declarar_escopo",
+        "description": (
+            "H1: escreve o ESCOPO.md da unidade — o que entra em cada aba "
+            "segundo o spec de submissao, a data de certificacao de CADA "
+            "title opinion, e a regra 'Runsheet = instrumentos protocolados "
+            "APOS a ultima certificacao'. O operador aceita com `minorh "
+            "escopo aceitar` ANTES de o ship comecar. Redeclarar substitui."),
+        "input_schema": {"type": "object", "properties": {
+            "escopo_markdown": {"type": "string",
+                                "description": "o ESCOPO.md inteiro, com as "
+                                               "fontes citadas"}},
+            "required": ["escopo_markdown"]},
+    },
+    {
+        "name": "emitir_pull_list",
+        "description": (
+            "H2.1: emite a PULL LIST da unidade (CSV) — um item por "
+            "instrumento do runsheet sem arquivo no disco, com referencia "
+            "deterministica. E a mesma lista que mede a completude de "
+            "Title Documents/ no fim; `minorh coletar` a executa. Reemitir "
+            "substitui a lista inteira."),
+        "input_schema": {"type": "object", "properties": {
+            "itens": {"type": "array", "items": {
+                "type": "object", "properties": {
+                    "book": {"type": "string"},
+                    "page": {"type": "string"},
+                    "data": {"type": "string",
+                             "description": "data do instrumento (a que o "
+                                            "qualifica pos-certificacao)"},
+                    "instrumento": {"type": "string"},
+                    "grantor": {"type": "string"},
+                    "arquivo_alvo": {"type": "string",
+                                     "description": "ex. 1822.310.pdf"},
+                    "condado": {"type": "string"}},
+                "required": ["book", "page", "data", "instrumento",
+                             "grantor", "arquivo_alvo", "condado"]}}},
+            "required": ["itens"]},
+    },
+    {
+        "name": "emitir_missing_files",
+        "description": (
+            "H4: emite as linhas do Missing Files (CSV staged para o Project "
+            "Log do time). SO documento faltante; rotulo canonico primeiro "
+            "(Entire Lease Folder, No Lease Folder, Not covered by Title "
+            "Opinion, Title Opinion(s), Folder exists but missing lease "
+            "agreement, Full Lease (Have Memo Only), Unit Designation); "
+            "descricao livre so quando nenhum serve, curta e sem induzir "
+            "erro. O operador cola no Project Log — append-only, nunca em "
+            "linha alheia."),
+        "input_schema": {"type": "object", "properties": {
+            "linhas": {"type": "array", "items": {
+                "type": "object", "properties": {
+                    "lease": {"type": "string"},
+                    "rotulo": {"type": "string"},
+                    "descricao": {"type": "string"}},
+                "required": ["lease", "rotulo"]}}},
+            "required": ["linhas"]},
+    },
+    {
         "name": "perguntar",
         "description": (
             "Emite uma pergunta em PERGUNTAS.md para o operador. Use quando o "
@@ -310,7 +369,38 @@ def montar_dispatch(corpus: Any, kb_unidade: Any, kb_global: Any,
                                    o_que_desempataria)
         return {"pergunta": qid}
 
+    def _declarar_escopo(escopo_markdown: str) -> dict[str, Any]:
+        path = estado.unidade / "ESCOPO.md"
+        path.write_text(escopo_markdown, encoding="utf-8")
+        estado.declarar_escopo()
+        return {"escopo_declarado": str(path),
+                "nota": "aguarda `minorh escopo aceitar` do operador antes "
+                        "do ship"}
+
+    def _emitir_pull_list(itens: list[dict[str, str]]) -> dict[str, Any]:
+        from src.minorh.coleta import escrever_pull_list
+        path = escrever_pull_list(estado.unidade, itens)
+        return {"pull_list": str(path), "itens": len(itens)}
+
+    def _emitir_missing_files(linhas: list[dict[str, str]]) -> dict[str, Any]:
+        import csv as _csv
+        path = estado.unidade / f"MISSING FILES - {estado.unidade.name}.csv"
+        with path.open("w", encoding="utf-8", newline="") as fh:
+            w = _csv.DictWriter(fh, fieldnames=("lease", "rotulo",
+                                                "descricao"))
+            w.writeheader()
+            for l in linhas:
+                w.writerow({"lease": l.get("lease", ""),
+                            "rotulo": l.get("rotulo", ""),
+                            "descricao": l.get("descricao", "")})
+        return {"missing_files": str(path), "linhas": len(linhas),
+                "nota": "staged — o operador cola no Project Log, "
+                        "append-only, nunca em linha alheia"}
+
     return {
+        "declarar_escopo": _declarar_escopo,
+        "emitir_pull_list": _emitir_pull_list,
+        "emitir_missing_files": _emitir_missing_files,
         "list_documents": lambda contains="": {
             "documentos": corpus.list_documents(contains)},
         "read_page": _read_page,

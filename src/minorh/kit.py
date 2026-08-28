@@ -54,6 +54,18 @@ FERRAMENTAS_KIT: list[dict[str, Any]] = [
             "required": ["documento", "destino", "por_que"]},
     },
     {
+        "name": "declarar_pasta",
+        "description": (
+            "Declara uma subpasta que deve EXISTIR no kit mesmo vazia — ex. "
+            "'Title Opinions/Unit Tract 7' sem opiniao que a cubra: vazio "
+            "declarado na checklist vence pasta inexistente (H3). "
+            "`por_que` vira a nota da checklist."),
+        "input_schema": {"type": "object", "properties": {
+            "destino": {"type": "string"},
+            "por_que": {"type": "string"}},
+            "required": ["destino", "por_que"]},
+    },
+    {
         "name": "nao_alocar",
         "description": (
             "Declara que um arquivo do corpus fica FORA do kit, com motivo "
@@ -139,9 +151,21 @@ def alocar(*, pasta: Path, corpus: Any, memoria: Any, modelo: str,
         fora.append({"documento": documento, "motivo": motivo})
         return {"fora_do_kit": documento}
 
+    pastas: list[dict[str, str]] = []
+
+    def _declarar_pasta(destino: str, por_que: str) -> dict[str, Any]:
+        raiz = destino.replace("\\", "/").split("/", 1)[0]
+        if raiz not in PASTAS:
+            raise ValueError(
+                f"destino {destino!r} nao comeca com uma pasta da spec: "
+                f"{', '.join(PASTAS)}")
+        pastas.append({"destino": destino, "por_que": por_que})
+        return {"pasta_declarada": destino}
+
     dispatch = dict(dispatch_leitura)
     dispatch["alocar_arquivo"] = _alocar
     dispatch["nao_alocar"] = _nao_alocar
+    dispatch["declarar_pasta"] = _declarar_pasta
 
     from src.minorh.ship import _leitura_schemas
     ferramentas_leitura = [t for t in _leitura_schemas()
@@ -162,6 +186,7 @@ def alocar(*, pasta: Path, corpus: Any, memoria: Any, modelo: str,
     sem_decisao = sorted(nomes - {a["documento"] for a in alocados}
                          - {f["documento"] for f in fora})
     return {"alocados": alocados, "fora_do_kit": fora,
+            "pastas_declaradas": pastas,
             "sem_decisao": sem_decisao}, log
 
 
@@ -189,6 +214,10 @@ def montar(*, pasta: Path, corpus: Any, alocacao: dict[str, Any],
                          "destino": str(destino.relative_to(kit_dir)),
                          "md5": relido})
 
+    for extra in alocacao.get("pastas_declaradas", []):
+        (kit_dir / extra["destino"].replace("\\", "/")).mkdir(
+            parents=True, exist_ok=True)
+
     unit_name = pasta.name.title()
     _colocar(ddr.read_bytes(), kit_dir / "PLM Report" /
              f"DDR - {unit_name}.xlsx", str(ddr))
@@ -205,6 +234,7 @@ def montar(*, pasta: Path, corpus: Any, alocacao: dict[str, Any],
         "copiados": copiados,
         "md5_roundtrip": f"{len(copiados)}/{len(copiados)}",
         "fora_do_kit": alocacao["fora_do_kit"],
+        "pastas_declaradas": alocacao.get("pastas_declaradas", []),
         "sem_decisao": alocacao["sem_decisao"],
         "checklist": ("no kit" if checklist is not None else
                       "template ausente na unidade — item declarado, nao "

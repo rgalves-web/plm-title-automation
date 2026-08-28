@@ -146,3 +146,7 @@ Uma linha por escrita. Quem escreveu foi o modelo; este arquivo e o rastro.
 - criou `pull-list-de-cartorio-derivada-do-exhibit-a-vs-pastas-de-files` (regra)
 - criou `veredito-grao-da-aba-ownership-worksheet-uma-linha-por-lease` (veredito)
 - criou `layout-xref-lease-to-well-ordenacao-e-custo` (layout)
+- criou `escopo-phase-i-runsheet-pos-certificacao` (regra-cliente)
+- criou `padrao-montagem-pacote-phase-i` (regra-cliente)
+- criou `missing-files-rotulos-canonicos` (regra-cliente)
+- criou `coleta-courthousedirect-receita-provada` (regra)
