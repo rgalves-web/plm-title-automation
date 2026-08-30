@@ -1,6 +1,10 @@
 # Workbench — status de implementação
 _Dono: o Code (ordem de 23/08). Baseline vigente abaixo; tudo sob "HISTÓRICO" descreve o estado PRÉ-CONSERTO e vale como registro, não como mapa do sistema._
 
+## CASE FILE — fundação + VS1 · 2026-08-30 (branch `casefile-vs1`)
+
+**Direção nova aceita pelo operador (30/08): o produto se reorganiza em torno de um Case File por Unit** (banco transacional PostgreSQL local + máquina de estados CTO: INDICADA→…→LIBERADA); o `minorh` congela como está e permanece para os replays. Implementado o **Vertical Slice 1 — Unit → Investigation Plan** em `src/casefile/` (doc: `docs/CASEFILE_VS1.md`): `indicar "Josh B Unit"` resolve por NOME; `planejar` = censo determinístico (sha256 completo, sightings, entrega quarentenada por origem, homônimos expostos) → triagem Haiku (rótulos no banco) → Examinador emite **claims com evidência obrigatória** + pesquisas → **Unit Investigation Plan versionado** aguardando `aprovar`/`rejeitar` do operador. Suíte: **966 verdes** (939 + 27 novos; 8 `@postgres` skipam sem `CASEFILE_TEST_DSN`). Smoke real Josh B (sem modelo): censo 1.034 conteúdos/1.633 caminhos em 7s, 50 homônimos com bytes distintos. Pendências: operador cria role/DBs no Postgres 16 local e preenche `CASEFILE_DSN` no `.env` (receita no doc); smoke com modelo (E7) após 01/09 (limite mensal).
+
 ## BASELINE — conserto definitivo · 2026-08-24 (branch `conserto-definitivo`)
 
 **O caminho único de produção é o `minorh`** (LLM-first puro, doc governante `ARQUITETURA_GOVERNANTE.md`): `unidade` (Triador Haiku + Examinador Opus) → `continuar` (delta) → `ship` (projeção + auditoria 100% família B OpenAI + regra de embarque + kit carbon-copy) → `publicar` (congelado) · `estado`/`perguntas`/`horas`/`painel`. A esteira determinística (`src/dd`, `src/knowledge`) está congelada — histórico e fonte de plumbing.
