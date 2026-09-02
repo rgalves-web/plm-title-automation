@@ -302,6 +302,93 @@ def test_bloqueio_por_evento_continua_valido(tmp_path):
     assert repo.estado_da_unit(unit["id"]) == "PLANEJANDO"
 
 
+# --- simulation_mode (política de 02/09) ------------------------------------
+
+def test_estados_da_simulacao(tmp_path):
+    repo, unit, _ = _unit(tmp_path)
+    repo.transicionar(unit["id"], "INDICADA", "COLETANDO", "atalho", "t")
+    assert estados.transicionar(repo, unit, "coleta_simulada_concluida",
+                                "operador") == "COLETA_SIMULADA_CONCLUIDA"
+    assert estados.transicionar(repo, unit, "seguir_exame_simulacao",
+                                "operador") == "EXAMINANDO"
+
+
+def test_simulacao_ativa_por_env_e_por_politica(tmp_path, monkeypatch):
+    from src.casefile import simulacao
+    repo, unit, _ = _unit(tmp_path)
+    monkeypatch.delenv("CASEFILE_SIMULATION_MODE", raising=False)
+    assert not simulacao.ativa(repo, unit["id"])
+    repo.registrar_politica(unit["id"], "simulation_mode", "true")
+    assert simulacao.ativa(repo, unit["id"])
+    monkeypatch.setenv("CASEFILE_SIMULATION_MODE", "true")
+    assert simulacao.ativa()                       # env sozinho basta
+    with pytest.raises(SystemExit, match="BLOQUEADA antes de abrir"):
+        simulacao.exigir_bloqueio_pagamento("teste", repo, unit["id"])
+
+
+def test_portal_bloqueia_antes_de_abrir_em_simulacao(tmp_path, monkeypatch):
+    from src.casefile import portal
+    repo, unit, pasta = _unit(tmp_path)
+    repo.registrar_politica(unit["id"], "simulation_mode", "true")
+    monkeypatch.delenv("CASEFILE_SIMULATION_MODE", raising=False)
+    repo.criar_collection_item(unit["id"], "441.275.pdf",
+                               "courthousedirect",
+                               {"book": "441", "page": "275",
+                                "arquivo_alvo": "441.275.pdf",
+                                "motivo": "Prior Lease"})
+
+    def capturador_proibido(*a, **k):
+        raise AssertionError("capturador chamado em simulacao!")
+
+    got = portal.executar_cartorio(repo, unit, pasta,
+                                   capturador=capturador_proibido)
+    assert got["bloqueados_simulacao"] == ["441.275.pdf"]
+    assert got["custo_coleta_usd"] == 0.0
+    item = repo.collection_items(unit["id"])[0]
+    assert item["status"] == "bloqueado_simulacao"
+    assert "required_in_production" in item["note"]
+    assert repo.custo_por_categoria(unit["id"]) == {}
+    with pytest.raises(SystemExit, match="BLOQUEADA"):
+        portal.baixar_publico(repo, unit, pasta, item["id"],
+                              "https://exemplo/x.pdf", "x.pdf", "n")
+
+
+def test_classificar_zero_acres_pela_leitura_declarada(tmp_path):
+    repo, unit, _ = _unit(tmp_path)
+    _claim_lease(repo, unit, "0220936/001")
+    _claim_lease(repo, unit, "0111111/001")
+    populacoes.recalcular(repo, unit)
+    # sem leitura completa: nada muda
+    got = populacoes.classificar_zero_acres(repo, unit)
+    assert not got["classificado"]
+    _fact(repo, unit, "serie 0220936 — leitura da /006",
+          {"abrange_a669_ou_a319": "nao", "leitura_completa": True,
+           "por_lease": {}})
+    got = populacoes.classificar_zero_acres(repo, unit)
+    assert got["classificado"] and got["membros"] == ["0220936-001"]
+    n = repo.populacoes_contagens(unit["id"])
+    assert n["in_dpu_but_zero_unit_acres"] == 1
+    assert "candidate_out_of_scope" not in n
+    assert n["dpu_exhibit_a"] == 2                 # denominador intacto
+    g1 = [g for g in gates.avaliar(repo, unit)
+          if g["condicao"] == "populacao-exhibit-a"][0]
+    assert g1["status"] == "ok"
+
+
+def test_acervo_amplo_da_simulacao_bloqueia_plm_report(tmp_path):
+    from src.casefile.acervo import montar_acervo
+    repo, unit, pasta = _unit(tmp_path)
+    entrega = pasta / "1. Landman Submitted"
+    (entrega / "Title Documents").mkdir(parents=True)
+    (entrega / "PLM Report").mkdir()
+    (entrega / "Title Documents" / "506.386.pdf").write_bytes(b"x")
+    (entrega / "PLM Report" / "DDR - Josh T Unit.xlsx").write_bytes(b"d")
+    acervo = montar_acervo(pasta, {}, incluir_entrega=True)
+    nomes = acervo.names()
+    assert any("506.386.pdf" in n for n in nomes)
+    assert not any("plm report" in n for n in nomes)
+
+
 # --- determinações de 02/09 (rodada 2) --------------------------------------
 
 def test_claim_de_evidencia_so_da_entrega_leva_marca_de_contaminacao(

@@ -29,9 +29,10 @@ def test_divisor_de_statements_respeita_strings_e_comentarios():
 def test_migrar_aplica_reaplicar_e_noop_e_seeds_presentes(pg):
     novas = migrar(pg)
     assert novas == ["0001_fundacao", "0002_seed_claim_types",
-                     "0003_vs2_coleta", "0004_semantica_vs2"]
+                     "0003_vs2_coleta", "0004_semantica_vs2",
+                     "0005_simulacao"]
     assert migrar(pg) == []                      # reaplicar é no-op
-    assert [m["version"] for m in estado_migracoes(pg)] == [1, 2, 3, 4]
+    assert [m["version"] for m in estado_migracoes(pg)] == [1, 2, 3, 4, 5]
     # 11 do VS1 + `fact` ativado pela 0003 (leituras dirigidas do VS2)
     ativos = pg.execute(
         "SELECT count(*) AS n FROM claim_types WHERE active").fetchone()["n"]

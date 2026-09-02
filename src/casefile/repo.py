@@ -306,6 +306,20 @@ class Repo:
             "AND kind = 'condicao_aprovacao' ORDER BY id",
             (unit_id,)).fetchall()
 
+    def politica(self, unit_id: int, chave: str) -> str | None:
+        got = self.conn.execute(
+            "SELECT answer FROM operator_decisions WHERE unit_id = %s AND "
+            "kind = 'politica' AND question = %s ORDER BY id DESC LIMIT 1",
+            (unit_id, f"[{chave}]")).fetchone()
+        return got["answer"] if got else None
+
+    def registrar_politica(self, unit_id: int, chave: str,
+                           valor: str) -> None:
+        self.conn.execute(
+            "INSERT INTO operator_decisions (unit_id, kind, question, "
+            "answer, decided_at) VALUES (%s, 'politica', %s, %s, now())",
+            (unit_id, f"[{chave}]", valor))
+
     def registrar_pergunta_vs2(self, unit_id: int, question: str,
                                claim_id: int | None = None) -> int:
         return self.conn.execute(

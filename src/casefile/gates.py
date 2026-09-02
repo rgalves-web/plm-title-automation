@@ -92,6 +92,12 @@ def _g1_populacao(repo: Any, uid: int,
         return _gate("populacao-exhibit-a", PENDENTE_OPERADOR,
                      f"operacional ({oper}) difere da DPU ({dpu}) sem "
                      f"decisao do operador registrada")
+    zero = n.get("in_dpu_but_zero_unit_acres", 0)
+    if zero:
+        return _gate("populacao-exhibit-a", OK,
+                     f"DPU={dpu} intacta; {zero} lease(s) classificadas "
+                     f"in_dpu_but_zero_unit_acres por leitura declarada "
+                     f"(determinacao 5) — presenca no Exhibit A preservada")
     leitura = _tem_fact(facts, "0220936")
     if leitura is None:
         return _gate("populacao-exhibit-a", PENDENTE,

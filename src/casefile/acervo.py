@@ -164,19 +164,28 @@ class Acervo(Corpus):
 def montar_acervo(pasta: Path, referencias: dict[str, Path | None],
                   incluir_entrega: bool = False,
                   entrega_permitida: tuple[str, ...] = (),
+                  entrega_bloqueada: tuple[str, ...] = ("plm report",),
                   cache: PageCache | None = None) -> Acervo:
     """O acervo da SESSÃO: unit + referências, entrega fora por padrão.
 
     `entrega_permitida`: liberação PONTUAL de arquivos da entrega, por
-    substring do nome lógico — só com autorização expressa do operador
-    (determinação 1 de 02/09). O resto da entrega (DDR final, notas,
-    conclusões humanas) continua fora por plumbing, não por instrução."""
-    origens = set(ORIGENS_DA_SESSAO) | ({"entrega"} if incluir_entrega
-                                        else set())
+    substring do nome lógico — só com autorização expressa do operador.
+    `incluir_entrega`: liberação AMPLA (simulação de 02/09), MENOS o que
+    `entrega_bloqueada` proíbe sempre — o DDR final e as conclusões humanas
+    (pasta 'PLM Report') nunca entram, por plumbing, não por instrução."""
+    origens = set(ORIGENS_DA_SESSAO)
     permitidos = tuple(t.lower() for t in entrega_permitida)
+    bloqueados = tuple(t.lower() for t in entrega_bloqueada)
+
+    def _entrega_ok(logical: str) -> bool:
+        if any(t in logical for t in bloqueados):
+            return False
+        if incluir_entrega:
+            return True
+        return any(t in logical for t in permitidos)
+
     entradas = [e for e in indexar_unit(pasta)
                 if e.origin in origens
-                or (e.origin == "entrega"
-                    and any(t in e.logical for t in permitidos))]
+                or (e.origin == "entrega" and _entrega_ok(e.logical))]
     entradas += entradas_de_referencias(referencias)
     return Acervo(AcervoIndex(entradas), cache=cache)

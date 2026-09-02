@@ -15,7 +15,8 @@ from __future__ import annotations
 
 from typing import Any
 
-ESTADOS = ("INDICADA", "PLANEJANDO", "COLETANDO", "EXAMINANDO", "VERIFICANDO",
+ESTADOS = ("INDICADA", "PLANEJANDO", "COLETANDO",
+           "COLETA_SIMULADA_CONCLUIDA", "EXAMINANDO", "VERIFICANDO",
            "PREENCHENDO", "AUDITANDO", "AGUARDANDO_RENATO", "LIBERADA",
            "BLOQUEADA")
 
@@ -26,6 +27,10 @@ TRANSICOES: dict[str, tuple[str, str]] = {
     "aprovar_plano":           ("AGUARDANDO_RENATO", "COLETANDO"),
     "rejeitar_plano":          ("AGUARDANDO_RENATO", "PLANEJANDO"),
     "coleta_concluida":        ("COLETANDO", "EXAMINANDO"),
+    # Simulação (política de 02/09): a coleta termina SEM compra e o exame
+    # prossegue com as limitações registradas na transição.
+    "coleta_simulada_concluida": ("COLETANDO", "COLETA_SIMULADA_CONCLUIDA"),
+    "seguir_exame_simulacao":  ("COLETA_SIMULADA_CONCLUIDA", "EXAMINANDO"),
     "exame_concluido":         ("EXAMINANDO", "VERIFICANDO"),
     "verificacao_concluida":   ("VERIFICANDO", "PREENCHENDO"),
     "preenchimento_concluido": ("PREENCHENDO", "AUDITANDO"),

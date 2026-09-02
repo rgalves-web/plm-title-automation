@@ -361,6 +361,18 @@ class RepoFake:
                 if d["unit_id"] == unit_id
                 and d["kind"] == "condicao_aprovacao"]
 
+    def politica(self, unit_id, chave):
+        for d in reversed(self.decisions):
+            if d["unit_id"] == unit_id and d["kind"] == "politica" \
+                    and d["question"] == f"[{chave}]":
+                return d["answer"]
+        return None
+
+    def registrar_politica(self, unit_id, chave, valor):
+        self.decisions.append({"id": len(self.decisions) + 1,
+                               "unit_id": unit_id, "kind": "politica",
+                               "question": f"[{chave}]", "answer": valor})
+
     def registrar_pergunta_vs2(self, unit_id, question, claim_id=None):
         row = {"id": len(self.decisions) + 1, "unit_id": unit_id,
                "kind": "pergunta_vs2", "question": question, "answer": "",

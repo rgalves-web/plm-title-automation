@@ -75,3 +75,37 @@ def recalcular(repo: Any, unit: dict[str, Any]) -> dict[str, Any]:
     return {"contagens": repo.populacoes_contagens(uid),
             "dpu_sem_linha_no_xref": so_na_dpu,
             "xref_fora_da_dpu": so_no_xref}
+
+
+def classificar_zero_acres(repo: Any, unit: dict[str, Any]
+                           ) -> dict[str, Any]:
+    """Determinação 5 (r2): se a leitura COMPLETA da série 0220936 declarar
+    que nenhum instrumento abrange A-669/A-319, os 7 saem de
+    candidate_out_of_scope para in_dpu_but_zero_unit_acres — presença no
+    Exhibit A preservada, denominador intacto. O que se aplica aqui é a
+    DECLARAÇÃO do modelo (claim citado), nunca inferência do código."""
+    uid = unit["id"]
+    facts = [c for c in repo.claims_da_unit(uid, "fact")
+             if "0220936" in c["entity"]
+             and c["value"].get("leitura_completa")
+             and "abrange_a669_ou_a319" in c["value"]]
+    if not facts:
+        return {"classificado": False,
+                "motivo": "sem leitura completa da serie com "
+                          "abrange_a669_ou_a319 declarado"}
+    melhor = facts[-1]
+    if melhor["value"]["abrange_a669_ou_a319"] != "nao":
+        return {"classificado": False,
+                "motivo": f"claim {melhor['id']} declara "
+                          f"{melhor['value']['abrange_a669_ou_a319']!r} — "
+                          f"classificacao nao se aplica"}
+    membros = [m["member"] for m in repo.populacao(uid, "dpu_exhibit_a")
+               if m["member"].startswith(SERIE_CANDIDATA)]
+    for membro in membros:
+        repo.gravar_membro_populacao(
+            uid, "in_dpu_but_zero_unit_acres", membro,
+            origem=f"claim {melhor['id']}",
+            note="Exhibit A preservado; zero acres na unit (A-811)")
+    repo.limpar_populacao(uid, "candidate_out_of_scope")
+    return {"classificado": True, "membros": membros,
+            "claim": melhor["id"]}

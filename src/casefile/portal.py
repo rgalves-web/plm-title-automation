@@ -42,6 +42,8 @@ def executar_cartorio(repo: Any, unit: dict[str, Any], pasta: Path,
                       cdp_url: str = "http://localhost:9222",
                       capturador: Any = None,
                       validador: Any = None) -> dict[str, Any]:
+    from src.casefile import simulacao
+
     capturador = capturador or _capturar_cdp
     validador = validador or validar_carimbo
     itens = [i for i in repo.collection_items(unit["id"])
@@ -49,8 +51,20 @@ def executar_cartorio(repo: Any, unit: dict[str, Any], pasta: Path,
              and i["status"] in ("pendente", "staged", "falhou")]
     resumo = {"pendentes": len(itens), "ja_no_disco": 0, "promovidos": 0,
               "falhas": [], "carimbo_invalido": [], "aberturas": 0,
-              "custo_coleta_usd": 0.0, "intervencao": []}
+              "custo_coleta_usd": 0.0, "intervencao": [],
+              "bloqueados_simulacao": []}
     if not itens:
+        return resumo
+
+    # Gate GLOBAL de simulação: falha/bloqueio ANTES de abrir qualquer
+    # documento, independente de instrução do agente (política de 02/09).
+    if simulacao.ativa(repo, unit["id"]):
+        for i in itens:
+            repo.atualizar_collection_item(
+                i["id"], status="bloqueado_simulacao",
+                note=f"{simulacao.MARCADOR_BLOQUEIO} — "
+                     f"{i['target'].get('motivo', '')}"[:380])
+        resumo["bloqueados_simulacao"] = [i["title"] for i in itens]
         return resumo
 
     if not cdp_disponivel(cdp_url):
@@ -83,6 +97,9 @@ def executar_cartorio(repo: Any, unit: dict[str, Any], pasta: Path,
                      f"CASEFILE_TETO_COLETA_USD=<novo>")
             resumo["intervencao"].append(item["title"])
             continue
+        simulacao.exigir_bloqueio_pagamento(
+            f"abertura CourthouseDirect {alvo['arquivo_alvo']}",
+            repo, unit["id"])
         try:
             png, alturas = capturador(
                 {"book": alvo["book"], "page": alvo["page"]},
@@ -148,6 +165,9 @@ def baixar_publico(repo: Any, unit: dict[str, Any], pasta: Path,
     """Documento PÚBLICO (RRC) por HTTP → staging → validado → promovido.
     Sem carimbo de cartório; a validação é a nota declarada (origem pública
     + URL na procedência)."""
+    from src.casefile import simulacao
+    simulacao.exigir_bloqueio_pagamento(f"download externo {url}",
+                                        repo, unit["id"])
     import urllib.request
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=60) as resp:
