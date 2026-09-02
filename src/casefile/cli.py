@@ -641,6 +641,82 @@ def cmd_reconciliar(nome: str, repo: Any = None) -> None:
     print(f"{path}")
 
 
+def cmd_examinar(nome: str, repo: Any = None, client: Any = None,
+                 so_preflight: bool = False) -> None:
+    """VS3 — exame canônico sob simulação, com preflight de custo
+    OBRIGATÓRIO antes de qualquer chamada de modelo (item 11 da ordem)."""
+    from src.casefile import exame_vs3, vs3_entregaveis
+
+    repo = repo or _repo()
+    unit = _unit_de(repo, nome)
+    if repo.estado_da_unit(unit["id"]) != "EXAMINANDO":
+        raise SystemExit(f"examinar exige EXAMINANDO; "
+                         f"{unit['canonical_name']} esta em "
+                         f"{repo.estado_da_unit(unit['id'])}.")
+    pasta = Path(unit["folder_path"])
+
+    # --- preflight -----------------------------------------------------------
+    teto = custo.teto_unit()
+    gasto = repo.custo_acumulado(unit["id"])
+    restante = round(teto - gasto, 4)
+    est = {"exame": {"min": 2.0, "esperado": 3.2, "max": 4.5},
+           "verificacao": {"min": 0.3, "esperado": 0.7, "max": 1.5}}
+    maximo = round(est["exame"]["max"] + est["verificacao"]["max"], 2)
+    estrategia = [
+        "digest dos claims no task (nada de reler o ja provado)",
+        "leituras novas restritas a data de corte + TO155xTract2",
+        "prompt/system pinados no cache; mapa/censo reutilizados",
+        "verificacao em familia B (OpenAI): Exhibit A em 2 chamadas de "
+        "transcricao p/ 67 leases; perguntas dirigidas so para claims "
+        "materiais com campo comparavel deterministicamente",
+        "populacao INTEIRA classificada por grupos homogeneos — nenhuma "
+        "lease fora para caber no orcamento",
+        f"tetos duros: exame ${est['exame']['max']}, verificacao "
+        f"${est['verificacao']['max']} (CASEFILE_TETO_VERIFICACAO_USD)"]
+    print(f"PREFLIGHT VS3: restante da unit ${restante} (gasto ${gasto} "
+          f"de ${teto})")
+    print(f"  estimativas: exame min ${est['exame']['min']} / esperado "
+          f"${est['exame']['esperado']} / max ${est['exame']['max']} · "
+          f"verificacao min ${est['verificacao']['min']} / esperado "
+          f"${est['verificacao']['esperado']} / max "
+          f"${est['verificacao']['max']} · MAXIMO TOTAL ${maximo}")
+    for e in estrategia:
+        print(f"  - {e}")
+    if maximo > restante:
+        raise SystemExit(
+            f"PREFLIGHT REPROVADO: maximo projetado ${maximo} > restante "
+            f"${restante}. Alternativas: (a) operador eleva o teto da unit; "
+            f"(b) reduzir verificacao dirigida (manter lote Exhibit A); "
+            f"(c) dividir o exame em duas sessoes com aceite intermediario. "
+            f"Nenhuma chamada de modelo foi feita.")
+    if so_preflight:
+        print("  (preflight-only: nenhuma chamada de modelo)")
+        return
+
+    print("1/3 sessao do exame (grafo + posicoes + claims DDR)…",
+          flush=True)
+    ja_posicoes = repo.posicoes(unit["id"])
+    if ja_posicoes and repo.deliverables(unit["id"], "chain_graph_vs3"):
+        print("    posicoes e grafo ja existem — pulando sessao", flush=True)
+    else:
+        exame_vs3.executar_sessao(
+            repo=repo, unit=unit, pasta=pasta, client=client,
+            max_cost_usd=min(est["exame"]["max"],
+                             custo.orcamento(repo, unit, 40.0)))
+
+    print("2/3 verificacao cega (familia B)…", flush=True)
+    got = exame_vs3.executar_verificacao(repo=repo, unit=unit, pasta=pasta)
+    print(f"    lote Exhibit A: {got['lote_exhibit_a']} · dirigidas: "
+          f"{len(got['dirigidas'])} · puladas por teto: "
+          f"{got['puladas_teto']} · custo ${got['custo_usd']}", flush=True)
+
+    print("3/3 reconciliacao + entregaveis…", flush=True)
+    caminhos = vs3_entregaveis.gerar_todos(repo, unit, pasta)
+    for nome_arq, caminho in caminhos.items():
+        print(f"    {nome_arq}: {caminho}")
+    _fecho(repo, unit)
+
+
 def _garantir_itens_rrc(repo: Any, unit: dict[str, Any]) -> None:
     import re as _re
     faltantes = repo.claims_da_unit(unit["id"], "document_missing")
@@ -703,6 +779,9 @@ def main(argv: list[str] | None = None) -> None:
         cmd_gates(_nome_de(resto))
     elif comando == "reconciliar":
         cmd_reconciliar(_nome_de(resto))
+    elif comando == "examinar":
+        cmd_examinar(_nome_de(resto),
+                     so_preflight="--preflight" in resto)
     elif comando == "avancar":
         cmd_avancar(_nome_de(resto))
     else:

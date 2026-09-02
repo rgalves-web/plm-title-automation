@@ -128,6 +128,9 @@ class RepoFake:
         self.searches: list[dict[str, Any]] = []
         self.items: list[dict[str, Any]] = []
         self.delivs: dict[tuple, dict[str, Any]] = {}
+        # VS3
+        self.verifs: list[dict[str, Any]] = []
+        self.positions: dict[tuple, dict[str, Any]] = {}
 
     # --- projetos e units --------------------------------------------------
     def obter_ou_criar_projeto(self, engagement, name, root_path):
@@ -276,7 +279,8 @@ class RepoFake:
                "source_sha256": source_sha256, "page": page,
                "evidence": evidence, "confidence": confidence,
                "materiality": materiality, "status": "ativo",
-               "session_id": session_id}
+               "session_id": session_id, "ddr_candidates": [],
+               "limitations": ""}
         self.claims.append(row)
         return row["id"]
 
@@ -493,6 +497,58 @@ class RepoFake:
 
     def marcar_pesquisa(self, research_id, status):
         self.research[research_id - 1]["status"] = status
+
+    # --- VS3 ----------------------------------------------------------------
+    def registrar_verificacao(self, claim_id, question, verdict,
+                              verifier_model, verifier_value, comparison,
+                              cost_usd, session_id=None):
+        row = {"id": len(self.verifs) + 1, "claim_id": claim_id,
+               "question": question, "verdict": verdict,
+               "verifier_model": verifier_model,
+               "verifier_value": verifier_value, "comparison": comparison,
+               "cost_usd": cost_usd, "session_id": session_id}
+        self.verifs.append(row)
+        return row["id"]
+
+    def verificacoes(self, unit_id):
+        meus = {c["id"] for c in self.claims if c["unit_id"] == unit_id}
+        return [v for v in self.verifs if v["claim_id"] in meus]
+
+    def verificacoes_do_claim(self, claim_id):
+        return [v for v in self.verifs if v["claim_id"] == claim_id]
+
+    def gravar_posicao(self, unit_id, population_item, classification,
+                       claim_ids, note, session_id):
+        self.positions[(unit_id, population_item)] = {
+            "unit_id": unit_id, "population_item": population_item,
+            "classification": classification, "claim_ids": claim_ids,
+            "note": note, "session_id": session_id}
+
+    def posicoes(self, unit_id):
+        return sorted((v for k, v in self.positions.items()
+                       if k[0] == unit_id),
+                      key=lambda v: v["population_item"])
+
+    def atualizar_claim_ddr(self, unit_id, claim_id, ddr_candidates,
+                            limitations):
+        for c in self.claims:
+            if c["id"] == claim_id and c["unit_id"] == unit_id:
+                c["ddr_candidates"] = ddr_candidates
+                c["limitations"] = limitations
+                return
+        raise ValueError(f"claim {claim_id} nao e da unit {unit_id}")
+
+    def sessoes_da_unit(self, unit_id):
+        return [s for s in self.sessions if s["unit_id"] == unit_id]
+
+    def decisoes_da_unit(self, unit_id):
+        return [d for d in self.decisions if d["unit_id"] == unit_id]
+
+    def custos_da_unit(self, unit_id):
+        return [c for c in self.costs if c["unit_id"] == unit_id]
+
+    def claim(self, claim_id):
+        return next((c for c in self.claims if c["id"] == claim_id), None)
 
     def registrar_deliverable(self, unit_id, kind, version, path, sha256):
         self.delivs[(unit_id, kind, version)] = {

@@ -492,6 +492,81 @@ class Repo:
             "CASE WHEN %s = 'executada' THEN now() ELSE executed_at END "
             "WHERE id = %s", (status, status, research_id))
 
+    # --- VS3: verificação cega e posições ------------------------------------
+    def registrar_verificacao(self, claim_id: int, question: str,
+                              verdict: str, verifier_model: str,
+                              verifier_value: dict[str, Any],
+                              comparison: dict[str, Any], cost_usd: float,
+                              session_id: int | None = None) -> int:
+        return self.conn.execute(
+            "INSERT INTO verifications (claim_id, question, verdict, "
+            "verifier_model, verifier_value, comparison, cost_usd, "
+            "session_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
+            "RETURNING id",
+            (claim_id, question, verdict, verifier_model,
+             _json(verifier_value), _json(comparison), cost_usd,
+             session_id)).fetchone()["id"]
+
+    def verificacoes(self, unit_id: int) -> list[dict[str, Any]]:
+        return self.conn.execute(
+            "SELECT v.* FROM verifications v JOIN claims c ON "
+            "c.id = v.claim_id WHERE c.unit_id = %s ORDER BY v.id",
+            (unit_id,)).fetchall()
+
+    def verificacoes_do_claim(self, claim_id: int) -> list[dict[str, Any]]:
+        return self.conn.execute(
+            "SELECT * FROM verifications WHERE claim_id = %s ORDER BY id",
+            (claim_id,)).fetchall()
+
+    def gravar_posicao(self, unit_id: int, population_item: str,
+                       classification: str, claim_ids: list[int],
+                       note: str, session_id: int | None) -> None:
+        self.conn.execute(
+            "INSERT INTO population_positions (unit_id, population_item, "
+            "classification, claim_ids, note, session_id) VALUES "
+            "(%s, %s, %s, %s, %s, %s) ON CONFLICT (unit_id, "
+            "population_item) DO UPDATE SET classification = "
+            "EXCLUDED.classification, claim_ids = EXCLUDED.claim_ids, "
+            "note = EXCLUDED.note, session_id = EXCLUDED.session_id, "
+            "at = now()",
+            (unit_id, population_item, classification, claim_ids, note,
+             session_id))
+
+    def posicoes(self, unit_id: int) -> list[dict[str, Any]]:
+        return self.conn.execute(
+            "SELECT * FROM population_positions WHERE unit_id = %s "
+            "ORDER BY population_item", (unit_id,)).fetchall()
+
+    def atualizar_claim_ddr(self, unit_id: int, claim_id: int,
+                            ddr_candidates: list[Any],
+                            limitations: str) -> None:
+        got = self.conn.execute(
+            "UPDATE claims SET ddr_candidates = %s, limitations = %s "
+            "WHERE id = %s AND unit_id = %s RETURNING id",
+            (_json(ddr_candidates), limitations, claim_id,
+             unit_id)).fetchone()
+        if got is None:
+            raise ValueError(f"claim {claim_id} nao e da unit {unit_id}")
+
+    def sessoes_da_unit(self, unit_id: int) -> list[dict[str, Any]]:
+        return self.conn.execute(
+            "SELECT * FROM model_sessions WHERE unit_id = %s ORDER BY id",
+            (unit_id,)).fetchall()
+
+    def decisoes_da_unit(self, unit_id: int) -> list[dict[str, Any]]:
+        return self.conn.execute(
+            "SELECT * FROM operator_decisions WHERE unit_id = %s "
+            "ORDER BY id", (unit_id,)).fetchall()
+
+    def custos_da_unit(self, unit_id: int) -> list[dict[str, Any]]:
+        return self.conn.execute(
+            "SELECT * FROM cost_entries WHERE unit_id = %s ORDER BY id",
+            (unit_id,)).fetchall()
+
+    def claim(self, claim_id: int) -> dict[str, Any] | None:
+        return self.conn.execute(
+            "SELECT * FROM claims WHERE id = %s", (claim_id,)).fetchone()
+
     def registrar_deliverable(self, unit_id: int, kind: str, version: int,
                               path: str, sha256: str) -> None:
         self.conn.execute(
