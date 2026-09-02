@@ -13,6 +13,15 @@
     python -m src.casefile rejeitar ["<unit>"] --motivo="..."
     python -m src.casefile estado ["<unit>"]  estado, contagens, custo
     python -m src.casefile unidades           uma linha por unit no banco
+    python -m src.casefile coletar ["<unit>"] [--cdp=URL]
+                                              o VS2: indice local dos XREFs,
+                                              populacoes, busca negativa,
+                                              exame dirigido, cartorio/RRC,
+                                              relatorio
+    python -m src.casefile gates ["<unit>"]   status das condicoes da
+                                              aprovacao (sem modelo)
+    python -m src.casefile avancar ["<unit>"] coleta_concluida — RECUSA com
+                                              gate pendente
 
 Teto duro por unit: US$ 25 (`CASEFILE_TETO_UNIT_USD`). Ao bater, qualquer
 comando com modelo recusa, reporta e espera ordem — nunca estoura em silêncio.
@@ -416,6 +425,208 @@ def _task_planejar(repo: Any, unit: dict[str, Any],
 
 
 # --------------------------------------------------------------------------
+# o VS2 — coleta sob condições
+# --------------------------------------------------------------------------
+
+def cmd_gates(nome: str, repo: Any = None) -> None:
+    from src.casefile import gates as g
+    repo = repo or _repo()
+    unit = _unit_de(repo, nome)
+    for gate in g.avaliar(repo, unit):
+        marca = {"ok": "OK", "pendente": "PENDENTE",
+                 "pendente_operador": "PENDENTE(operador)"}[gate["status"]]
+        print(f"[{marca:>18}] {gate['condicao']}: {gate['detalhe']}")
+
+
+def cmd_avancar(nome: str, repo: Any = None) -> None:
+    from src.casefile import gates as g
+    repo = repo or _repo()
+    unit = _unit_de(repo, nome)
+    pend = g.pendentes(repo, unit)
+    if pend:
+        linhas = "\n".join(f"  - {p['condicao']} [{p['status']}]: "
+                           f"{p['detalhe']}" for p in pend)
+        raise SystemExit(
+            f"AVANCO RECUSADO — {len(pend)} condicao(oes) da aprovacao "
+            f"pendente(s):\n{linhas}")
+    novo = estados.transicionar(repo, unit, "coleta_concluida", "operador",
+                                "todas as condicoes da aprovacao com gate OK")
+    print(f"{unit['canonical_name']} -> {novo}")
+
+
+def cmd_coletar(nome: str, repo: Any = None, client: Any = None,
+                cdp_url: str = "http://localhost:9222") -> None:
+    import re as _re
+
+    from src.casefile import buscas as bs
+    from src.casefile import exame_dirigido, populacoes, portal
+    from src.casefile import gates as g
+    from src.casefile import relatorio as rel
+    from src.casefile import xref_local as xl
+    from src.examinador.cache import PageCache
+    from src.examinador.okf import KnowledgeBase
+
+    repo = repo or _repo()
+    unit = _unit_de(repo, nome)
+    pasta = Path(unit["folder_path"])
+    atual = repo.estado_da_unit(unit["id"])
+    if atual != "COLETANDO":
+        raise SystemExit(f"coletar exige COLETANDO; "
+                         f"{unit['canonical_name']} esta em {atual}.")
+    resumo_fases: dict[str, Any] = {}
+
+    print("1/6 censo (refresh) + indice local XREF/Schedule…", flush=True)
+    proj_root = pasta.parent
+    referencias = {k: referencia.find_reference(k, proj_root)
+                   for k in referencia.REFERENCE_PATTERNS}
+    censo.executar(repo, unit, pasta, referencias)
+    shas = repo.sha_por_nome(unit["id"])
+
+    # As chaves vêm da ordem do operador: o contrato K… está no texto das
+    # condições; o nome da unit, do canônico; as leases, dos claims.
+    condicoes_txt = " ".join(c["question"] + " " + c["answer"]
+                             for c in repo.condicoes(unit["id"]))
+    achado = _re.search(r"K\d{7}", condicoes_txt)
+    contrato = achado.group() if achado else None
+    if not contrato:
+        raise SystemExit("nenhum contrato K… nas condicoes registradas — "
+                         "sem chave de pertencimento para o indice")
+    nome_unit = unit["canonical_name"].replace(" UNIT", "").strip()
+    leases = repo.claims_da_unit(unit["id"], "lease_in_unit")
+
+    ja_ok = {gate["condicao"]: gate["status"]
+             for gate in g.avaliar(repo, unit)}
+    if ja_ok.get("xref-indexacao-local") == "ok":
+        print("    indice ja completo (gate OK) — pulando", flush=True)
+    else:
+        xref_path = referencias.get("xref")
+        if xref_path is None:
+            raise SystemExit("XREF nao encontrado na raiz do projeto")
+        sha_xref = shas.get(f"referencias/{xref_path.name}".lower(),
+                            ["?"])[0]
+        chaves = [xl.chave_contract(contrato),
+                  xl.chave_unit_name(nome_unit)]
+        chaves += [xl.chave_lease_no(c["value"]["lease_no"])
+                   for c in leases]
+        got = xl.indexar(repo, unit, xref_path, sha_xref, chaves,
+                         ["LEASE NO", "WELL OR CONTRACT NB",
+                          "WELL OR CONTRACT NAME"])
+        print(f"    XREF: {got['linhas_casadas']} linha(s) de "
+              f"{got['chaves']} chave(s); sem linha: "
+              f"{len(got['chaves_sem_linha'])}", flush=True)
+        _indexar_schedule(repo, unit, referencias, shas, leases, xl)
+
+    print("2/6 populacoes…", flush=True)
+    resumo_fases["populacoes"] = populacoes.recalcular(repo, unit)
+    print("    " + " · ".join(
+        f"{k} {v}" for k, v in
+        sorted(resumo_fases["populacoes"]["contagens"].items())), flush=True)
+
+    print("3/6 busca negativa DOTO/DOI…", flush=True)
+    if repo.buscas(unit["id"], "DOTO/DOI"):
+        print("    busca ja registrada — pulando", flush=True)
+    else:
+        acervo_lean = montar_acervo(pasta, referencias)
+        got = bs.busca_doto_doi(repo, unit, proj_root, acervo_lean)
+        print(f"    {got['hits']} hit(s) em {got['nomes_varridos']} nomes + "
+              f"{got['textos_varridos']} textos "
+              f"({got['nao_pesquisaveis']} nao pesquisaveis) -> "
+              f"{got['resultado']}", flush=True)
+
+    print("4/6 exame dirigido (leituras da aprovacao)…", flush=True)
+    pendencias_leitura = [p for p in g.pendentes(repo, unit)
+                          if p["status"] == "pendente"]
+    if not pendencias_leitura:
+        print("    gates de leitura ja OK — pulando sessao", flush=True)
+    else:
+        cache = PageCache()
+        acervo = montar_acervo(pasta, referencias, cache=cache)
+        orc = custo.orcamento(repo, unit,
+                              float(os.environ.get("CASEFILE_TETO_USD",
+                                                   "40")))
+        exame_dirigido.executar(
+            repo=repo, unit=unit, pasta=pasta, acervo=acervo,
+            kb_unidade=KnowledgeBase(caneta.caminho(pasta) / "fichas"),
+            kb_global=KnowledgeBase(), client=client, max_cost_usd=orc)
+        resumo_fases["populacoes"] = populacoes.recalcular(repo, unit)
+
+    print("5/6 acessos externos (cartorio via CDP + RRC)…", flush=True)
+    resumo_fases["cartorio"] = portal.executar_cartorio(
+        repo, unit, pasta, cdp_url=cdp_url)
+    c = resumo_fases["cartorio"]
+    print(f"    cartorio: {c['promovidos']} promovido(s) · "
+          f"{c['ja_no_disco']} ja no disco · {len(c['falhas'])} falha(s) · "
+          f"{len(c['intervencao'])} intervencao(oes) · "
+          f"${c['custo_coleta_usd']:.2f} de coleta", flush=True)
+    _garantir_itens_rrc(repo, unit)
+
+    print("6/6 relatorio + gates…", flush=True)
+    caminho_rel = rel.gerar(repo, unit, pasta, resumo_fases)
+    print(f"    {caminho_rel}", flush=True)
+    cmd_gates(nome, repo=repo)
+    _fecho(repo, unit)
+
+
+def _indexar_schedule(repo: Any, unit: dict[str, Any],
+                      referencias: dict[str, Any], shas: dict[str, Any],
+                      leases: list[dict[str, Any]], xl: Any) -> None:
+    """Recordings (condição 2): a coluna não existe no XREF (claim 111);
+    o cruzamento por vol/página é feito na Lease & Mineral Schedule."""
+    sched = referencias.get("lease_mineral_schedule")
+    if sched is None:
+        print("    Schedule NAO encontrada — lookups de recording ficam "
+              "pendentes (gate aponta)", flush=True)
+        return
+    cab = xl.cabecalhos_do_workbook(sched)
+    col_lease = col_rec = None
+    for aba, colunas in cab.items():
+        for c in colunas:
+            alto = c.upper()
+            if col_lease is None and "LEASE" in alto and \
+                    ("NO" in alto or "NUMBER" in alto or alto == "LEASE"):
+                col_lease = c
+            if col_rec is None and "RECORDING" in alto:
+                col_rec = c
+    if col_rec is None:
+        print(f"    Schedule sem coluna de RECORDING (cabecalhos: "
+              f"{list(cab.values())[0][:10]}…) — gate aponta", flush=True)
+        return
+    sha_sched = shas.get(f"referencias/{sched.name}".lower(), ["?"])[0]
+    chaves = []
+    for c in leases:
+        v = c["value"]
+        if col_lease:
+            chaves.append(xl.chave_lease_no(v["lease_no"],
+                                            coluna=col_lease))
+        if v.get("vol") and v.get("page"):
+            chaves.append(xl.chave_recording(v["vol"], v["page"],
+                                             coluna=col_rec))
+    got = xl.indexar(repo, unit, sched, sha_sched, chaves,
+                     [c for c in (col_lease, col_rec) if c])
+    print(f"    Schedule: {got['linhas_casadas']} linha(s); chaves sem "
+          f"linha: {len(got['chaves_sem_linha'])}", flush=True)
+
+
+def _garantir_itens_rrc(repo: Any, unit: dict[str, Any]) -> None:
+    import re as _re
+    faltantes = repo.claims_da_unit(unit["id"], "document_missing")
+    api = None
+    for c in faltantes:
+        m = _re.search(r"42-?337-?\d{5}",
+                       c["entity"] + " " + str(c["value"]))
+        if m:
+            api = m.group()
+            break
+    if api is None:
+        return
+    for doc in ("W-1 drilling permit", "W-2 G-1 completion report",
+                "well plat", "production data"):
+        repo.criar_collection_item(
+            unit["id"], title=f"RRC {doc} {api}".replace("/", "-"),
+            method="rrc", target={"api": api, "doc": doc})
+
+
+# --------------------------------------------------------------------------
 
 def main(argv: list[str] | None = None) -> None:
     # Console Windows sem UTF-8 nao pode derrubar um comando por causa de um
@@ -451,7 +662,14 @@ def main(argv: list[str] | None = None) -> None:
         cmd_estado(_nome_de(resto))
     elif comando == "unidades":
         cmd_unidades()
+    elif comando == "coletar":
+        cdp = _flag(resto, "cdp") or "http://localhost:9222"
+        cmd_coletar(_nome_de(resto), cdp_url=cdp)
+    elif comando == "gates":
+        cmd_gates(_nome_de(resto))
+    elif comando == "avancar":
+        cmd_avancar(_nome_de(resto))
     else:
         raise SystemExit(f"comando desconhecido: {comando!r}. Comandos: db, "
                          f"indicar, planejar, plano, aprovar, rejeitar, "
-                         f"estado, unidades.")
+                         f"estado, unidades, coletar, gates, avancar.")

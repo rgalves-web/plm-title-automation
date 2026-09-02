@@ -282,3 +282,206 @@ class Repo:
             "UPDATE investigation_plans SET status = %s, decided_by = %s, "
             "decided_at = now(), decision_note = %s WHERE id = %s",
             (status, decided_by, note, plan_id))
+
+    # --- VS2: condições da aprovação -----------------------------------------
+    def condicoes(self, unit_id: int) -> list[dict[str, Any]]:
+        return self.conn.execute(
+            "SELECT * FROM operator_decisions WHERE unit_id = %s "
+            "AND kind = 'condicao_aprovacao' ORDER BY id",
+            (unit_id,)).fetchall()
+
+    def registrar_pergunta_vs2(self, unit_id: int, question: str,
+                               claim_id: int | None = None) -> int:
+        return self.conn.execute(
+            "INSERT INTO operator_decisions (unit_id, kind, question, "
+            "claim_id) VALUES (%s, 'pergunta_vs2', %s, %s) RETURNING id",
+            (unit_id, question, claim_id)).fetchone()["id"]
+
+    def perguntas_vs2_abertas(self, unit_id: int,
+                              assunto: str = "") -> list[dict[str, Any]]:
+        return self.conn.execute(
+            "SELECT * FROM operator_decisions WHERE unit_id = %s AND kind = "
+            "'pergunta_vs2' AND answer = '' AND lower(question) LIKE %s "
+            "ORDER BY id", (unit_id, f"%{assunto.lower()}%")).fetchall()
+
+    # --- VS2: índice local de workbooks --------------------------------------
+    def registrar_xref_lookup(self, unit_id: int, source_sha256: str,
+                              key_kind: str, key_value: str,
+                              rows_found: int) -> None:
+        self.conn.execute(
+            "INSERT INTO xref_lookups (unit_id, source_sha256, key_kind, "
+            "key_value, rows_found) VALUES (%s, %s, %s, %s, %s) "
+            "ON CONFLICT (unit_id, source_sha256, key_kind, key_value) "
+            "DO UPDATE SET rows_found = EXCLUDED.rows_found, at = now()",
+            (unit_id, source_sha256, key_kind, key_value, rows_found))
+
+    def registrar_xref_row(self, unit_id: int, source_sha256: str,
+                           sheet: str, row_number: int, row: dict[str, Any],
+                           matched_keys: list[str]) -> None:
+        self.conn.execute(
+            "INSERT INTO xref_rows (unit_id, source_sha256, sheet, "
+            "row_number, row, matched_keys) VALUES (%s, %s, %s, %s, %s, %s) "
+            "ON CONFLICT (unit_id, source_sha256, sheet, row_number) "
+            "DO UPDATE SET row = EXCLUDED.row, matched_keys = "
+            "EXCLUDED.matched_keys",
+            (unit_id, source_sha256, sheet, row_number, _json(row),
+             matched_keys))
+
+    def xref_lookups(self, unit_id: int) -> list[dict[str, Any]]:
+        return self.conn.execute(
+            "SELECT * FROM xref_lookups WHERE unit_id = %s ORDER BY id",
+            (unit_id,)).fetchall()
+
+    def xref_rows_da_unit(self, unit_id: int) -> list[dict[str, Any]]:
+        return self.conn.execute(
+            "SELECT * FROM xref_rows WHERE unit_id = %s "
+            "ORDER BY source_sha256, sheet, row_number",
+            (unit_id,)).fetchall()
+
+    # --- VS2: populações ------------------------------------------------------
+    def gravar_membro_populacao(self, unit_id: int, population: str,
+                                member: str, origem: str = "",
+                                note: str = "") -> None:
+        self.conn.execute(
+            "INSERT INTO population_members (unit_id, population, member, "
+            "origem, note) VALUES (%s, %s, %s, %s, %s) "
+            "ON CONFLICT (unit_id, population, member) DO UPDATE SET "
+            "origem = EXCLUDED.origem, note = EXCLUDED.note",
+            (unit_id, population, member, origem, note))
+
+    def limpar_populacao(self, unit_id: int, population: str) -> None:
+        self.conn.execute(
+            "DELETE FROM population_members WHERE unit_id = %s "
+            "AND population = %s", (unit_id, population))
+
+    def populacao(self, unit_id: int, population: str
+                  ) -> list[dict[str, Any]]:
+        return self.conn.execute(
+            "SELECT * FROM population_members WHERE unit_id = %s "
+            "AND population = %s ORDER BY member",
+            (unit_id, population)).fetchall()
+
+    def populacoes_contagens(self, unit_id: int) -> dict[str, int]:
+        rows = self.conn.execute(
+            "SELECT population, count(*) AS n FROM population_members "
+            "WHERE unit_id = %s GROUP BY population", (unit_id,)).fetchall()
+        return {r["population"]: r["n"] for r in rows}
+
+    # --- VS2: buscas negativas ------------------------------------------------
+    def registrar_busca(self, unit_id: int, target: str,
+                        terms: list[str], scope: str, names_scanned: int,
+                        hits: list[dict[str, Any]],
+                        result: str = "pendente_julgamento") -> int:
+        return self.conn.execute(
+            "INSERT INTO negative_searches (unit_id, target, terms, scope, "
+            "names_scanned, hits, result) VALUES (%s, %s, %s, %s, %s, %s, "
+            "%s) RETURNING id",
+            (unit_id, target, _json(terms), scope, names_scanned,
+             _json(hits), result)).fetchone()["id"]
+
+    def julgar_busca(self, search_id: int, result: str, evidence: str,
+                     session_id: int | None = None) -> None:
+        self.conn.execute(
+            "UPDATE negative_searches SET result = %s, evidence = %s, "
+            "session_id = %s WHERE id = %s",
+            (result, evidence, session_id, search_id))
+
+    def buscas(self, unit_id: int, target: str | None = None
+               ) -> list[dict[str, Any]]:
+        if target is not None:
+            return self.conn.execute(
+                "SELECT * FROM negative_searches WHERE unit_id = %s "
+                "AND target = %s ORDER BY id", (unit_id, target)).fetchall()
+        return self.conn.execute(
+            "SELECT * FROM negative_searches WHERE unit_id = %s ORDER BY id",
+            (unit_id,)).fetchall()
+
+    # --- VS2: itens de coleta -------------------------------------------------
+    def criar_collection_item(self, unit_id: int, title: str, method: str,
+                              target: dict[str, Any],
+                              research_item_id: int | None = None) -> int:
+        got = self.conn.execute(
+            "SELECT id FROM collection_items WHERE unit_id = %s "
+            "AND title = %s", (unit_id, title)).fetchone()
+        if got:
+            return got["id"]
+        return self.conn.execute(
+            "INSERT INTO collection_items (unit_id, title, method, target, "
+            "research_item_id) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (unit_id, title, method, _json(target),
+             research_item_id)).fetchone()["id"]
+
+    def atualizar_collection_item(self, item_id: int, **campos: Any) -> None:
+        permitidos = ("status", "staged_path", "promoted_path", "sha256",
+                      "provenance", "cost_usd", "note")
+        sets, valores = [], []
+        for chave, valor in campos.items():
+            if chave not in permitidos:
+                raise ValueError(f"campo desconhecido: {chave}")
+            sets.append(f"{chave} = %s")
+            valores.append(_json(valor) if chave == "provenance" else valor)
+        if not sets:
+            return
+        sets.append("updated_at = now()")
+        self.conn.execute(
+            f"UPDATE collection_items SET {', '.join(sets)} WHERE id = %s",
+            (*valores, item_id))
+
+    def collection_items(self, unit_id: int, status: str | None = None
+                         ) -> list[dict[str, Any]]:
+        if status is not None:
+            return self.conn.execute(
+                "SELECT * FROM collection_items WHERE unit_id = %s "
+                "AND status = %s ORDER BY id", (unit_id, status)).fetchall()
+        return self.conn.execute(
+            "SELECT * FROM collection_items WHERE unit_id = %s ORDER BY id",
+            (unit_id,)).fetchall()
+
+    def custo_por_categoria(self, unit_id: int) -> dict[str, float]:
+        rows = self.conn.execute(
+            "SELECT category, round(sum(amount_usd), 4) AS total "
+            "FROM cost_entries WHERE unit_id = %s GROUP BY category",
+            (unit_id,)).fetchall()
+        return {r["category"]: float(r["total"]) for r in rows}
+
+    # --- VS2: pesquisas -------------------------------------------------------
+    def pesquisas(self, unit_id: int, status: str | None = None
+                  ) -> list[dict[str, Any]]:
+        if status is not None:
+            return self.conn.execute(
+                "SELECT * FROM research_items WHERE unit_id = %s "
+                "AND status = %s ORDER BY id", (unit_id, status)).fetchall()
+        return self.conn.execute(
+            "SELECT * FROM research_items WHERE unit_id = %s ORDER BY id",
+            (unit_id,)).fetchall()
+
+    def marcar_pesquisa(self, research_id: int, status: str) -> None:
+        self.conn.execute(
+            "UPDATE research_items SET status = %s, executed_at = "
+            "CASE WHEN %s = 'executada' THEN now() ELSE executed_at END "
+            "WHERE id = %s", (status, status, research_id))
+
+    def registrar_deliverable(self, unit_id: int, kind: str, version: int,
+                              path: str, sha256: str) -> None:
+        self.conn.execute(
+            "INSERT INTO deliverable_versions (unit_id, kind, version, "
+            "path, sha256) VALUES (%s, %s, %s, %s, %s) "
+            "ON CONFLICT (unit_id, kind, version) DO UPDATE SET "
+            "path = EXCLUDED.path, sha256 = EXCLUDED.sha256",
+            (unit_id, kind, version, path, sha256))
+
+    def deliverables(self, unit_id: int, kind: str) -> list[dict[str, Any]]:
+        return self.conn.execute(
+            "SELECT * FROM deliverable_versions WHERE unit_id = %s "
+            "AND kind = %s ORDER BY version", (unit_id, kind)).fetchall()
+
+    def claims_da_unit(self, unit_id: int, claim_type: str | None = None
+                       ) -> list[dict[str, Any]]:
+        if claim_type is not None:
+            return self.conn.execute(
+                "SELECT * FROM claims WHERE unit_id = %s AND claim_type = %s"
+                " AND status = 'ativo' ORDER BY id",
+                (unit_id, claim_type)).fetchall()
+        return self.conn.execute(
+            "SELECT * FROM claims WHERE unit_id = %s AND status = 'ativo' "
+            "ORDER BY id", (unit_id,)).fetchall()

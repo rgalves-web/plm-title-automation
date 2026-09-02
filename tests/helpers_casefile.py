@@ -118,6 +118,14 @@ class RepoFake:
         self.sessions: list[dict[str, Any]] = []
         self.costs: list[dict[str, Any]] = []
         self.plans: list[dict[str, Any]] = []
+        # VS2
+        self.decisions: list[dict[str, Any]] = []
+        self.lookups: dict[tuple, int] = {}
+        self.xrows: dict[tuple, dict[str, Any]] = {}
+        self.members: dict[tuple, dict[str, Any]] = {}
+        self.searches: list[dict[str, Any]] = []
+        self.items: list[dict[str, Any]] = []
+        self.delivs: dict[tuple, dict[str, Any]] = {}
 
     # --- projetos e units --------------------------------------------------
     def obter_ou_criar_projeto(self, engagement, name, root_path):
@@ -330,6 +338,147 @@ class RepoFake:
         row = self.plans[plan_id - 1]
         row.update(status=status, decided_by=decided_by,
                    decision_note=note)
+
+    # --- VS2 ----------------------------------------------------------------
+    def condicoes(self, unit_id):
+        return [d for d in self.decisions
+                if d["unit_id"] == unit_id
+                and d["kind"] == "condicao_aprovacao"]
+
+    def registrar_pergunta_vs2(self, unit_id, question, claim_id=None):
+        row = {"id": len(self.decisions) + 1, "unit_id": unit_id,
+               "kind": "pergunta_vs2", "question": question, "answer": "",
+               "claim_id": claim_id}
+        self.decisions.append(row)
+        return row["id"]
+
+    def perguntas_vs2_abertas(self, unit_id, assunto=""):
+        return [d for d in self.decisions
+                if d["unit_id"] == unit_id and d["kind"] == "pergunta_vs2"
+                and not d["answer"]
+                and assunto.lower() in d["question"].lower()]
+
+    def registrar_xref_lookup(self, unit_id, source_sha256, key_kind,
+                              key_value, rows_found):
+        chave = (unit_id, source_sha256, key_kind, key_value)
+        self.lookups[chave] = rows_found
+
+    def registrar_xref_row(self, unit_id, source_sha256, sheet, row_number,
+                           row, matched_keys):
+        chave = (unit_id, source_sha256, sheet, row_number)
+        self.xrows[chave] = {"unit_id": unit_id,
+                             "source_sha256": source_sha256, "sheet": sheet,
+                             "row_number": row_number, "row": row,
+                             "matched_keys": matched_keys}
+
+    def xref_lookups(self, unit_id):
+        return [{"unit_id": k[0], "source_sha256": k[1], "key_kind": k[2],
+                 "key_value": k[3], "rows_found": v}
+                for k, v in self.lookups.items() if k[0] == unit_id]
+
+    def xref_rows_da_unit(self, unit_id):
+        return sorted((r for r in self.xrows.values()
+                       if r["unit_id"] == unit_id),
+                      key=lambda r: (r["source_sha256"], r["sheet"],
+                                     r["row_number"]))
+
+    def gravar_membro_populacao(self, unit_id, population, member,
+                                origem="", note=""):
+        self.members[(unit_id, population, member)] = {
+            "unit_id": unit_id, "population": population, "member": member,
+            "origem": origem, "note": note}
+
+    def limpar_populacao(self, unit_id, population):
+        for k in [k for k in self.members
+                  if k[0] == unit_id and k[1] == population]:
+            del self.members[k]
+
+    def populacao(self, unit_id, population):
+        return sorted((v for k, v in self.members.items()
+                       if k[0] == unit_id and k[1] == population),
+                      key=lambda v: v["member"])
+
+    def populacoes_contagens(self, unit_id):
+        out = {}
+        for (uid, pop, _m) in self.members:
+            if uid == unit_id:
+                out[pop] = out.get(pop, 0) + 1
+        return out
+
+    def registrar_busca(self, unit_id, target, terms, scope, names_scanned,
+                        hits, result="pendente_julgamento"):
+        row = {"id": len(self.searches) + 1, "unit_id": unit_id,
+               "target": target, "terms": terms, "scope": scope,
+               "names_scanned": names_scanned, "hits": hits,
+               "result": result, "evidence": "", "session_id": None}
+        self.searches.append(row)
+        return row["id"]
+
+    def julgar_busca(self, search_id, result, evidence, session_id=None):
+        row = self.searches[search_id - 1]
+        row.update(result=result, evidence=evidence, session_id=session_id)
+
+    def buscas(self, unit_id, target=None):
+        return [b for b in self.searches
+                if b["unit_id"] == unit_id
+                and (target is None or b["target"] == target)]
+
+    def criar_collection_item(self, unit_id, title, method, target,
+                              research_item_id=None):
+        for i in self.items:
+            if i["unit_id"] == unit_id and i["title"] == title:
+                return i["id"]
+        row = {"id": len(self.items) + 1, "unit_id": unit_id,
+               "title": title, "method": method, "target": target,
+               "research_item_id": research_item_id, "status": "pendente",
+               "staged_path": "", "promoted_path": "", "sha256": None,
+               "provenance": {}, "cost_usd": 0, "note": ""}
+        self.items.append(row)
+        return row["id"]
+
+    def atualizar_collection_item(self, item_id, **campos):
+        permitidos = ("status", "staged_path", "promoted_path", "sha256",
+                      "provenance", "cost_usd", "note")
+        for chave in campos:
+            if chave not in permitidos:
+                raise ValueError(f"campo desconhecido: {chave}")
+        self.items[item_id - 1].update(campos)
+
+    def collection_items(self, unit_id, status=None):
+        return [i for i in self.items
+                if i["unit_id"] == unit_id
+                and (status is None or i["status"] == status)]
+
+    def custo_por_categoria(self, unit_id):
+        out = {}
+        for c in self.costs:
+            if c["unit_id"] == unit_id:
+                out[c["category"]] = round(
+                    out.get(c["category"], 0) + c["amount_usd"], 4)
+        return out
+
+    def pesquisas(self, unit_id, status=None):
+        return [r for r in self.research
+                if r["unit_id"] == unit_id
+                and (status is None or r["status"] == status)]
+
+    def marcar_pesquisa(self, research_id, status):
+        self.research[research_id - 1]["status"] = status
+
+    def registrar_deliverable(self, unit_id, kind, version, path, sha256):
+        self.delivs[(unit_id, kind, version)] = {
+            "unit_id": unit_id, "kind": kind, "version": version,
+            "path": path, "sha256": sha256}
+
+    def deliverables(self, unit_id, kind):
+        return sorted((v for k, v in self.delivs.items()
+                       if k[0] == unit_id and k[1] == kind),
+                      key=lambda v: v["version"])
+
+    def claims_da_unit(self, unit_id, claim_type=None):
+        return [c for c in self.claims
+                if c["unit_id"] == unit_id and c["status"] == "ativo"
+                and (claim_type is None or c["claim_type"] == claim_type)]
 
     # ----------------------------------------------------------------------
     def _unit(self, unit_id):

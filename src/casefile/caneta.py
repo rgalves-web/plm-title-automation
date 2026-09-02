@@ -31,3 +31,40 @@ def escrever_texto(path: Path, texto: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(texto, encoding="utf-8")
     return path
+
+
+def promover_staged(origem: Path, destino: Path,
+                    sha256_esperado: str) -> Path:
+    """A ÚNICA escrita permitida fora de _casefile/: promoção de um staged
+    validado para FILES/, com round-trip de hash (condição 6 da aprovação;
+    mesma disciplina do md5 round-trip do kit do minorh). Recusa origem fora
+    de staging/, destino fora de FILES/, e destino existente com bytes
+    diferentes — nunca sobrescreve em silêncio."""
+    import hashlib
+    origem, destino = Path(origem), Path(destino)
+    if PASTA_CASEFILE not in origem.parts or "staging" not in origem.parts:
+        raise EscritaForaDoCaseFile(
+            f"promocao so parte de {PASTA_CASEFILE}/staging/ — recusado: "
+            f"{origem}")
+    if destino.parent.name.upper() != "FILES":
+        raise EscritaForaDoCaseFile(
+            f"promocao so entra em FILES/ — recusado: {destino}")
+    dados = origem.read_bytes()
+    sha = hashlib.sha256(dados).hexdigest()
+    if sha != sha256_esperado:
+        raise AssertionError(
+            f"staged mudou de bytes: esperado {sha256_esperado[:12]}…, "
+            f"lido {sha[:12]}…")
+    if destino.exists():
+        existente = hashlib.sha256(destino.read_bytes()).hexdigest()
+        if existente != sha:
+            raise AssertionError(
+                f"{destino} ja existe com bytes DIFERENTES "
+                f"({existente[:12]}… vs {sha[:12]}…) — nada e sobrescrito")
+        return destino
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    destino.write_bytes(dados)
+    relido = hashlib.sha256(destino.read_bytes()).hexdigest()
+    if relido != sha:
+        raise AssertionError(f"round-trip falhou em {destino}")
+    return destino
