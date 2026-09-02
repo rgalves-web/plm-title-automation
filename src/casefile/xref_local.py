@@ -43,13 +43,18 @@ def desambiguar_cabecalhos(header: tuple[Any, ...]) -> list[str]:
     return out
 
 
-def exigir_colunas(cabecalhos: list[str], exigidas: list[str],
-                   arquivo: str) -> None:
-    faltam = [c for c in exigidas if c not in cabecalhos]
-    if faltam:
-        raise ErroDeCabecalho(
-            f"{arquivo}: colunas exigidas ausentes {faltam}. "
-            f"Cabecalhos encontrados: {cabecalhos}")
+def colunas_presentes(cabecalhos: list[str],
+                      exigidas: list[Any]) -> list[Any]:
+    """As exigências que a aba NÃO atende. Cada exigência é um nome de
+    coluna ou uma tupla de alternativas (a Schedule real nomeia a coluna da
+    lease de 'LEASENO' em duas abas e a deixa com cabeçalho VAZIO na
+    principal — fato dos dados, não escolha nossa)."""
+    faltam = []
+    for exigida in exigidas:
+        alternativas = exigida if isinstance(exigida, tuple) else (exigida,)
+        if not any(a in cabecalhos for a in alternativas):
+            faltam.append(exigida)
+    return faltam
 
 
 def normalizar_lease(texto: str) -> str:
@@ -94,18 +99,27 @@ def cabecalhos_do_workbook(path: Path) -> dict[str, list[str]]:
 
 def indexar(repo: Any, unit: dict[str, Any], path: Path, sha256: str,
             chaves: list[ChaveDeBusca],
-            colunas_exigidas: list[str]) -> dict[str, Any]:
-    """Varre o workbook inteiro uma vez; persiste lookups e linhas casadas."""
+            colunas_exigidas: list[Any]) -> dict[str, Any]:
+    """Varre o workbook inteiro uma vez; persiste lookups e linhas casadas.
+
+    Aba sem as colunas exigidas é PULADA e registrada (não fatal): a
+    Schedule real carrega abas de outra natureza. Nenhuma aba indexável no
+    arquivo inteiro é falha ruidosa."""
     contagem = {f"{c.kind}:{c.value}": 0 for c in chaves}
     linhas_casadas = 0
-    abas: set[str] = set()
-    cabecalhos_ok = False
+    abas_ok: set[str] = set()
+    abas_puladas: dict[str, list[Any]] = {}
+    vistas: set[str] = set()
     for aba, numero, valores in linhas_do_workbook(path):
-        if aba not in abas:
-            abas.add(aba)
-            exigir_colunas(list(valores), colunas_exigidas,
-                           f"{path.name}!{aba}")
-            cabecalhos_ok = True
+        if aba not in vistas:
+            vistas.add(aba)
+            faltam = colunas_presentes(list(valores), colunas_exigidas)
+            if faltam:
+                abas_puladas[aba] = faltam
+            else:
+                abas_ok.add(aba)
+        if aba in abas_puladas:
+            continue
         casaram = [f"{c.kind}:{c.value}" for c in chaves if c.casa(valores)]
         if casaram:
             for chave in casaram:
@@ -113,12 +127,15 @@ def indexar(repo: Any, unit: dict[str, Any], path: Path, sha256: str,
             repo.registrar_xref_row(unit["id"], sha256, aba, numero,
                                     valores, casaram)
             linhas_casadas += 1
-    if not cabecalhos_ok:
-        raise ErroDeCabecalho(f"{path.name}: nenhuma aba com linhas")
+    if not abas_ok:
+        raise ErroDeCabecalho(
+            f"{path.name}: nenhuma aba tem as colunas exigidas "
+            f"{colunas_exigidas}; puladas: {abas_puladas}")
     for c in chaves:
         repo.registrar_xref_lookup(unit["id"], sha256, c.kind, c.value,
                                    contagem[f"{c.kind}:{c.value}"])
-    return {"arquivo": path.name, "abas": sorted(abas),
+    return {"arquivo": path.name, "abas": sorted(abas_ok),
+            "abas_puladas": abas_puladas,
             "linhas_casadas": linhas_casadas,
             "chaves": len(chaves),
             "chaves_sem_linha": sorted(k for k, n in contagem.items()
@@ -143,11 +160,14 @@ def chave_unit_name(valor: str, coluna: str = "WELL OR CONTRACT NAME"
         lambda v: alvo in v.get(coluna, "").strip().upper())
 
 
-def chave_lease_no(valor: str, coluna: str = "LEASE NO") -> ChaveDeBusca:
+def chave_lease_no(valor: str, coluna: str | tuple[str, ...] = "LEASE NO"
+                   ) -> ChaveDeBusca:
     alvo = normalizar_lease(valor)
+    colunas = coluna if isinstance(coluna, tuple) else (coluna,)
     return ChaveDeBusca(
         "lease_no", valor,
-        lambda v: normalizar_lease(v.get(coluna, "")) == alvo)
+        lambda v: any(normalizar_lease(v.get(c, "")) == alvo
+                      for c in colunas))
 
 
 def chave_recording(vol: str, page: str, coluna: str) -> ChaveDeBusca:

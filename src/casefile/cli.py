@@ -592,19 +592,25 @@ def _indexar_schedule(repo: Any, unit: dict[str, Any],
               f"{list(cab.values())[0][:10]}…) — gate aponta", flush=True)
         return
     sha_sched = shas.get(f"referencias/{sched.name}".lower(), ["?"])[0]
+    # A aba principal da Schedule real deixa a coluna da lease com cabeçalho
+    # VAZIO ('' após desambiguação) — a alternativa entra por isso.
+    colunas_lease = tuple(c for c in (col_lease, "") if c is not None)
     chaves = []
     for c in leases:
         v = c["value"]
-        if col_lease:
-            chaves.append(xl.chave_lease_no(v["lease_no"],
-                                            coluna=col_lease))
+        chaves.append(xl.chave_lease_no(v["lease_no"],
+                                        coluna=colunas_lease))
         if v.get("vol") and v.get("page"):
             chaves.append(xl.chave_recording(v["vol"], v["page"],
                                              coluna=col_rec))
     got = xl.indexar(repo, unit, sched, sha_sched, chaves,
-                     [c for c in (col_lease, col_rec) if c])
-    print(f"    Schedule: {got['linhas_casadas']} linha(s); chaves sem "
-          f"linha: {len(got['chaves_sem_linha'])}", flush=True)
+                     [colunas_lease, col_rec])
+    print(f"    Schedule: {got['linhas_casadas']} linha(s) em "
+          f"{len(got['abas'])} aba(s)"
+          + (f" ({len(got['abas_puladas'])} pulada(s))"
+             if got["abas_puladas"] else "")
+          + f"; chaves sem linha: {len(got['chaves_sem_linha'])}",
+          flush=True)
 
 
 def _garantir_itens_rrc(repo: Any, unit: dict[str, Any]) -> None:

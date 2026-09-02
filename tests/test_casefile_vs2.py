@@ -86,6 +86,37 @@ def test_indexador_falha_ruidoso_sem_coluna(tmp_path):
         xl.indexar(repo, unit, path, SHA_X, [], ["COLUNA INEXISTENTE"])
 
 
+def test_indexador_pula_aba_sem_colunas_e_aceita_alternativas(tmp_path):
+    """A Schedule real: aba principal com cabeçalho VAZIO na coluna da
+    lease; abas seguintes com 'LEASENO'; uma aba de outra natureza."""
+    repo, unit, _ = _unit(tmp_path)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "EOG Leases"
+    ws.append(["DIVISION", "", "RECORDING"])
+    ws.append(["FW", "0111111-001", "Vol 531, Pg 840"])
+    ws2 = wb.create_sheet("Outra Natureza")
+    ws2.append(["QUALQUER", "COISA"])
+    ws2.append(["x", "y"])
+    ws3 = wb.create_sheet("EOG Outleases")
+    ws3.append(["DIVISION", "LEASENO", "RECORDING"])
+    ws3.append(["FW", "0111111-002", "Vol 1, Pg 2"])
+    path = tmp_path / "Schedule sintetica.xlsx"
+    wb.save(path)
+    chaves = [xl.chave_lease_no("0111111/001", coluna=("LEASENO", "")),
+              xl.chave_lease_no("0111111/002", coluna=("LEASENO", "")),
+              xl.chave_recording("531", "840", coluna="RECORDING")]
+    got = xl.indexar(repo, unit, path, SHA_X, chaves,
+                     [("LEASENO", ""), "RECORDING"])
+    assert got["abas"] == ["EOG Leases", "EOG Outleases"]
+    assert list(got["abas_puladas"]) == ["Outra Natureza"]
+    assert got["linhas_casadas"] == 2
+    lookups = {(x["key_kind"], x["key_value"]): x["rows_found"]
+               for x in repo.xref_lookups(unit["id"])}
+    assert lookups[("lease_no", "0111111/001")] == 1
+    assert lookups[("recording", "531/840")] == 1
+
+
 def test_normalizacao_e_recording():
     assert xl.normalizar_lease(" 0220604/001 ") == "0220604-001"
     assert xl.normalizar_lease("0220604-001") == "0220604-001"
