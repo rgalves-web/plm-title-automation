@@ -502,14 +502,43 @@ class RepoFake:
     # --- VS3 ----------------------------------------------------------------
     def registrar_verificacao(self, claim_id, question, verdict,
                               verifier_model, verifier_value, comparison,
-                              cost_usd, session_id=None):
+                              cost_usd, session_id=None, rastreio=None):
+        r = rastreio or {}
         row = {"id": len(self.verifs) + 1, "claim_id": claim_id,
                "question": question, "verdict": verdict,
                "verifier_model": verifier_model,
                "verifier_value": verifier_value, "comparison": comparison,
-               "cost_usd": cost_usd, "session_id": session_id}
+               "cost_usd": cost_usd, "session_id": session_id,
+               "status": "valida", "invalidation_reason": "",
+               "source_sha256": r.get("source_sha256"),
+               "page": r.get("page", ""),
+               "evidence_payload_sha256": r.get("evidence_payload_sha256"),
+               "prompt_sha256": r.get("prompt_sha256"),
+               "raw_response": r.get("raw_response", ""),
+               "request_id": r.get("request_id", ""),
+               "model_params": r.get("model_params", {}), "at": _now()}
         self.verifs.append(row)
         return row["id"]
+
+    def invalidar_verificacao(self, verification_id, reason):
+        row = self.verifs[verification_id - 1]
+        row.update(status="invalidada", invalidation_reason=reason)
+
+    def atualizar_claim_status(self, unit_id, claim_id, status,
+                               superseded_by=None, nota=""):
+        for c in self.claims:
+            if c["id"] == claim_id and c["unit_id"] == unit_id:
+                c["status"] = status
+                c["superseded_by"] = superseded_by
+                if nota:
+                    c["limitations"] = nota
+                return
+        raise ValueError(f"claim {claim_id} nao e da unit {unit_id}")
+
+    def responder_pergunta_vs2(self, decision_id, answer):
+        row = self.decisions[decision_id - 1]
+        if row["kind"] == "pergunta_vs2":
+            row["answer"] = answer
 
     def verificacoes(self, unit_id):
         meus = {c["id"] for c in self.claims if c["unit_id"] == unit_id}
@@ -551,10 +580,12 @@ class RepoFake:
     def claim(self, claim_id):
         return next((c for c in self.claims if c["id"] == claim_id), None)
 
-    def registrar_deliverable(self, unit_id, kind, version, path, sha256):
+    def registrar_deliverable(self, unit_id, kind, version, path, sha256,
+                              lifecycle="final"):
         self.delivs[(unit_id, kind, version)] = {
             "unit_id": unit_id, "kind": kind, "version": version,
-            "path": path, "sha256": sha256}
+            "path": path, "sha256": sha256, "lifecycle": lifecycle,
+            "created_at": _now()}
 
     def deliverables(self, unit_id, kind):
         return sorted((v for k, v in self.delivs.items()

@@ -120,7 +120,7 @@ def test_lote_exhibit_a_transcricao_independente(tmp_path):
         claims_lease=[repo.claim(c1), repo.claim(c2)],
         pngs=[b"png"], chamar=transcreve, custo=custo)
     assert got == {"concordancia": 1, "divergencia": 1,
-                   "evidencia_insuficiente": 0}
+                   "evidencia_insuficiente": 0, "nao_verificavel": 0}
     assert repo.verificacoes_do_claim(c2)[0]["verdict"] == "divergencia"
 
 
@@ -177,7 +177,7 @@ def test_reconciliar_e_gerar_todos(tmp_path):
     repo.registrar_verificacao(cid, "q", "concordancia", "b", {}, {}, 0.01)
     repo.atualizar_claim_ddr(unit["id"], cid, ["Summary!B2"], "")
     rec = vs3_entregaveis.reconciliar(repo, unit)
-    assert rec["claims_com_verificacao"] == 1
+    assert rec["verificacao_tentada"] == 1
     assert rec["vereditos"]["concordancia"] == 1
     assert rec["claims_ddr_prontos"] == 1
     caminhos = vs3_entregaveis.gerar_todos(repo, unit, pasta)
@@ -189,6 +189,166 @@ def test_reconciliar_e_gerar_todos(tmp_path):
         "concordancia"
     corpo = caminhos["title_examination"].read_text(encoding="utf-8")
     assert "2026-06-16" in corpo and "comprovada" in corpo
+
+
+def test_identidade_da_evidencia_e_afirmada_antes_da_chamada(tmp_path):
+    """Veredito CTO item 1: sha/página renderizados = os do claim, senão
+    NENHUMA chamada acontece."""
+    repo, unit, _ = _unit(tmp_path)
+    cid = _claim(repo, unit, valor={"certification_date": "2010-03-03"})
+    claim = repo.claim(cid)
+
+    def nunca_chamar(*a, **k):
+        raise AssertionError("chamada feita com evidencia errada!")
+
+    custo = verificador._CustoB()
+    with pytest.raises(verificador.EvidenciaNaoCorresponde,
+                       match="documento renderizado"):
+        verificador.verificar_pergunta(
+            repo=repo, claim=claim, pergunta="q", campo_do_claim="x",
+            evidencia_texto="t", sha_doc_renderizado="f" * 64,
+            pagina_renderizada="1", chamar=nunca_chamar, custo=custo)
+    with pytest.raises(verificador.EvidenciaNaoCorresponde,
+                       match="pagina renderizada"):
+        verificador.verificar_pergunta(
+            repo=repo, claim=claim, pergunta="q", campo_do_claim="x",
+            evidencia_texto="t", sha_doc_renderizado=SHA_A,
+            pagina_renderizada="9", chamar=nunca_chamar, custo=custo)
+    assert repo.verificacoes_do_claim(cid) == []
+
+
+def test_rastreio_completo_gravado_na_verificacao(tmp_path):
+    repo, unit, _ = _unit(tmp_path)
+    cid = _claim(repo, unit, valor={"certification_date": "2010-03-03"})
+
+    def chamar(prompt, png=None, max_tokens=4000):
+        class U:
+            prompt_tokens, completion_tokens = 10, 10
+        return ('{"valor": "2010-03-03", "trecho": "x", '
+                '"evidencia_suficiente": true}', U(),
+                {"request_id": "req_abc",
+                 "model_params": {"model": "gpt-x"}})
+
+    custo = verificador._CustoB()
+    verificador.verificar_pergunta(
+        repo=repo, claim=repo.claim(cid), pergunta="q?",
+        campo_do_claim="2010-03-03", evidencia_texto="as of 2010-03-03",
+        sha_doc_renderizado=SHA_A, pagina_renderizada="1",
+        chamar=chamar, custo=custo)
+    v = repo.verificacoes_do_claim(cid)[0]
+    assert v["source_sha256"] == SHA_A and v["page"] == "1"
+    assert v["request_id"] == "req_abc"
+    assert len(v["evidence_payload_sha256"]) == 64
+    assert len(v["prompt_sha256"]) == 64
+    assert "2010-03-03" in v["raw_response"]
+    # e o valor do examinador NUNCA vaza para o prompt (hash != do payload
+    # nao prova; o teste de cegueira ja cobre no test acima do modulo)
+
+
+def test_invalidacao_preserva_trilha_e_sai_das_metricas(tmp_path):
+    repo, unit, _ = _unit(tmp_path)
+    cid = _claim(repo, unit, valor={"x": 1})
+    vid = repo.registrar_verificacao(cid, "q", "divergencia", "b", {}, {},
+                                     0.0)
+    repo.invalidar_verificacao(vid, "verifier_error — inspecao do operador")
+    v = repo.verificacoes_do_claim(cid)[0]
+    assert v["status"] == "invalidada"
+    assert "verifier_error" in v["invalidation_reason"]
+    rec = vs3_entregaveis.reconciliar(repo, unit)
+    assert rec["verificacao_tentada"] == 0       # fora das métricas
+    assert rec["vereditos"]["divergencia"] == 0  # não é divergência de título
+
+
+def test_lifecycle_dos_entregaveis_partial_ate_exame_fechar(tmp_path):
+    repo, unit, pasta = _unit(tmp_path)
+    _claim(repo, unit, valor={"x": 1})
+    caminhos = vs3_entregaveis.gerar_todos(repo, unit, pasta)
+    d = repo.deliverables(unit["id"], "title_examination_vs3")[0]
+    assert d["lifecycle"] == "partial"
+    corpo = caminhos["title_examination"].read_text(encoding="utf-8")
+    assert "STATUS: PARTIAL" in corpo
+
+
+def test_regressao_596_589_evidencia_nao_contem_1272(tmp_path):
+    """Regressão do caso 142 (dados REAIS): a EVIDÊNCIA ENTREGUE ao
+    verificador — a página 596/589 renderizada — NÃO contém 1272. Isso
+    prova mecanicamente que a verification 142 (que declarou A-1272) foi
+    verifier_error, não divergência de título. Skip visível sem o Drive
+    local ou sem OCR configurado."""
+    import io
+    import pathlib
+
+    import fitz
+    from PIL import Image
+
+    doc = pathlib.Path(r"C:\Users\Renato\PURPLE LAND MGMT"
+                       r"\BKV122TX - Project Emirates\JOSH B UNIT"
+                       r"\1. Landman Submitted\Leases"
+                       r"\l52 - 596.589 - Frances Caswell OGL "
+                       r"(Memorandum).pdf")
+    if not doc.exists():
+        pytest.skip("Drive local indisponivel nesta maquina")
+    try:
+        from src.knowledge.classifier import default_ocr
+        with fitz.open(doc) as pdf:
+            png = pdf[0].get_pixmap(dpi=200).tobytes("png")
+        ocr = default_ocr()(Image.open(io.BytesIO(png))).upper()
+    except Exception:
+        pytest.skip("OCR nao configurado nesta maquina")
+    assert ocr.strip(), "OCR vazio"
+    # o cerne do verifier_error: o numero 1272 NAO esta na pagina entregue
+    assert "1272" not in ocr
+
+
+def test_regressao_verifier_error_nao_e_divergencia_de_titulo(tmp_path):
+    """A metade positiva, com dado real embutido: o trecho que o examinador
+    capturou (a citação literal do memorandum 596/589) contém A-811, e uma
+    verificação que declara A-1272 sobre ele é `divergencia` — mas ao ser
+    invalidada como verifier_error SAI das métricas de título."""
+    repo, unit, _ = _unit(tmp_path)
+    evidencia_real = ("50.00 acres of land, more or less, being a part of "
+                      "Section #3422, Texas Emigration & Land Co., Survey, "
+                      "A-811, and being more particularly described in that "
+                      "certain Deed dated January 4, 1940")
+    assert "A-811" in evidencia_real and "1272" not in evidencia_real
+    sess = repo.abrir_sessao(unit["id"], "coletar.leitura_006", "opus")
+    cid = repo.inserir_claim(
+        unit["id"], "fact", "serie 0220936 — leitura da /006 (596/589)",
+        {"abrange_a669_ou_a319": "nao", "leitura_completa": True},
+        SHA_A, "1", evidencia_real, "alta", "alta", sess)
+    vid = repo.registrar_verificacao(
+        cid, "survey/abstract?", "divergencia", "gpt-x",
+        {"valor": "C.H.G.R.R. A-1272"}, {}, 0.02)
+    # inspeção visual do operador: a página tem A-811 -> verifier_error
+    repo.invalidar_verificacao(vid, "verifier_error: a pagina 596/589 tem "
+                               "A-811 (inspecao visual do operador); "
+                               "A-1272 nao esta na evidencia")
+    rec = vs3_entregaveis.reconciliar(repo, unit)
+    assert rec["vereditos"]["divergencia"] == 0   # nao conta como divergencia
+    assert rec["verificacao_tentada"] == 0        # invalidada fora
+
+
+def test_preflight_resume_aware_exclui_trabalho_concluido(tmp_path,
+                                                          monkeypatch,
+                                                          capsys):
+    from src.casefile import cli
+    repo, unit, pasta = _unit(tmp_path)
+    monkeypatch.setattr(cli, "ULTIMA", tmp_path / "ultima")
+    monkeypatch.setenv("CASEFILE_TETO_UNIT_USD", "25")
+    repo.transicionar(unit["id"], "INDICADA", "EXAMINANDO", "atalho", "t")
+    repo.registrar_custo(unit["id"], "modelo", 19.5, {})   # restante $5.50
+    sess = repo.abrir_sessao(unit["id"], "exame.vs3", "opus")
+    repo.fechar_sessao(sess, "INTERROMPIDA: credit", 5, {}, 2.3, "x")
+    cid = _claim(repo, unit, valor={"x": 1})
+    repo.registrar_verificacao(cid, "q", "concordancia", "b", {}, {}, 0.0)
+    n_antes = len(repo.sessoes_da_unit(unit["id"]))
+    cli.cmd_examinar("U UNIT", repo=repo, so_preflight=True)
+    saida = capsys.readouterr().out
+    assert "resume-aware" in saida
+    assert "INTERROMPIDA" in saida
+    assert "verificacoes validas: 1" in saida
+    assert "nenhuma chamada de modelo" in saida
+    assert len(repo.sessoes_da_unit(unit["id"])) == n_antes  # nada novo
 
 
 def test_preflight_reprova_sem_orcamento(tmp_path, monkeypatch):

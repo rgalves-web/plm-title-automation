@@ -20,6 +20,16 @@
                                               relatorio
     python -m src.casefile gates ["<unit>"]   status das condicoes da
                                               aprovacao (sem modelo)
+    python -m src.casefile reconciliar ["<unit>"]
+                                              matriz de recordings por lease
+                                              + pull deduplicada (sem modelo)
+    python -m src.casefile examinar ["<unit>"] [--preflight]
+                                              VS3: exame canonico com
+                                              preflight resume-aware
+                                              obrigatorio
+    python -m src.casefile dashboard [--porta=8788]
+                                              Control Tower local read-only
+                                              (http://localhost:8788)
     python -m src.casefile avancar ["<unit>"] coleta_concluida — RECUSA com
                                               gate pendente
 
@@ -655,53 +665,71 @@ def cmd_examinar(nome: str, repo: Any = None, client: Any = None,
                          f"{repo.estado_da_unit(unit['id'])}.")
     pasta = Path(unit["folder_path"])
 
-    # --- preflight -----------------------------------------------------------
+    # --- preflight RESUME-AWARE (veredito CTO 02/09, item 5) ----------------
     teto = custo.teto_unit()
     gasto = repo.custo_acumulado(unit["id"])
     restante = round(teto - gasto, 4)
-    est = {"exame": {"min": 2.0, "esperado": 3.2, "max": 4.5},
-           "verificacao": {"min": 0.3, "esperado": 0.7, "max": 1.5}}
-    maximo = round(est["exame"]["max"] + est["verificacao"]["max"], 2)
-    estrategia = [
-        "digest dos claims no task (nada de reler o ja provado)",
-        "leituras novas restritas a data de corte + TO155xTract2",
-        "prompt/system pinados no cache; mapa/censo reutilizados",
-        "verificacao em familia B (OpenAI): Exhibit A em 2 chamadas de "
-        "transcricao p/ 67 leases; perguntas dirigidas so para claims "
-        "materiais com campo comparavel deterministicamente",
-        "populacao INTEIRA classificada por grupos homogeneos — nenhuma "
-        "lease fora para caber no orcamento",
-        f"tetos duros: exame ${est['exame']['max']}, verificacao "
-        f"${est['verificacao']['max']} (CASEFILE_TETO_VERIFICACAO_USD)"]
-    print(f"PREFLIGHT VS3: restante da unit ${restante} (gasto ${gasto} "
-          f"de ${teto})")
-    print(f"  estimativas: exame min ${est['exame']['min']} / esperado "
-          f"${est['exame']['esperado']} / max ${est['exame']['max']} · "
-          f"verificacao min ${est['verificacao']['min']} / esperado "
-          f"${est['verificacao']['esperado']} / max "
-          f"${est['verificacao']['max']} · MAXIMO TOTAL ${maximo}")
-    for e in estrategia:
-        print(f"  - {e}")
+    sessoes_exame = [s for s in repo.sessoes_da_unit(unit["id"])
+                     if s["command"].startswith("exame.")]
+    interrompida = next(
+        (s for s in reversed(sessoes_exame)
+         if "INTERROMPIDA" in (s.get("stop_reason") or "")), None)
+    tem_posicoes = bool(repo.posicoes(unit["id"]))
+    tem_grafo = bool(repo.deliverables(unit["id"], "chain_graph_vs3"))
+    validas = {v["claim_id"] for v in repo.verificacoes(unit["id"])
+               if v.get("status", "valida") == "valida"}
+    claims_ativos = repo.claims_da_unit(unit["id"])
+    sem_verificacao = [c for c in claims_ativos if c["id"] not in validas]
+
+    print(f"PREFLIGHT VS3 (resume-aware): restante da unit ${restante} "
+          f"(gasto ${gasto} de ${teto})")
+    print("  JA CONCLUIDO (excluido da estimativa — nenhuma chamada valida "
+          "se repete):")
+    print(f"  - verificacoes validas: {len(validas)} claim(s)")
+    if interrompida:
+        print(f"  - sessao {interrompida['id']} detectada como "
+              f"INTERROMPIDA (${interrompida['cost_usd'] or 0} ja "
+              f"contabilizados)")
+    est: dict[str, dict[str, float]] = {}
+    if not (tem_posicoes and tem_grafo):
+        est["exame_retomada"] = {"min": 1.2, "esperado": 2.2, "max": 3.5}
+        print("  FALTA: data de corte, grafo, posicoes canonicas, claims "
+              "DDR (sessao retomada; digest/cache reduzem o custo)")
+    else:
+        print("  exame ja completo (grafo + posicoes) — sessao NAO sera "
+              "reaberta")
+    if sem_verificacao or not (tem_posicoes and tem_grafo):
+        n = max(len(sem_verificacao), 5)   # claims novos da retomada
+        est["verificacao"] = {"min": round(0.02 * n, 2),
+                              "esperado": round(0.04 * n, 2),
+                              "max": round(min(1.0, 0.08 * n), 2)}
+        print(f"  FALTA: verificacao de ~{n} claim(s) (novos/invalidados)")
+    minimo = round(sum(e["min"] for e in est.values()), 2)
+    esperado = round(sum(e["esperado"] for e in est.values()), 2)
+    maximo = round(sum(e["max"] for e in est.values()), 2)
+    print(f"  RESTANTE ESTIMADO: min ${minimo} / esperado ${esperado} / "
+          f"max ${maximo}")
     if maximo > restante:
         raise SystemExit(
-            f"PREFLIGHT REPROVADO: maximo projetado ${maximo} > restante "
-            f"${restante}. Alternativas: (a) operador eleva o teto da unit; "
-            f"(b) reduzir verificacao dirigida (manter lote Exhibit A); "
-            f"(c) dividir o exame em duas sessoes com aceite intermediario. "
-            f"Nenhuma chamada de modelo foi feita.")
+            f"PREFLIGHT REPROVADO: maximo restante ${maximo} > restante "
+            f"${restante}. Alternativas: (a) operador eleva o teto; "
+            f"(b) so verificacao (familia B, sem Anthropic); (c) dividir a "
+            f"retomada. Nenhuma chamada de modelo foi feita.")
+    if not est:
+        print("  NADA A FAZER: exame e verificacao completos.")
+        return
     if so_preflight:
         print("  (preflight-only: nenhuma chamada de modelo)")
         return
 
     print("1/3 sessao do exame (grafo + posicoes + claims DDR)…",
           flush=True)
-    ja_posicoes = repo.posicoes(unit["id"])
-    if ja_posicoes and repo.deliverables(unit["id"], "chain_graph_vs3"):
+    if tem_posicoes and tem_grafo:
         print("    posicoes e grafo ja existem — pulando sessao", flush=True)
     else:
         exame_vs3.executar_sessao(
             repo=repo, unit=unit, pasta=pasta, client=client,
-            max_cost_usd=min(est["exame"]["max"],
+            max_cost_usd=min(est["exame_retomada"]["max"],
                              custo.orcamento(repo, unit, 40.0)))
 
     print("2/3 verificacao cega (familia B)…", flush=True)
@@ -715,6 +743,16 @@ def cmd_examinar(nome: str, repo: Any = None, client: Any = None,
     for nome_arq, caminho in caminhos.items():
         print(f"    {nome_arq}: {caminho}")
     _fecho(repo, unit)
+
+
+def cmd_dashboard(porta: int = 8788) -> None:
+    """Sobe o Control Tower local (VS-D0, read-only). Ctrl+C encerra."""
+    import uvicorn
+
+    from src.casefile.api import app
+    print(f"Control Tower em http://localhost:{porta} — read-only; "
+          f"dados direto do banco do Case File.")
+    uvicorn.run(app, host="127.0.0.1", port=porta, log_level="warning")
 
 
 def _garantir_itens_rrc(repo: Any, unit: dict[str, Any]) -> None:
@@ -782,9 +820,12 @@ def main(argv: list[str] | None = None) -> None:
     elif comando == "examinar":
         cmd_examinar(_nome_de(resto),
                      so_preflight="--preflight" in resto)
+    elif comando == "dashboard":
+        cmd_dashboard(int(_flag(resto, "porta") or "8788"))
     elif comando == "avancar":
         cmd_avancar(_nome_de(resto))
     else:
         raise SystemExit(f"comando desconhecido: {comando!r}. Comandos: db, "
                          f"indicar, planejar, plano, aprovar, rejeitar, "
-                         f"estado, unidades, coletar, gates, avancar.")
+                         f"estado, unidades, coletar, gates, reconciliar, "
+                         f"examinar, dashboard, avancar.")

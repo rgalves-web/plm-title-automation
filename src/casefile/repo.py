@@ -497,15 +497,46 @@ class Repo:
                               verdict: str, verifier_model: str,
                               verifier_value: dict[str, Any],
                               comparison: dict[str, Any], cost_usd: float,
-                              session_id: int | None = None) -> int:
+                              session_id: int | None = None,
+                              rastreio: dict[str, Any] | None = None) -> int:
+        r = rastreio or {}
         return self.conn.execute(
             "INSERT INTO verifications (claim_id, question, verdict, "
             "verifier_model, verifier_value, comparison, cost_usd, "
-            "session_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
-            "RETURNING id",
+            "session_id, source_sha256, page, evidence_payload_sha256, "
+            "prompt_sha256, raw_response, request_id, model_params) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+            "%s, %s) RETURNING id",
             (claim_id, question, verdict, verifier_model,
-             _json(verifier_value), _json(comparison), cost_usd,
-             session_id)).fetchone()["id"]
+             _json(verifier_value), _json(comparison), cost_usd, session_id,
+             r.get("source_sha256"), r.get("page", ""),
+             r.get("evidence_payload_sha256"), r.get("prompt_sha256"),
+             r.get("raw_response", "")[:20000], r.get("request_id", ""),
+             _json(r.get("model_params", {})))).fetchone()["id"]
+
+    def invalidar_verificacao(self, verification_id: int,
+                              reason: str) -> None:
+        self.conn.execute(
+            "UPDATE verifications SET status = 'invalidada', "
+            "invalidation_reason = %s WHERE id = %s",
+            (reason, verification_id))
+
+    def atualizar_claim_status(self, unit_id: int, claim_id: int,
+                               status: str, superseded_by: int | None = None,
+                               nota: str = "") -> None:
+        got = self.conn.execute(
+            "UPDATE claims SET status = %s, superseded_by = %s, "
+            "limitations = CASE WHEN %s != '' THEN %s ELSE limitations END "
+            "WHERE id = %s AND unit_id = %s RETURNING id",
+            (status, superseded_by, nota, nota, claim_id,
+             unit_id)).fetchone()
+        if got is None:
+            raise ValueError(f"claim {claim_id} nao e da unit {unit_id}")
+
+    def responder_pergunta_vs2(self, decision_id: int, answer: str) -> None:
+        self.conn.execute(
+            "UPDATE operator_decisions SET answer = %s, decided_at = now() "
+            "WHERE id = %s AND kind = 'pergunta_vs2'", (answer, decision_id))
 
     def verificacoes(self, unit_id: int) -> list[dict[str, Any]]:
         return self.conn.execute(
@@ -568,13 +599,15 @@ class Repo:
             "SELECT * FROM claims WHERE id = %s", (claim_id,)).fetchone()
 
     def registrar_deliverable(self, unit_id: int, kind: str, version: int,
-                              path: str, sha256: str) -> None:
+                              path: str, sha256: str,
+                              lifecycle: str = "final") -> None:
         self.conn.execute(
             "INSERT INTO deliverable_versions (unit_id, kind, version, "
-            "path, sha256) VALUES (%s, %s, %s, %s, %s) "
+            "path, sha256, lifecycle) VALUES (%s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (unit_id, kind, version) DO UPDATE SET "
-            "path = EXCLUDED.path, sha256 = EXCLUDED.sha256",
-            (unit_id, kind, version, path, sha256))
+            "path = EXCLUDED.path, sha256 = EXCLUDED.sha256, "
+            "lifecycle = EXCLUDED.lifecycle",
+            (unit_id, kind, version, path, sha256, lifecycle))
 
     def deliverables(self, unit_id: int, kind: str) -> list[dict[str, Any]]:
         return self.conn.execute(

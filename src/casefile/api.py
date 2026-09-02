@@ -11,12 +11,13 @@ Execução local:  uvicorn --app-dir <repo> src.casefile.api:app --port 8788
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 from src.casefile import custo as custo_mod
 from src.casefile import gates as gates_mod
@@ -57,13 +58,45 @@ def _modo(repo: Any, unit_id: int) -> str:
 
 
 def _ultima_atividade(repo: Any, unit_id: int) -> str | None:
-    ts = []
-    for t in repo.transicoes(unit_id):
-        ts.append(t["at"])
+    """Considera transições, sessões, claims, verificações, decisões,
+    custos e entregáveis (veredito CTO, item 6)."""
+    ts: list[Any] = []
+    ts += [t["at"] for t in repo.transicoes(unit_id)]
     for s in repo.sessoes_da_unit(unit_id):
         ts.append(s.get("ended_at") or s.get("started_at"))
-    ts = [x for x in ts if x is not None]
-    return _iso(max(ts)) if ts else None
+    ts += [c.get("created_at") for c in repo.claims_da_unit(unit_id)]
+    ts += [v.get("at") for v in repo.verificacoes(unit_id)]
+    ts += [d.get("decided_at") for d in repo.decisoes_da_unit(unit_id)]
+    ts += [c.get("at") for c in repo.custos_da_unit(unit_id)]
+    for kind in ("relatorio_coleta_vs2", "reconciliacao_recordings",
+                 "chain_graph_vs3", "title_examination_vs3"):
+        ts += [d.get("created_at") for d in repo.deliverables(unit_id, kind)]
+    ts = [_iso(x) for x in ts if x is not None]
+    return max(ts) if ts else None
+
+
+def _verificacao_buckets(repo: Any,
+                         claims: list[dict[str, Any]],
+                         verifs: list[dict[str, Any]]) -> dict[str, int]:
+    """Último veredito VÁLIDO por claim — tentativa não é concordância."""
+    ultimo: dict[int, str] = {}
+    for v in verifs:
+        if v.get("status", "valida") == "valida":
+            ultimo[v["claim_id"]] = v["verdict"]
+    ids = {c["id"] for c in claims}
+    meus = {cid: verd for cid, verd in ultimo.items() if cid in ids}
+    return {"tentadas": len(meus),
+            "concordantes": sum(1 for x in meus.values()
+                                if x == "concordancia"),
+            "divergentes": sum(1 for x in meus.values()
+                               if x == "divergencia"),
+            "insuficientes": sum(1 for x in meus.values()
+                                 if x == "evidencia_insuficiente"),
+            "nao_verificaveis": sum(1 for x in meus.values()
+                                    if x == "nao_verificavel")}
+
+
+_API_RE = re.compile(r"42-?337-?\d{5}")
 
 
 def _blockers(repo: Any, unit_id: int) -> dict[str, Any]:
@@ -106,15 +139,23 @@ def _progresso(repo: Any, unit_id: int) -> dict[str, Any]:
                        - pops.get("in_dpu_but_zero_unit_acres", 0),
                    "zero_unit_acres":
                        pops.get("in_dpu_but_zero_unit_acres", 0),
-                   "examinadas_com_claim": len(leases),
-                   "verificadas": sum(1 for c in leases
-                                      if c["id"] in com_verif)},
-        "tracts": len(repo.claims_da_unit(unit_id, "tract")),
-        "wells": len([c for c in claims
-                      if "api 42" in c["entity"].lower()
-                      or c["claim_type"] == "well"]),
+                   "com_claim": len(leases),
+                   # tentativa != verificada: os baldes falam por si
+                   "verificacao": _verificacao_buckets(repo, leases,
+                                                       verifs)},
+        # o claim da linha TOTAL do Exhibit C não é um tract
+        "tracts": sum(1 for c in repo.claims_da_unit(unit_id, "tract")
+                      if "total" not in str(
+                          c["value"].get("tract_no", "")).lower()
+                      and "total" not in c["entity"].lower()),
+        # poços = APIs distintos citados (normalizados: com e sem hífen são
+        # o MESMO poço), nunca contagem de claims
+        "wells": len({m.group().replace("-", "") for c in claims
+                      for m in [_API_RE.search(
+                          c["entity"] + str(c["value"]))] if m}),
         "claims": {"ativos": len(claims),
-                   "com_verificacao": len(com_verif),
+                   "verificacao": _verificacao_buckets(repo, claims,
+                                                       verifs),
                    "prontos_para_ddr": sum(1 for c in claims
                                            if c.get("ddr_candidates"))},
         "divergencias": len(repo.claims_da_unit(unit_id, "divergence")),
@@ -148,6 +189,18 @@ def units(repo: Any = Depends(get_repo)) -> list[dict[str, Any]]:
         bl = _blockers(repo, u["id"])
         sess_ativa = next((s for s in repo.sessoes_da_unit(u["id"])
                            if s.get("ended_at") is None), None)
+        # Saúde reflete sessão interrompida e marco incompleto (item 6).
+        sessoes_exame = [s for s in repo.sessoes_da_unit(u["id"])
+                         if s["command"].startswith("exame.")]
+        exame_interrompido = bool(
+            sessoes_exame
+            and "INTERROMPIDA" in (sessoes_exame[-1].get("stop_reason")
+                                   or ""))
+        marco_incompleto = (u["state"] == "EXAMINANDO"
+                            and not repo.posicoes(u["id"]))
+        atencao = (bool(bl["gates_bloqueando"])
+                   or bool(bl["requer_intervencao"])
+                   or exame_interrompido or marco_incompleto)
         out.append({
             "id": u["id"], "projeto": u.get("engagement", ""),
             "unit": u["canonical_name"], "estado": u["state"],
@@ -167,8 +220,13 @@ def units(repo: Any = Depends(get_repo)) -> list[dict[str, Any]]:
             "custo_portal": custos.get("coleta", 0.0),
             "orcamento": custo_mod.teto_unit(),
             "prazo_sla": None,
-            "saude": ("atencao" if bl["gates_bloqueando"]
-                      or bl["requer_intervencao"] else "ok"),
+            "saude": "atencao" if atencao else "ok",
+            "saude_motivos": ([m for m, cond in (
+                ("sessao de exame interrompida", exame_interrompido),
+                ("marco VS3 incompleto (0 posicoes)", marco_incompleto),
+                ("gates bloqueando", bool(bl["gates_bloqueando"])),
+                ("itens requerem intervencao",
+                 bool(bl["requer_intervencao"]))) if cond]),
         })
     return out
 
@@ -289,11 +347,16 @@ def unit_timeline(unit_id: int, repo: Any = Depends(get_repo)
 
 @app.get("/api/units/{unit_id}/intervencoes")
 def unit_intervencoes(unit_id: int, repo: Any = Depends(get_repo)
-                      ) -> list[dict[str, Any]]:
-    """Fila do operador — decisões de landman, sem tarefas técnicas."""
+                      ) -> dict[str, Any]:
+    """State/mode-aware (veredito CTO, itens 3 e 6): a FILA atual carrega
+    somente decisões reais e acionáveis no modo presente; o que exigiria
+    PM/seller ou coleta paga em SIMULATION vai para dependências de
+    produção — visível, mas fora da fila."""
     _unit_ou_404(repo, unit_id)
+    simulacao_ativa = simulacao.ativa(repo, unit_id)
     agora = datetime.now(timezone.utc)
-    fila = []
+    fila: list[dict[str, Any]] = []
+    producao: list[dict[str, Any]] = []
     for q in repo.perguntas_vs2_abertas(unit_id):
         fila.append({"criticidade": "alta", "unit_id": unit_id,
                      "pergunta": q["question"],
@@ -309,28 +372,56 @@ def unit_intervencoes(unit_id: int, repo: Any = Depends(get_repo)
                 idade = round((agora - i["at"]).total_seconds() / 3600, 1)
             except TypeError:
                 idade = None
-        fila.append({"criticidade": "media", "unit_id": unit_id,
-                     "pergunta": f"Coleta em producao: {i['title']}",
-                     "motivo": i["note"][:160],
-                     "impacto": "conclusoes dependentes ficam impedidas",
-                     "evidencias": json.dumps(i["target"],
-                                              ensure_ascii=False)[:160],
-                     "acao_necessaria": "autorizar coleta em producao "
-                                        "(fora da simulacao)",
-                     "aguardando_desde": _iso(i.get("at")),
-                     "horas_aguardando": idade, "id": f"coleta-{i['id']}"})
+        item = {"criticidade": "media", "unit_id": unit_id,
+                "pergunta": f"Coleta em producao: {i['title']}",
+                "motivo": i["note"][:160],
+                "impacto": "conclusoes dependentes ficam impedidas",
+                "evidencias": json.dumps(i["target"],
+                                         ensure_ascii=False)[:160],
+                "acao_necessaria": "coleta paga (somente em producao)",
+                "aguardando_desde": _iso(i.get("at")),
+                "horas_aguardando": idade, "id": f"coleta-{i['id']}"}
+        (producao if simulacao_ativa else fila).append(item)
     for p in repo.pesquisas(unit_id, "aberta"):
         if "pm" in p["where_"].lower() or "seller" in p["where_"].lower():
-            fila.append({"criticidade": "media", "unit_id": unit_id,
-                         "pergunta": p["title"],
-                         "motivo": p["what"][:160],
-                         "impacto": "campo do DDR fica em branco declarado",
-                         "evidencias": p["where_"],
-                         "acao_necessaria": "solicitacao externa "
-                                            "(em producao)",
-                         "aguardando_desde": None,
-                         "id": f"pesquisa-{p['id']}"})
-    return fila
+            item = {"criticidade": "media", "unit_id": unit_id,
+                    "pergunta": p["title"], "motivo": p["what"][:160],
+                    "impacto": "campo do DDR fica em branco declarado",
+                    "evidencias": p["where_"],
+                    "acao_necessaria": "solicitacao externa "
+                                       "(somente em producao)",
+                    "aguardando_desde": None, "id": f"pesquisa-{p['id']}"}
+            (producao if simulacao_ativa else fila).append(item)
+    return {"fila": fila, "dependencias_producao": producao,
+            "modo": "SIMULATION" if simulacao_ativa else "PRODUCTION"}
+
+
+@app.get("/api/claims/{claim_id}/evidencia.png")
+def claim_evidencia(claim_id: int, repo: Any = Depends(get_repo)
+                    ) -> Response:
+    """A página documental citada pelo claim, em pixels — renderização
+    local, read-only (item 6: o drawer mostra a página, não só o trecho)."""
+    c = repo.claim(claim_id)
+    if c is None:
+        raise HTTPException(404, f"claim {claim_id} nao existe")
+    unit = _unit_ou_404(repo, c["unit_id"])
+    from src.casefile.acervo import montar_acervo
+    acervo = montar_acervo(Path(unit["folder_path"]), {},
+                           incluir_entrega=True)
+    nome = next((n for n, shas in
+                 repo.sha_por_nome(c["unit_id"]).items()
+                 if c["source_sha256"] in shas and acervo.index.exists(n)),
+                None)
+    if nome is None:
+        raise HTTPException(404, "documento do claim fora do acervo")
+    try:
+        pagina = int(str(c["page"]).split("-")[0].split(",")[0].strip())
+    except ValueError:
+        pagina = 1
+    got = acervo.read_page(nome, pagina, "imagem")
+    if got.get("kind") != "image":
+        raise HTTPException(404, "pagina nao renderizavel em pixels")
+    return Response(content=got["png"], media_type="image/png")
 
 
 @app.get("/api/units/{unit_id}/grafo")

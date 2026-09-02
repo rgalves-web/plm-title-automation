@@ -326,6 +326,13 @@ def executar_verificacao(*, repo: Any, unit: dict[str, Any], pasta: Path,
         except Exception:
             return None
 
+    def _sha_doc(nome: str) -> str | None:
+        import hashlib
+        try:
+            return hashlib.sha256(acervo.index.read_bytes(nome)).hexdigest()
+        except Exception:
+            return None
+
     # 1) lote: transcrição independente do Exhibit A (p.3 e p.4 da DPU).
     leases = repo.claims_da_unit(unit["id"], "lease_in_unit")
     # O unit dec CERTO: pastas de lease carregam designations de OUTRAS
@@ -336,14 +343,17 @@ def executar_verificacao(*, repo: Any, unit: dict[str, Any], pasta: Path,
     dpu_nome = next((n for n in acervo.names()
                      if "unit dec" in n and "rec" in n
                      and all(t in n for t in tokens)), None)
-    ja = {v["claim_id"] for v in repo.verificacoes(unit["id"])}
+    # Só verificação VÁLIDA conta como feita — invalidada refaz.
+    ja = {v["claim_id"] for v in repo.verificacoes(unit["id"])
+          if v.get("status", "valida") == "valida"}
     pendentes_lote = [c for c in leases if c["id"] not in ja]
     if dpu_nome and pendentes_lote:
         pngs = [p for p in (_png(dpu_nome, 3), _png(dpu_nome, 4)) if p]
         if pngs:
             resumo["lote_exhibit_a"] = verificador.verificar_lote_exhibit_a(
                 repo=repo, unit=unit, claims_lease=pendentes_lote,
-                pngs=pngs, chamar=chamar, custo=cust)
+                pngs=pngs, sha_doc=_sha_doc(dpu_nome), chamar=chamar,
+                custo=cust)
 
     # 2) dirigidas: perguntas por claim material (tabela determinística).
     for claim, pergunta, campo, ev in _perguntas_materiais(repo, unit,
@@ -355,25 +365,29 @@ def executar_verificacao(*, repo: Any, unit: dict[str, Any], pasta: Path,
             continue
         texto_ev, png_ev = "", None
         nome_ev = sha_nomes.get(claim["source_sha256"])
+        pagina_ev = _pagina_int(claim["page"])
         if ev == "texto" and nome_ev:
             try:
-                got = acervo.read_page(nome_ev, claim["page"].split(",")[0]
-                                       .strip() or 1, "texto")
+                got = acervo.read_page(nome_ev, pagina_ev, "texto")
                 texto_ev = got.get("text", "")
             except Exception:
                 texto_ev = ""
         elif nome_ev:
-            png_ev = _png(nome_ev, _pagina_int(claim["page"]))
+            png_ev = _png(nome_ev, pagina_ev)
         if not texto_ev and png_ev is None:
             repo.registrar_verificacao(
                 claim["id"], pergunta, "nao_verificavel",
                 verificador.modelo_b(), {},
-                {"motivo": "evidencia nao renderizavel"}, 0.0, None)
+                {"motivo": "evidencia nao renderizavel"}, 0.0, None,
+                rastreio={"source_sha256": claim["source_sha256"],
+                          "page": str(pagina_ev)})
             continue
         got = verificador.verificar_pergunta(
             repo=repo, claim=claim, pergunta=pergunta,
             campo_do_claim=campo, evidencia_texto=texto_ev,
-            evidencia_png=png_ev, chamar=chamar, custo=cust)
+            evidencia_png=png_ev,
+            sha_doc_renderizado=_sha_doc(nome_ev) if nome_ev else None,
+            pagina_renderizada=pagina_ev, chamar=chamar, custo=cust)
         resumo["dirigidas"].append(got)
 
     repo.registrar_custo(unit["id"], "verificacao", cust.total,

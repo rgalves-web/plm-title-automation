@@ -96,17 +96,71 @@ def test_claim_com_verificacao_e_contaminacao(cenario):
     assert det["origem"] == "entrega"
 
 
-def test_fila_timeline_documentos(cenario):
+def test_fila_mode_aware_separa_dependencias_de_producao(cenario):
+    """Veredito CTO item 3/6: em SIMULATION, PM/coleta paga saem da fila."""
     client, repo, unit = cenario
-    fila = client.get(f"/api/units/{unit['id']}/intervencoes").json()
-    tipos = {f["criticidade"] for f in fila}
-    assert "alta" in tipos and len(fila) == 2   # pergunta + bloqueado
+    got = client.get(f"/api/units/{unit['id']}/intervencoes").json()
+    assert got["modo"] == "SIMULATION"
+    assert len(got["fila"]) == 1                    # só a pergunta real
+    assert got["fila"][0]["criticidade"] == "alta"
+    assert len(got["dependencias_producao"]) == 1   # o bloqueado_simulacao
+    assert "producao" in \
+        got["dependencias_producao"][0]["acao_necessaria"]
     tl = client.get(f"/api/units/{unit['id']}/timeline").json()
     acoes = [e["acao"] for e in tl]
     assert "atalho" in acoes and "sessao exame.vs3" in acoes
     docs = client.get(f"/api/units/{unit['id']}/documentos").json()
     assert docs["censo_por_origem"]["unit_files"]["conteudos"] == 1
     assert docs["itens_coleta"][0]["status"] == "bloqueado_simulacao"
+
+
+def test_metricas_semanticas_do_progresso(cenario):
+    """Tentativa != verificada; TOTAL não é tract; well = API distinto."""
+    client, repo, unit = cenario
+    uid = unit["id"]
+    sess = repo.sessoes_da_unit(uid)[0]["id"]
+    repo.inserir_claim(uid, "tract", "tract 1",
+                       {"tract_no": "1", "acres": "13.05"}, SHA, "6", "t",
+                       "alta", "alta", sess)
+    repo.inserir_claim(uid, "tract", "linha TOTAL do Exhibit C",
+                       {"tract_no": "TOTAL"}, SHA, "6", "t", "alta",
+                       "alta", sess)
+    repo.inserir_claim(uid, "fact", "poco API 42-337-34773",
+                       {"api": "42-337-34773"}, SHA, "1", "t", "alta",
+                       "alta", sess)
+    # mesmo poço citado sem hífen: NÃO deve virar um segundo well
+    repo.inserir_claim(uid, "fact", "producao 4233734773",
+                       {"api": "4233734773"}, SHA, "1", "t", "alta",
+                       "alta", sess)
+    # verificação inválida NÃO conta nas métricas
+    c_lease = repo.claims_da_unit(uid, "lease_in_unit")[0]
+    vid = repo.registrar_verificacao(c_lease["id"], "q", "divergencia",
+                                     "gpt-x", {}, {}, 0.0)
+    repo.invalidar_verificacao(vid, "verifier_error")
+    p = client.get(f"/api/units/{uid}").json()["progresso"]
+    assert p["tracts"] == 1                     # TOTAL excluído
+    assert p["wells"] == 1                      # API distinto
+    assert p["leases"]["verificacao"]["tentadas"] == 0   # inválida fora
+    assert p["claims"]["verificacao"]["concordantes"] == 1
+
+
+def test_saude_atencao_com_exame_interrompido(cenario):
+    client, repo, unit = cenario
+    sess = repo.abrir_sessao(unit["id"], "exame.vs3", "opus")
+    repo.fechar_sessao(sess, "INTERROMPIDA: credit balance too low", 5,
+                       {}, 2.0, "x")
+    u = client.get("/api/units").json()[0]
+    assert u["saude"] == "atencao"
+    assert "sessao de exame interrompida" in u["saude_motivos"]
+
+
+def test_lifecycle_impede_parcial_como_final(cenario):
+    client, repo, unit = cenario
+    repo.registrar_deliverable(unit["id"], "title_examination_vs3", 1,
+                               "x.md", "0" * 64, lifecycle="partial")
+    det = client.get(f"/api/units/{unit['id']}").json()
+    d = det["deliverables"]["title_examination_vs3"][0]
+    assert d["lifecycle"] == "partial"
 
 
 def test_unit_inexistente_404_e_home_serve_html(cenario):

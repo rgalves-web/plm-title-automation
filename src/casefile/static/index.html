@@ -94,10 +94,13 @@ async function refresh(){
       renderPortfolio(units);                          // sobrevivem
     }
     if(unitSel) await loadUnit(unitSel,false);
-    $("#hdr-upd").textContent="atualizado "+new Date().toLocaleTimeString();
+    $("#hdr-upd").innerHTML="atualizado "+new Date().toLocaleTimeString();
     const sim=units.some(u=>u.modo==="SIMULATION");
     $("#hdr-mode").innerHTML=sim?badge("SIMULATION MODE","sim"):"";
-  }catch(e){$("#hdr-upd").textContent="erro: "+e.message;}
+  }catch(e){
+    $("#hdr-upd").innerHTML=badge("DASHBOARD OFFLINE — API sem resposta","bad")
+      +` <span class="muted">${esc(e.message)}</span>`;
+  }
 }
 
 function renderPortfolio(units){
@@ -145,8 +148,9 @@ function renderDetail(){
       <div class="kpi"><b>${money(d.custos.total)}</b><span>custo total · teto ${money(d.custos.orcamento)}</span></div>
       <div class="kpi"><b>${money(d.custos.por_categoria.coleta||0)}</b><span>portal (deve ser $0 em simulação)</span></div>
       <div class="kpi"><b>${p.leases.exhibit_a} / ${p.leases.potencialmente_contribuintes} / ${p.leases.zero_unit_acres}</b><span>leases Exhibit A / contribuintes / zero-acres</span></div>
-      <div class="kpi"><b>${p.claims.ativos}</b><span>claims · ${p.claims.com_verificacao} verificados · ${p.claims.prontos_para_ddr} p/ DDR</span></div>
-      <div class="kpi"><b>${(cache.fila||[]).length}</b><span>intervenções na fila</span></div>
+      <div class="kpi"><b>${p.leases.verificacao.concordantes} / ${p.leases.verificacao.insuficientes}</b><span>leases: concordantes / evid. insuficiente (${p.leases.verificacao.tentadas} tentadas)</span></div>
+      <div class="kpi"><b>${p.claims.ativos}</b><span>claims · verif.: ${p.claims.verificacao.concordantes}✓ ${p.claims.verificacao.divergentes}✗ ${p.claims.verificacao.insuficientes}? · ${p.claims.prontos_para_ddr} p/ DDR</span></div>
+      <div class="kpi"><b>${(cache.fila.fila||[]).length}</b><span>fila (acionável agora) · ${(cache.fila.dependencias_producao||[]).length} dependências de produção</span></div>
     </div>
     <nav class="tabs">${TABS.map(([k,t])=>
       `<button class="${k===tabSel?"on":""}" onclick="setTab('${k}')">${t}</button>`).join("")}</nav>
@@ -166,7 +170,7 @@ function renderTab(){
     <div class="sec"><h4>Progresso por população (sem percentual único)</h4>
       <div class="kpis">
         <div class="kpi"><b>${Object.values(p.documentos.no_censo_por_origem).reduce((a,b)=>a+b,0)}</b><span>docs no censo · ${p.documentos.ausentes_declarados} ausentes · ${p.documentos.bloqueados_simulacao} bloq. simulação</span></div>
-        <div class="kpi"><b>${p.leases.examinadas_com_claim}</b><span>leases com claim · ${p.leases.verificadas} verificadas</span></div>
+        <div class="kpi"><b>${p.leases.com_claim}</b><span>leases com claim · verif.: ${p.leases.verificacao.concordantes} concordantes, ${p.leases.verificacao.insuficientes} insuficientes, ${p.leases.verificacao.divergentes} divergentes</span></div>
         <div class="kpi"><b>${p.tracts}</b><span>tracts</span></div>
         <div class="kpi"><b>${p.divergencias}</b><span>divergências</span></div>
         <div class="kpi"><b>${p.curativas}</b><span>curatives</span></div>
@@ -214,13 +218,17 @@ function renderTab(){
     return `<div class="sec"><h4>${tabSel==="tl"?"Timeline":"Auditoria (todos os eventos)"}</h4>
       ${tabela(tabSel==="tl"?rows:rows,[["q","quando"],["ator","ator"],["acao","ação"],
         ["mud","estado"],["motivo","motivo"],["custo","custo"],["vp","prompt/versão"]])}</div>`;}
-  case "fila":return `<div class="sec"><h4>Fila consolidada para o operador</h4>${tabela(
-      cache.fila.map(f=>({crit:f.criticidade,perg:f.pergunta,motivo:f.motivo,
-        impacto:f.impacto,acao:f.acao_necessaria,
-        espera:f.horas_aguardando!=null?f.horas_aguardando+"h":"—"})),
-      [["crit","criticidade"],["perg","pergunta"],["motivo","motivo"],
-       ["impacto","impacto"],["acao","ação necessária"],["espera","aguardando"]])}
-      <p class="muted">Somente decisões de landman/operador — tarefas técnicas não entram aqui. Ações chegam no VS-D1.</p></div>`;
+  case "fila":{const F=cache.fila;const mapa=f=>({crit:f.criticidade,
+      perg:f.pergunta,motivo:f.motivo,impacto:f.impacto,
+      acao:f.acao_necessaria,
+      espera:f.horas_aguardando!=null?f.horas_aguardando+"h":"—"});
+    const cols=[["crit","criticidade"],["perg","pergunta"],["motivo","motivo"],
+       ["impacto","impacto"],["acao","ação necessária"],["espera","aguardando"]];
+    return `<div class="sec"><h4>Fila — acionável AGORA (modo ${esc(F.modo)})</h4>
+      ${tabela((F.fila||[]).map(mapa),cols)}</div>
+      <div class="sec"><h4>Dependências de produção (fora da fila no modo ${esc(F.modo)})</h4>
+      ${tabela((F.dependencias_producao||[]).map(mapa),cols)}
+      <p class="muted">Itens que exigiriam PM/seller ou coleta paga não são acionáveis em simulação. Ações chegam no VS-D1.</p></div>`;}
   }
   return "";
 }
@@ -259,6 +267,10 @@ window.openClaim=async id=>{
       <dt>limitações</dt><dd>${esc(c.limitacoes||"—")}</dd>
       <dt>células DDR</dt><dd>${(c.celulas_candidatas_ddr||[]).map(esc).join(", ")||"—"}</dd>
     </dl>
+    <div class="sec"><h4>Página documental (render local)</h4>
+      <img src="/api/claims/${id}/evidencia.png" alt="página citada"
+           style="max-width:100%;border:1px solid var(--line);border-radius:4px"
+           onerror="this.replaceWith(Object.assign(document.createElement('p'),{className:'muted',textContent:'página não renderizável em pixels (ex.: planilha) — ver trecho abaixo'}))"></div>
     <div class="sec"><h4>Trecho (evidência do examinador)</h4><pre>${esc(c.documento.trecho)}</pre></div>
     <div class="sec"><h4>Valor do examinador</h4><pre>${esc(JSON.stringify(c.claim.value,null,1))}</pre></div>
     <div class="sec"><h4>Verificação cega</h4>

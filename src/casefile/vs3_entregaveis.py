@@ -18,27 +18,42 @@ from src.casefile import caneta, gates
 
 
 def _grava(repo: Any, unit: dict[str, Any], pasta: Path, kind: str,
-           nome: str, texto: str) -> Path:
+           nome: str, texto: str, lifecycle: str) -> Path:
     path = caneta.escrever_texto(caneta.caminho(pasta) / nome, texto)
     versao = 1 + len(repo.deliverables(unit["id"], kind))
     repo.registrar_deliverable(
         unit["id"], kind, versao, str(path),
-        hashlib.sha256(texto.encode("utf-8")).hexdigest())
+        hashlib.sha256(texto.encode("utf-8")).hexdigest(),
+        lifecycle=lifecycle)
     return path
+
+
+def _lifecycle(repo: Any, unit: dict[str, Any]) -> str:
+    """PARTIAL enquanto o exame não fechou (posições + grafo + data de
+    corte) — nenhum consumidor trata parcial como 'latest final'."""
+    tem_posicoes = bool(repo.posicoes(unit["id"]))
+    tem_grafo = bool(repo.deliverables(unit["id"], "chain_graph_vs3"))
+    tem_corte = any("data de corte" in c["entity"].lower()
+                    for c in repo.claims_da_unit(unit["id"]))
+    return "final" if (tem_posicoes and tem_grafo and tem_corte) \
+        else "partial"
 
 
 def reconciliar(repo: Any, unit: dict[str, Any]) -> dict[str, Any]:
     uid = unit["id"]
     claims = repo.claims_da_unit(uid)
-    verifs = repo.verificacoes(uid)
+    # Só verificação VÁLIDA conta (invalidada = verifier_error, preservada
+    # na trilha mas fora das métricas); tentativa nunca vira "verificada".
+    verifs = [v for v in repo.verificacoes(uid)
+              if v.get("status", "valida") == "valida"]
     por_claim: dict[int, list[dict[str, Any]]] = {}
     for v in verifs:
         por_claim.setdefault(v["claim_id"], []).append(v)
     vereditos = {k: 0 for k in ("concordancia", "divergencia",
                                 "evidencia_insuficiente",
                                 "nao_verificavel")}
-    for v in verifs:
-        vereditos[v["verdict"]] += 1
+    for cid, vs in por_claim.items():
+        vereditos[vs[-1]["verdict"]] += 1
     tipos = {}
     for c in claims:
         t = c["value"].get("tipo_resultado") or {
@@ -49,19 +64,26 @@ def reconciliar(repo: Any, unit: dict[str, Any]) -> dict[str, Any]:
     posicoes = repo.posicoes(uid)
     pops = repo.populacoes_contagens(uid)
     dpu = {m["member"] for m in repo.populacao(uid, "dpu_exhibit_a")}
-    leases_verificadas = {
-        c["id"] for c in repo.claims_da_unit(uid, "lease_in_unit")
-        if c["id"] in por_claim}
+    leases = repo.claims_da_unit(uid, "lease_in_unit")
+    lease_verd = {c["id"]: por_claim[c["id"]][-1]["verdict"]
+                  for c in leases if c["id"] in por_claim}
     return {
         "claims_ativos": len(claims),
-        "claims_com_verificacao": len(por_claim),
+        "verificacao_tentada": len(por_claim),
         "vereditos": vereditos,
         "tipos_resultado": tipos,
         "posicoes": len(posicoes),
         "posicoes_por_classe": _conta(posicoes, "classification"),
         "populacoes": pops,
         "leases_dpu": len(dpu),
-        "leases_verificadas": len(leases_verificadas),
+        "leases_verificacao": {
+            "tentadas": len(lease_verd),
+            "concordantes": sum(1 for v in lease_verd.values()
+                                if v == "concordancia"),
+            "insuficientes": sum(1 for v in lease_verd.values()
+                                 if v == "evidencia_insuficiente"),
+            "divergentes": sum(1 for v in lease_verd.values()
+                               if v == "divergencia")},
         "claims_ddr_prontos": sum(1 for c in claims
                                   if c.get("ddr_candidates")),
         "perguntas_abertas": len(repo.perguntas_vs2_abertas(uid)),
@@ -83,9 +105,14 @@ def gerar_todos(repo: Any, unit: dict[str, Any], pasta: Path
     uid = unit["id"]
     agora = datetime.now(timezone.utc).isoformat(timespec="seconds")
     rec = reconciliar(repo, unit)
+    lc = _lifecycle(repo, unit)
+    banner = ("" if lc == "final" else
+              f"\n> **STATUS: {lc.upper()}** — exame incompleto (o "
+              f"consumidor NÃO deve tratar este artefato como final).\n")
     posicoes = repo.posicoes(uid)
     claims = {c["id"]: c for c in repo.claims_da_unit(uid)}
-    verifs = repo.verificacoes(uid)
+    verifs = [v for v in repo.verificacoes(uid)
+              if v.get("status", "valida") == "valida"]
     por_claim: dict[int, list[dict[str, Any]]] = {}
     for v in verifs:
         por_claim.setdefault(v["claim_id"], []).append(v)
@@ -96,7 +123,7 @@ def gerar_todos(repo: Any, unit: dict[str, Any], pasta: Path
     # --- TITLE_EXAMINATION ---------------------------------------------------
     md = [f"# TITLE EXAMINATION VS3 — {unit['canonical_name']} (v1)",
           f"_gerado em {agora} · simulação (golden replay) · nenhuma "
-          f"certificação de WI/NRI_", "",
+          f"certificação de WI/NRI_", banner,
           "## Data de corte"]
     if corte:
         md.append(f"- {corte['value'].get('data', '?')} — fonte: "
@@ -119,15 +146,15 @@ def gerar_todos(repo: Any, unit: dict[str, Any], pasta: Path
     for k, n in rec["vereditos"].items():
         md.append(f"- {k}: {n}")
     md += ["", "## Reconciliação (critério de aceite)"]
-    for k in ("claims_ativos", "claims_com_verificacao", "leases_dpu",
-              "leases_verificadas", "posicoes", "claims_ddr_prontos",
-              "perguntas_abertas"):
+    for k in ("claims_ativos", "verificacao_tentada", "leases_dpu",
+              "posicoes", "claims_ddr_prontos", "perguntas_abertas"):
         md.append(f"- {k}: {rec[k]}")
+    md.append(f"- leases (verificacao): {rec['leases_verificacao']}")
     md.append(f"- populações: {rec['populacoes']}")
     md.append(f"- posições por classe: {rec['posicoes_por_classe']}")
     out["title_examination"] = _grava(
         repo, unit, pasta, "title_examination_vs3",
-        "TITLE_EXAMINATION_VS3_v1.md", "\n".join(md) + "\n")
+        "TITLE_EXAMINATION_VS3_v1.md", "\n".join(md) + "\n", lc)
 
     # --- CLAIMS_READY_FOR_DDR ------------------------------------------------
     sessoes = {s["id"]: s for s in repo.sessoes_da_unit(uid)}
@@ -158,11 +185,12 @@ def gerar_todos(repo: Any, unit: dict[str, Any], pasta: Path
     texto = json.dumps({"unit": unit["canonical_name"], "gerado_em": agora,
                         "itens": prontos}, ensure_ascii=False, indent=1)
     out["claims_ready"] = _grava(repo, unit, pasta, "claims_ready_vs3",
-                                 "CLAIMS_READY_FOR_DDR_VS3.json", texto)
+                                 "CLAIMS_READY_FOR_DDR_VS3.json", texto,
+                                 lc)
 
     # --- UNRESOLVED_ISSUES ---------------------------------------------------
     md = [f"# UNRESOLVED ISSUES VS3 — {unit['canonical_name']}",
-          f"_gerado em {agora}_", "", "## Divergências de verificação "
+          f"_gerado em {agora}_", banner, "## Divergências de verificação "
           "(abertas — adjudicação pendente)"]
     houve = False
     for v in verifs:
@@ -194,15 +222,19 @@ def gerar_todos(repo: Any, unit: dict[str, Any], pasta: Path
             md.append(f"- [{c['id']}] {c['entity'][:100]}")
     out["unresolved"] = _grava(repo, unit, pasta, "unresolved_vs3",
                                "UNRESOLVED_ISSUES_VS3.md",
-                               "\n".join(md) + "\n")
+                               "\n".join(md) + "\n", lc)
 
     # --- EVIDENCE_COVERAGE ---------------------------------------------------
     md = [f"# EVIDENCE COVERAGE VS3 — {unit['canonical_name']}",
-          f"_gerado em {agora}_", ""]
-    md.append(f"- Leases do Exhibit A: {rec['leases_dpu']} · com "
-              f"verificação independente: {rec['leases_verificadas']}")
-    md.append(f"- Claims ativos: {rec['claims_ativos']} · com verificação: "
-              f"{rec['claims_com_verificacao']}")
+          f"_gerado em {agora}_", banner]
+    lv = rec['leases_verificacao']
+    md.append(f"- Leases do Exhibit A: {rec['leases_dpu']} · verificacao "
+              f"TENTADA em {lv['tentadas']}: {lv['concordantes']} "
+              f"concordantes, {lv['insuficientes']} evidencia "
+              f"insuficiente, {lv['divergentes']} divergentes — tentativa "
+              f"nao e concordancia")
+    md.append(f"- Claims ativos: {rec['claims_ativos']} · verificacao tentada: "
+              f"{rec['verificacao_tentada']}")
     md.append(f"- Vereditos: {rec['vereditos']}")
     md.append(f"- Posições canônicas: {rec['posicoes']} "
               f"({rec['posicoes_por_classe']})")
@@ -210,14 +242,14 @@ def gerar_todos(repo: Any, unit: dict[str, Any], pasta: Path
         f"{g['condicao']}={g['status']}" for g in gates.avaliar(repo, unit)))
     out["coverage"] = _grava(repo, unit, pasta, "coverage_vs3",
                              "EVIDENCE_COVERAGE_VS3.md",
-                             "\n".join(md) + "\n")
+                             "\n".join(md) + "\n", lc)
 
     # --- COST_REPORT ---------------------------------------------------------
     custos = repo.custo_por_categoria(uid)
     sess_vs3 = [s for s in repo.sessoes_da_unit(uid)
                 if s["command"].startswith("exame.")]
     md = [f"# COST REPORT VS3 — {unit['canonical_name']}",
-          f"_gerado em {agora}_", ""]
+          f"_gerado em {agora}_", banner]
     for s in sess_vs3:
         md.append(f"- sessão {s['id']} ({s['command']}, {s['model']}): "
                   f"${s['cost_usd'] or 0} · {s['turns']} turnos · "
@@ -228,5 +260,5 @@ def gerar_todos(repo: Any, unit: dict[str, Any], pasta: Path
     md.append(f"- **total da unit: ${repo.custo_acumulado(uid):.2f}** "
               f"(teto $25) · portal: ${custos.get('coleta', 0.0):.2f}")
     out["cost"] = _grava(repo, unit, pasta, "cost_vs3",
-                         "COST_REPORT_VS3.md", "\n".join(md) + "\n")
+                         "COST_REPORT_VS3.md", "\n".join(md) + "\n", lc)
     return out
