@@ -216,6 +216,13 @@ class RepoFake:
     def sha_existe(self, sha256):
         return sha256 in self.source_files
 
+    def nomes_por_origem(self, unit_id):
+        out = {}
+        for s in self.sightings:
+            if s["unit_id"] in (unit_id, None):
+                out.setdefault(s["logical_name"], set()).add(s["origin"])
+        return out
+
     def origens_do_sha(self, sha256):
         row = self.source_files.get(sha256)
         if not row:

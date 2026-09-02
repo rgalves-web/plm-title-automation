@@ -371,11 +371,20 @@ def test_reconciliacao_matriz_acoes_e_pull_deduplicada(tmp_path):
         "files/0111111-001 (fulano-oil & gas)/lease.tif", "unit_files")
     # lease da checagem do operador (506/386), sem pasta -> coletar corrigido
     _claim_lease(repo, unit, "0220604/018", vol="506", page="386")
+    # lease cujo instrumento existe SO na entrega -> decisao do operador
+    _claim_lease(repo, unit, "0333333/001", vol="999", page="111")
+    sid2 = repo.registrar_source_file("d" * 64, 5)
+    repo.registrar_sighting(
+        sid2, unit["id"], "z2", "",
+        "1. landman submitted/title documents/999.111.pdf", "entrega")
     linhas = rc.matriz(repo, unit)
     por_lease = {li["lease"]: li for li in linhas}
     assert por_lease["0111111/001"]["acao"].startswith("nenhuma")
     assert por_lease["0220604/018"]["acao"] == "coletar 506.386.pdf"
     assert "CORRIGIDO" in por_lease["0220604/018"]["divergencia"]
+    # entrega nunca fecha a acao sozinha (determinacao 1): vira decisao
+    assert por_lease["0333333/001"]["acao"].startswith("DECISAO DO OPERADOR")
+    assert por_lease["0333333/001"]["alvo"] is None
     # pull: cancela item antigo com o nome errado e cria o corrigido
     velho = repo.criar_collection_item(unit["id"], "506.38.pdf",
                                        "courthousedirect", {"book": "506",

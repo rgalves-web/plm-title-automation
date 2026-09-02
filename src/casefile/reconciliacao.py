@@ -62,7 +62,14 @@ def _par(vol: str, page: str) -> tuple[str, str]:
 
 def matriz(repo: Any, unit: dict[str, Any]) -> list[dict[str, Any]]:
     uid = unit["id"]
-    nomes = set(repo.sha_por_nome(uid))
+    # Determinação 1: existência no corpus AUTÔNOMO fecha ação; existência
+    # SÓ na entrega vira decisão do operador (cópia contaminada × $0,50 no
+    # cartório) — nunca consumo silencioso da entrega.
+    por_origem = repo.nomes_por_origem(uid)
+    nomes = {n for n, o in por_origem.items()
+             if o - {"entrega", "outro"}}
+    nomes_entrega = {n for n, o in por_origem.items()
+                     if o <= {"entrega", "outro"} and "entrega" in o}
     claims_todos = repo.claims_da_unit(uid)
 
     # Linhas da Schedule (a única fonte tabular com RECORDING).
@@ -123,14 +130,8 @@ def matriz(repo: Any, unit: dict[str, Any]) -> list[dict[str, Any]]:
         tem_instrumento = any(
             ("lease.tif" in n or "lease - rec" in n or "lease-rec" in n
              or " ogl" in n or "memo" in n) for n in pasta_tokens)
-        arquivos_vol_pg = []
-        if dpu_vol and dpu_pg:
-            for cand in (f"{dpu_vol}.{dpu_pg}.pdf",
-                         f"{dpu_vol}_{int(dpu_pg):04d}.tif"
-                         if dpu_pg.isdigit() else "",
-                         f"{dpu_vol}_{dpu_pg}.tif"):
-                if cand and any(cand.lower() in n for n in nomes):
-                    arquivos_vol_pg.append(cand)
+        arquivos_vol_pg, so_na_entrega = _existe_par(
+            dpu_vol, dpu_pg, nomes, nomes_entrega)
 
         chec = checagens.get(lease)
         herd = herdados.get(lease)
@@ -146,7 +147,8 @@ def matriz(repo: Any, unit: dict[str, Any]) -> list[dict[str, Any]]:
             divergencias.append(f"checagem do operador: {chec[2]}")
 
         acao, alvo = _acao(lease, dpu_vol, dpu_pg, tem_pasta,
-                           tem_instrumento, arquivos_vol_pg, chec, herd)
+                           tem_instrumento, arquivos_vol_pg, so_na_entrega,
+                           chec, herd, nomes, nomes_entrega)
         out.append({
             "lease": v.get("lease_no", lease), "lessor":
                 str(v.get("lessor", ""))[:34],
@@ -158,35 +160,71 @@ def matriz(repo: Any, unit: dict[str, Any]) -> list[dict[str, Any]]:
             "acervo": ("instrumento na pasta" if tem_instrumento
                        else "pasta SEM instrumento" if tem_pasta
                        else "SEM pasta")
-            + (f"; arquivos vol/pg: {arquivos_vol_pg}"
-               if arquivos_vol_pg else ""),
+            + (f"; vol/pg no corpus: {arquivos_vol_pg}"
+               if arquivos_vol_pg else "")
+            + (f"; SO NA ENTREGA: {so_na_entrega}" if so_na_entrega
+               else ""),
             "divergencia": "; ".join(divergencias) or "-",
             "acao": acao, "alvo": alvo, "claim": c["id"],
         })
     return out
 
 
+def _existe_par(vol: str, pg: str, nomes: set[str],
+                nomes_entrega: set[str]) -> tuple[list[str], list[str]]:
+    """(no corpus autônomo, só na entrega) para os nomes derivados do par."""
+    autonomo, entrega = [], []
+    if not (vol and pg):
+        return autonomo, entrega
+    candidatos = [f"{vol}.{pg}.pdf", f"{vol}_{pg}.tif", f"{vol}.{pg} "]
+    if str(pg).isdigit():
+        candidatos.append(f"{vol}_{int(pg):04d}.tif")
+    for cand in candidatos:
+        baixo = cand.lower()
+        if any(baixo in n for n in nomes):
+            autonomo.append(cand)
+        elif any(baixo in n for n in nomes_entrega):
+            entrega.append(cand)
+    return autonomo, entrega
+
+
 def _acao(lease: str, vol: str, pg: str, tem_pasta: bool,
           tem_instrumento: bool, arquivos: list[str],
-          chec: tuple | None, herd: tuple | None
+          so_na_entrega: list[str], chec: tuple | None, herd: tuple | None,
+          nomes: set[str] = frozenset(),
+          nomes_entrega: set[str] = frozenset()
           ) -> tuple[str, dict[str, str] | None]:
     fonte = chec or herd
     if fonte:
+        # O alvo é um documento ESPECÍFICO (vol/página da checagem ou do
+        # achado) — a existência se confere contra ELE, nunca contra o
+        # instrumento genérico da pasta (a Prior Lease 441/275 não é a
+        # lease.tif da /002).
         v, p, nota = fonte
         alvo = {"book": v, "page": p, "arquivo_alvo": f"{v}.{p}.pdf",
                 "motivo": nota or "checagem/alvo reconciliado"}
-        if arquivos or (tem_instrumento and not chec):
-            return ("nenhuma — documento ja no acervo", None)
+        alvo_auto, alvo_entrega = _existe_par(v, p, nomes, nomes_entrega)
+        if alvo_auto:
+            return ("nenhuma — alvo ja no corpus autonomo", None)
+        if alvo_entrega:
+            return (f"DECISAO DO OPERADOR: usar copia da entrega "
+                    f"(benchmark_contamination) OU coletar {v}.{p}.pdf "
+                    f"($0,50)", None)
         extra = " + indice de grantor Vol 439" if lease.startswith(
             "0220750-008") else ""
         return (f"coletar {v}.{p}.pdf{extra}", alvo)
     if arquivos or tem_instrumento:
-        return ("nenhuma — instrumento no acervo", None)
+        return ("nenhuma — instrumento no corpus autonomo", None)
+    if so_na_entrega:
+        return ("DECISAO DO OPERADOR: usar copia da entrega "
+                "(benchmark_contamination) OU coletar "
+                f"{vol}.{pg}.pdf ($0,50)", None)
     if vol and pg:
         return (f"coletar {vol}.{pg}.pdf",
                 {"book": vol, "page": pg,
                  "arquivo_alvo": f"{vol}.{pg}.pdf",
-                 "motivo": "sem instrumento no acervo (recording da DPU)"})
+                 "motivo": "sem instrumento no corpus autonomo (recording "
+                           "da DPU)"})
     return ("indice de grantor (sem par deterministico)", None)
 
 
@@ -202,8 +240,12 @@ def render_md(linhas: list[dict[str, Any]], custo_estimado: float,
         md.append(f"| {li['lease']} | {li['lessor']} | {li['dpu']} | "
                   f"{li['schedule']} | {li['acervo'][:60]} | "
                   f"{li['divergencia'][:90]} | {li['acao']} |")
+    decisoes = sum(1 for li in linhas
+                   if li["acao"].startswith("DECISAO DO OPERADOR"))
     md += ["", f"**Pull list reconciliada: {pulls} documento(s) · custo "
-           f"estimado ${custo_estimado:.2f}** (US$ 0,50/abertura)", ""]
+           f"estimado ${custo_estimado:.2f}** (US$ 0,50/abertura)",
+           f"**Decisões do operador pendentes (cópia da entrega × coleta "
+           f"paga): {decisoes}**", ""]
     return "\n".join(md)
 
 

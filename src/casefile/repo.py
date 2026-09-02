@@ -122,6 +122,15 @@ class Repo:
                 hashes.append(r["sha256"])
         return out
 
+    def nomes_por_origem(self, unit_id: int) -> dict[str, set[str]]:
+        rows = self.conn.execute(
+            "SELECT logical_name, origin FROM file_sightings "
+            "WHERE unit_id = %s OR unit_id IS NULL", (unit_id,)).fetchall()
+        out: dict[str, set[str]] = {}
+        for r in rows:
+            out.setdefault(r["logical_name"], set()).add(r["origin"])
+        return out
+
     def origens_do_sha(self, sha256: str) -> set[str]:
         rows = self.conn.execute(
             "SELECT DISTINCT s.origin FROM file_sightings s "
