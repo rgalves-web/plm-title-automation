@@ -111,9 +111,8 @@ def gerar(repo: Any, unit: dict[str, Any], pasta: Path,
     md.append("## 7. Status das seis condições (gates verificáveis)")
     todas = gates.avaliar(repo, unit)
     for g in todas:
-        marca = {"ok": "OK", "pendente": "PENDENTE",
-                 "pendente_operador": "PENDENTE (operador)"}[g["status"]]
-        md.append(f"- **{g['condicao']}**: {marca} — {g['detalhe']}")
+        md.append(f"- **{g['condicao']}**: {gates.ROTULOS[g['status']]} — "
+                  f"{g['detalhe']}")
     md.append("")
 
     # 8. dependentes de PM/seller e intervenções ------------------------------

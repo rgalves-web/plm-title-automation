@@ -56,6 +56,65 @@ def executar(*, repo: Any, unit: dict[str, Any], pasta: Path, acervo: Any,
     return log
 
 
+SISTEMA_RELEASE = """Voce e o landman desta unidade lendo UM documento
+autorizado pelo operador. Leia-o INTEIRO e registre a leitura como claim
+`fact` com citacao literal. Nada alem deste documento e do acervo normal da
+unit esta disponivel — e e assim por regra, nao por acaso. Nenhuma
+certificacao de WI/NRI. Branco declarado e melhor que numero plausivel."""
+
+
+def ler_release(*, repo: Any, unit: dict[str, Any], pasta: Path,
+                client: Any = None, max_cost_usd: float = 3.0) -> Any:
+    """Determinação 1 (02/09): leitura do PDF 'Stewart curative — EOG
+    release of suspense' da entrega, com liberação PONTUAL no acervo e
+    marca de benchmark_contamination injetada pelo encanamento."""
+    from src.casefile.acervo import montar_acervo
+    from src.examinador.okf import KnowledgeBase
+
+    acervo = montar_acervo(pasta, {},
+                           entrega_permitida=("release of suspense",))
+    alvos = [n for n in acervo.names() if "release of suspense" in n]
+    if not alvos:
+        raise SystemExit("o PDF autorizado nao apareceu no acervo — "
+                         "conferir o censo da entrega")
+    session_ref: dict[str, Any] = {"id": None}
+    dispatch = ferramentas.montar_dispatch(
+        acervo=acervo, repo=repo, unit=unit, pasta=pasta,
+        kb_unidade=KnowledgeBase(pasta / "_casefile" / "fichas"),
+        kb_global=KnowledgeBase(),
+        ator=f"modelo:{sessao.modelo()}", session_ref=session_ref)
+    task = (
+        f"UNIDADE: {unit['canonical_name']}.\n\n"
+        f"DOCUMENTO AUTORIZADO (origem: pasta de entrega; o encanamento "
+        f"marca benchmark_contamination=true em todo claim que o cite):\n"
+        f"- {alvos[0]}\n\n"
+        "Leia TODAS as paginas. Depois registre UM claim `fact`:\n"
+        "- entidade: 'release Marlee M Stewart — leitura do PDF autorizado'\n"
+        "- valor com as chaves: `natureza` (o que o instrumento e, pela "
+        "linguagem do proprio documento), `efeito_no_tract_1` (o que ele "
+        "significa para a lease 0221055/002 e o 1/4 de Lorna Marlee Stewart"
+        " — SEM certificar WI/NRI), `leitura_completa` (true SOMENTE se "
+        "todas as paginas foram lidas), `instrumento` (tipo, data, "
+        "referencias de recording que o documento citar) e "
+        "`relacao_com_claim_121` (o que esta leitura muda em relacao ao "
+        ".html ilegivel).\n\n"
+        "Se este PDF NAO for o release em si (ex.: for um release of "
+        "suspense de fundos), diga isso em `natureza` com o trecho literal "
+        "e deixe `leitura_completa` true mesmo assim — a leitura foi "
+        "completa; o que muda e o que o documento E. Pode consultar as "
+        "pastas da lease 0221055-002 no acervo para contexto.")
+    tools = ferramentas.FERRAMENTAS_LEITURA + [
+        t for t in ferramentas.FERRAMENTAS_ESCRITA
+        if t["name"] == "registrar_claims"]
+    log, _sid = sessao.rodar(
+        repo=repo, unit=unit, pasta=pasta, comando="coletar.release",
+        sistema=SISTEMA_RELEASE, task=task, ferramentas=tools,
+        dispatch=dispatch, modelo_sessao=sessao.modelo(),
+        max_cost_usd=max_cost_usd, client=client, max_turns=40,
+        session_ref=session_ref)
+    return log
+
+
 def _nomes(acervo: Any, *pedacos: str) -> list[str]:
     baixo = [p.lower() for p in pedacos]
     return [n for n in acervo.names() if all(p in n for p in baixo)][:20]

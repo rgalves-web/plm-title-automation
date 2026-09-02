@@ -433,9 +433,8 @@ def cmd_gates(nome: str, repo: Any = None) -> None:
     repo = repo or _repo()
     unit = _unit_de(repo, nome)
     for gate in g.avaliar(repo, unit):
-        marca = {"ok": "OK", "pendente": "PENDENTE",
-                 "pendente_operador": "PENDENTE(operador)"}[gate["status"]]
-        print(f"[{marca:>18}] {gate['condicao']}: {gate['detalhe']}")
+        print(f"[{g.ROTULOS[gate['status']]:>19}] {gate['condicao']}: "
+              f"{gate['detalhe']}")
 
 
 def cmd_avancar(nome: str, repo: Any = None) -> None:
@@ -613,6 +612,35 @@ def _indexar_schedule(repo: Any, unit: dict[str, Any],
           flush=True)
 
 
+def cmd_reconciliar(nome: str, repo: Any = None) -> None:
+    """Determinações 3-4: matriz de recordings por lease + pull list
+    reconciliada e deduplicada. Sem modelo, sem portal."""
+    from src.casefile import reconciliacao as rc
+    repo = repo or _repo()
+    unit = _unit_de(repo, nome)
+    if repo.estado_da_unit(unit["id"]) != "COLETANDO":
+        raise SystemExit("reconciliar exige COLETANDO.")
+    pasta = Path(unit["folder_path"])
+    linhas = rc.matriz(repo, unit)
+    pull = rc.regenerar_pull(repo, unit, linhas)
+    versao = 1 + len(repo.deliverables(unit["id"],
+                                       "reconciliacao_recordings"))
+    md = rc.render_md(linhas, pull["custo_estimado_usd"], pull["novos"])
+    path = caneta.escrever_texto(
+        caneta.caminho(pasta) / f"RECONCILIACAO_RECORDINGS_v{versao}.md", md)
+    import hashlib
+    repo.registrar_deliverable(
+        unit["id"], "reconciliacao_recordings", versao, str(path),
+        hashlib.sha256(md.encode("utf-8")).hexdigest())
+    divergentes = sum(1 for li in linhas if li["divergencia"] != "-")
+    print(f"matriz: {len(linhas)} leases · {divergentes} com divergencia "
+          f"anotada")
+    print(f"pull reconciliada: {pull['novos']} documento(s) "
+          f"(~${pull['custo_estimado_usd']:.2f}) · "
+          f"{pull['cancelados']} item(ns) antigos cancelados com nota")
+    print(f"{path}")
+
+
 def _garantir_itens_rrc(repo: Any, unit: dict[str, Any]) -> None:
     import re as _re
     faltantes = repo.claims_da_unit(unit["id"], "document_missing")
@@ -673,6 +701,8 @@ def main(argv: list[str] | None = None) -> None:
         cmd_coletar(_nome_de(resto), cdp_url=cdp)
     elif comando == "gates":
         cmd_gates(_nome_de(resto))
+    elif comando == "reconciliar":
+        cmd_reconciliar(_nome_de(resto))
     elif comando == "avancar":
         cmd_avancar(_nome_de(resto))
     else:

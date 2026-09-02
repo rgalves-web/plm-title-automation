@@ -153,6 +153,13 @@ def montar_dispatch(*, acervo: Any, repo: Any, unit: dict[str, Any],
             except validacao.ClaimInvalido as exc:
                 rejeitados.append({"indice": i, "erro": str(exc)})
                 continue
+            # Determinação 1 do operador (02/09): evidência que existe SÓ na
+            # entrega carrega a marca de contaminação de benchmark — pode
+            # completar o caso, nunca contar como descoberta autônoma.
+            origens = repo.origens_do_sha(ok["source_sha256"])
+            if origens and origens <= {"entrega"}:
+                ok["value"] = dict(ok["value"], benchmark_contamination=True,
+                                   origem_evidencia="entrega")
             cid = repo.inserir_claim(
                 unit_id=unit["id"], session_id=session_ref["id"], **ok)
             aceitos.append(cid)

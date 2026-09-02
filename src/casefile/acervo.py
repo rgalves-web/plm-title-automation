@@ -163,10 +163,20 @@ class Acervo(Corpus):
 
 def montar_acervo(pasta: Path, referencias: dict[str, Path | None],
                   incluir_entrega: bool = False,
+                  entrega_permitida: tuple[str, ...] = (),
                   cache: PageCache | None = None) -> Acervo:
-    """O acervo da SESSÃO: unit + referências, entrega fora por padrão."""
+    """O acervo da SESSÃO: unit + referências, entrega fora por padrão.
+
+    `entrega_permitida`: liberação PONTUAL de arquivos da entrega, por
+    substring do nome lógico — só com autorização expressa do operador
+    (determinação 1 de 02/09). O resto da entrega (DDR final, notas,
+    conclusões humanas) continua fora por plumbing, não por instrução."""
     origens = set(ORIGENS_DA_SESSAO) | ({"entrega"} if incluir_entrega
                                         else set())
-    entradas = [e for e in indexar_unit(pasta) if e.origin in origens]
+    permitidos = tuple(t.lower() for t in entrega_permitida)
+    entradas = [e for e in indexar_unit(pasta)
+                if e.origin in origens
+                or (e.origin == "entrega"
+                    and any(t in e.logical for t in permitidos))]
     entradas += entradas_de_referencias(referencias)
     return Acervo(AcervoIndex(entradas), cache=cache)

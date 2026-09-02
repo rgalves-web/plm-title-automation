@@ -222,37 +222,59 @@ def _fact(repo, unit, entidade, valor):
                               "1", "trecho", "alta", "media", sess)
 
 
-def test_gates_pendentes_e_ok_na_ordem(tmp_path):
-    repo, unit, pasta = _unit(tmp_path)
+def _armar_gates(repo, unit, completo=True):
+    """Arma os artefatos dos 6 gates; `completo=False` deixa as leituras
+    sem as chaves de evidência (determinação 2)."""
     _claim_lease(repo, unit, "0111111/001")
     _claim_lease(repo, unit, "0220936/001")
-    assert all(g["status"] != "ok" for g in gates.avaliar(repo, unit))
-
-    # G1: populações + leitura da série
     populacoes.recalcular(repo, unit)
+    extra_serie = {"leitura_completa": True} if completo else {}
     _fact(repo, unit, "serie 0220936 legal descriptions",
-          {"abrange_a669_ou_a319": "nao", "por_lease": {}})
-    # G2: lookups por contrato, unit, todas as leases e recording
+          {"abrange_a669_ou_a319": "nao", "por_lease": {}, **extra_serie})
     for kind, valor in (("contract", "K9999999"), ("unit_name", "JOSH T"),
                         ("lease_no", "0111111-001"),
                         ("lease_no", "0220936-001"),
                         ("recording", "100/1")):
         repo.registrar_xref_lookup(unit["id"], SHA_X, kind, valor, 1)
-    # G3, G5, G6: leituras dirigidas
     _fact(repo, unit, "grupo BRA-DE", {"instrumentos": [],
-                                       "classificacao": "ratificacao"})
+                                       "classificacao": "top lease"})
+    extra_155 = {"diferenca_gross_explicada":
+                 "TO cobre 155 ac gross; o trato usa 80.02"} if completo \
+        else {}
     _fact(repo, unit, "TO A-669 155ac",
-          {"certification_date": "2010-04-09", "amarracao": {"2": "ok"}})
+          {"certification_date": "2010-03-03", "amarracao": {"2": "ok"},
+           **extra_155})
+    extra_rel = {"leitura_completa": True} if completo else {}
     _fact(repo, unit, "release Marlee M Stewart",
-          {"natureza": "release", "efeito_no_tract_1": "x"})
-    # G4: busca julgada + solicitação ao PM
-    bid = repo.registrar_busca(unit["id"], "DOTO/DOI", ["doto"], "tudo",
-                               10, [], result="nao_encontrado")
+          {"natureza": "release", "efeito_no_tract_1": "x", **extra_rel})
+    repo.registrar_busca(unit["id"], "DOTO/DOI", ["doto"], "tudo",
+                         10, [], result="nao_encontrado")
     sess = repo.abrir_sessao(unit["id"], "x", "m")
     repo.inserir_pesquisa(unit["id"], "Solicitar DOTO/DOI",
                           "DOTO/DOI do unit", "PM/seller", "email", sess, [])
-    todos = gates.avaliar(repo, unit)
+
+
+def test_gates_pendentes_e_ok_na_ordem(tmp_path):
+    repo, unit, pasta = _unit(tmp_path)
+    _claim_lease(repo, unit, "0111111/001")
+    assert all(g["status"] != "ok" for g in gates.avaliar(repo, unit))
+    repo2, unit2, _ = _unit(tmp_path / "b")
+    _armar_gates(repo2, unit2, completo=True)
+    todos = gates.avaliar(repo2, unit2)
     assert [g["status"] for g in todos] == ["ok"] * 6, todos
+
+
+def test_tentativa_nao_e_evidencia_semantica_da_determinacao_2(tmp_path):
+    repo, unit, _ = _unit(tmp_path)
+    _armar_gates(repo, unit, completo=False)
+    por_condicao = {g["condicao"]: g["status"]
+                    for g in gates.avaliar(repo, unit)}
+    # leitura declarada impossível BLOQUEIA; parciais passam com ressalva
+    assert por_condicao["release-marlee-stewart"] == "pendente_evidencia"
+    assert por_condicao["to-155ac-certificacao-e-amarracao"] == "ok_parcial"
+    assert por_condicao["populacao-exhibit-a"] == "ok_parcial"
+    bloqueiam = gates.pendentes(repo, unit)
+    assert [g["condicao"] for g in bloqueiam] == ["release-marlee-stewart"]
 
 
 def test_avancar_recusa_com_gate_pendente_e_passa_com_todos_ok(tmp_path,
@@ -278,3 +300,95 @@ def test_bloqueio_por_evento_continua_valido(tmp_path):
     repo, unit, _ = _unit(tmp_path)
     estados.transicionar(repo, unit, "planejar", "operador")
     assert repo.estado_da_unit(unit["id"]) == "PLANEJANDO"
+
+
+# --- determinações de 02/09 (rodada 2) --------------------------------------
+
+def test_claim_de_evidencia_so_da_entrega_leva_marca_de_contaminacao(
+        tmp_path):
+    from src.casefile import ferramentas
+    repo, unit, pasta = _unit(tmp_path)
+    sid = repo.registrar_source_file(SHA_X, 9)
+    repo.registrar_sighting(sid, unit["id"], "c", "", "1. landman "
+                            "submitted/seller files/release.pdf", "entrega")
+    sess_ref = {"id": repo.abrir_sessao(unit["id"], "t", "m")}
+    from src.casefile.acervo import Acervo, AcervoIndex
+    dispatch = ferramentas.montar_dispatch(
+        acervo=Acervo(AcervoIndex([])), repo=repo, unit=unit, pasta=pasta,
+        kb_unidade=_KbNula(), kb_global=_KbNula(), ator="modelo:x",
+        session_ref=sess_ref)
+    got = dispatch["registrar_claims"](claims=[{
+        "tipo": "fact", "entidade": "release — leitura",
+        "valor": {"natureza": "x", "leitura_completa": True},
+        "documento": f"sha256:{SHA_X}", "pagina": "1",
+        "trecho": "trecho literal", "confianca": "alta"}])
+    assert got["aceitos"] == 1
+    claim = repo.claims_da_unit(unit["id"], "fact")[0]
+    assert claim["value"]["benchmark_contamination"] is True
+    assert claim["value"]["origem_evidencia"] == "entrega"
+    # evidência que TAMBÉM existe fora da entrega não leva a marca
+    repo.registrar_sighting(sid, unit["id"], "d", "", "files/release.pdf",
+                            "unit_files")
+    dispatch["registrar_claims"](claims=[{
+        "tipo": "fact", "entidade": "release 2",
+        "valor": {"natureza": "y"}, "documento": f"sha256:{SHA_X}",
+        "pagina": "1", "trecho": "t", "confianca": "alta"}])
+    segundo = repo.claims_da_unit(unit["id"], "fact")[1]
+    assert "benchmark_contamination" not in segundo["value"]
+
+
+class _KbNula:
+    def read(self, conceito):
+        return {"encontrado": False}
+
+    def write(self, *a, **k):
+        return {"gravada": True}
+
+
+def test_acervo_libera_so_o_arquivo_autorizado_da_entrega(tmp_path):
+    from src.casefile.acervo import montar_acervo
+    repo, unit, pasta = _unit(tmp_path)
+    entrega = pasta / "1. Landman Submitted" / "Seller Files"
+    entrega.mkdir(parents=True)
+    (entrega / "Stewart curative - EOG release of suspense.pdf"
+     ).write_bytes(b"pdf")
+    (entrega / "DDR - Josh T Unit.xlsx").write_bytes(b"ddr")
+    acervo = montar_acervo(pasta, {},
+                           entrega_permitida=("release of suspense",))
+    nomes = acervo.names()
+    assert any("release of suspense" in n for n in nomes)
+    assert not any("ddr - josh t" in n for n in nomes)   # o resto fica fora
+
+
+def test_reconciliacao_matriz_acoes_e_pull_deduplicada(tmp_path):
+    from src.casefile import reconciliacao as rc
+    repo, unit, pasta = _unit(tmp_path)
+    # lease com instrumento no acervo -> nenhuma ação
+    cid = _claim_lease(repo, unit, "0111111/001", vol="100", page="1")
+    sid = repo.registrar_source_file("f" * 64, 5)
+    repo.registrar_sighting(
+        sid, unit["id"], "z", "m",
+        "files/0111111-001 (fulano-oil & gas)/lease.tif", "unit_files")
+    # lease da checagem do operador (506/386), sem pasta -> coletar corrigido
+    _claim_lease(repo, unit, "0220604/018", vol="506", page="386")
+    linhas = rc.matriz(repo, unit)
+    por_lease = {li["lease"]: li for li in linhas}
+    assert por_lease["0111111/001"]["acao"].startswith("nenhuma")
+    assert por_lease["0220604/018"]["acao"] == "coletar 506.386.pdf"
+    assert "CORRIGIDO" in por_lease["0220604/018"]["divergencia"]
+    # pull: cancela item antigo com o nome errado e cria o corrigido
+    velho = repo.criar_collection_item(unit["id"], "506.38.pdf",
+                                       "courthousedirect", {"book": "506",
+                                                            "page": "38"})
+    got = rc.regenerar_pull(repo, unit, linhas)
+    assert got["cancelados"] == 1 and got["novos"] == 1
+    itens = repo.collection_items(unit["id"])
+    assert itens[velho - 1]["status"] == "cancelado"
+    novos = [i for i in itens if i["status"] == "pendente"]
+    assert novos[0]["title"] == "506.386.pdf"
+    assert got["custo_estimado_usd"] == 0.5
+    # regenerar de novo é idempotente (dedupe por par vol/página)
+    de_novo = rc.regenerar_pull(repo, unit, linhas)
+    assert de_novo["novos"] == 1
+    assert len([i for i in repo.collection_items(unit["id"])
+                if i["status"] == "pendente"]) == 1

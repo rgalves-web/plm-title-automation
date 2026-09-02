@@ -122,6 +122,13 @@ class Repo:
                 hashes.append(r["sha256"])
         return out
 
+    def origens_do_sha(self, sha256: str) -> set[str]:
+        rows = self.conn.execute(
+            "SELECT DISTINCT s.origin FROM file_sightings s "
+            "JOIN source_files f ON f.id = s.source_file_id "
+            "WHERE f.sha256 = %s", (sha256,)).fetchall()
+        return {r["origin"] for r in rows}
+
     def sha_existe(self, sha256: str) -> bool:
         return self.conn.execute(
             "SELECT 1 FROM source_files WHERE sha256 = %s",
@@ -402,7 +409,8 @@ class Repo:
                               research_item_id: int | None = None) -> int:
         got = self.conn.execute(
             "SELECT id FROM collection_items WHERE unit_id = %s "
-            "AND title = %s", (unit_id, title)).fetchone()
+            "AND title = %s AND status != 'cancelado'",
+            (unit_id, title)).fetchone()
         if got:
             return got["id"]
         return self.conn.execute(

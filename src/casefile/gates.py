@@ -4,7 +4,16 @@ Cada gate confere a EXISTÊNCIA do artefato que a condição exige (populações
 persistidas, lookups cobrindo as chaves, claims de leitura com as chaves de
 valor combinadas, busca negativa julgada, solicitação emitida) — jamais se o
 conteúdo está certo. `avancar` (evento coleta_concluida) recusa enquanto
-houver gate pendente; pendente_operador nomeia o que só o operador destrava.
+houver gate pendente.
+
+Semântica corrigida pelo operador em 02/09 (determinação 2): tentativa
+executada NÃO é evidência. Um claim de leitura só fecha o gate quando declara
+`leitura_completa: true`; leitura declarada impossível é `pendente_evidencia`
+(bloqueia). `ok_parcial` marca gate satisfeito com ressalva declarada (não
+bloqueia, mas aparece): a amarração do TO 155ac fica parcial enquanto a
+diferença 155 gross × 80,02 unit acres não estiver explicada
+(`diferenca_gross_explicada`), e a população fica parcial enquanto a decisão
+da série 0220936 aguarda a /006 e o operador.
 """
 from __future__ import annotations
 
@@ -12,7 +21,17 @@ from typing import Any
 
 from src.casefile.xref_local import normalizar_lease
 
-OK, PENDENTE, PENDENTE_OPERADOR = "ok", "pendente", "pendente_operador"
+OK = "ok"
+OK_PARCIAL = "ok_parcial"
+PENDENTE = "pendente"
+PENDENTE_OPERADOR = "pendente_operador"
+PENDENTE_EVIDENCIA = "pendente_evidencia"
+
+BLOQUEIAM = (PENDENTE, PENDENTE_OPERADOR, PENDENTE_EVIDENCIA)
+
+ROTULOS = {OK: "OK", OK_PARCIAL: "OK-PARCIAL", PENDENTE: "PENDENTE",
+           PENDENTE_OPERADOR: "PENDENTE(operador)",
+           PENDENTE_EVIDENCIA: "PENDENTE(evidencia)"}
 
 
 def avaliar(repo: Any, unit: dict[str, Any]) -> list[dict[str, str]]:
@@ -29,7 +48,7 @@ def avaliar(repo: Any, unit: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def pendentes(repo: Any, unit: dict[str, Any]) -> list[dict[str, str]]:
-    return [g for g in avaliar(repo, unit) if g["status"] != OK]
+    return [g for g in avaliar(repo, unit) if g["status"] in BLOQUEIAM]
 
 
 def _gate(slug: str, status: str, detalhe: str) -> dict[str, str]:
@@ -68,6 +87,12 @@ def _g1_populacao(repo: Any, uid: int,
         return _gate("populacao-exhibit-a", PENDENTE,
                      f"DPU={dpu}, out_of_scope={ooc}; falta a LEITURA das "
                      f"legal descriptions da serie 0220936 (claim fact)")
+    if _pergunta_aberta(repo, uid, "0220936") or \
+            not leitura["value"].get("leitura_completa"):
+        return _gate("populacao-exhibit-a", OK_PARCIAL,
+                     f"DPU={dpu} intacta; out_of_scope={ooc}; serie 0220936 "
+                     f"segue candidata ate a leitura da /006 e a decisao do "
+                     f"operador (claim {leitura['id']})")
     return _gate("populacao-exhibit-a", OK,
                  f"DPU={dpu} intacta; out_of_scope={ooc}; leitura da serie "
                  f"registrada (claim {leitura['id']})")
@@ -158,16 +183,33 @@ def _g5_to_155(repo: Any, uid: int,
         return _gate("to-155ac-certificacao-e-amarracao", PENDENTE,
                      f"cert date registrada (claim {c['id']}), falta a "
                      f"amarracao trato-a-trato")
+    explicada = c["value"].get("diferenca_gross_explicada") or \
+        (_tem_fact(facts, "155", ("diferenca_gross_explicada",)) or {}
+         ).get("value", {}).get("diferenca_gross_explicada")
+    if not explicada:
+        return _gate("to-155ac-certificacao-e-amarracao", OK_PARCIAL,
+                     f"cert date registrada (claim {c['id']}); amarracao "
+                     f"PARCIAL/confianca media — 155 ac gross x 80,02 ac do "
+                     f"Tract 2 sem explicacao (determinacao 2 do operador)")
     return _gate("to-155ac-certificacao-e-amarracao", OK,
-                 f"cert date + amarracao registradas (claim {c['id']})")
+                 f"cert date + amarracao registradas e diferenca de acreagem "
+                 f"explicada (claim {c['id']})")
 
 
 def _g6_release(repo: Any, uid: int,
                 facts: list[dict[str, Any]]) -> dict[str, str]:
-    c = _tem_fact(facts, "release", ("natureza",))
+    c = _tem_fact(facts, "release", ("natureza", "efeito_no_tract_1"))
     if c is None:
         return _gate("release-marlee-stewart", PENDENTE,
                      "release de Marlee M. Stewart ainda nao lido (fact com "
-                     "chave natureza)")
+                     "chaves natureza e efeito_no_tract_1)")
+    # Determinação 2: tentativa nao e evidencia — leitura declarada
+    # impossivel bloqueia ate o documento legivel ser lido e interpretado.
+    if not c["value"].get("leitura_completa"):
+        return _gate("release-marlee-stewart", PENDENTE_EVIDENCIA,
+                     f"claim {c['id']} declara leitura impossivel/incompleta"
+                     f" — pendente ate a leitura do PDF autorizado "
+                     f"('Stewart curative - EOG release of suspense') com "
+                     f"leitura_completa=true")
     return _gate("release-marlee-stewart", OK,
-                 f"leitura registrada (claim {c['id']})")
+                 f"leitura completa registrada (claim {c['id']})")

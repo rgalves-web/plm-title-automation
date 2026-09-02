@@ -65,6 +65,8 @@ CLAIM_TYPES_ATIVOS: dict[str, list[str]] = {
     "document_present": ["logical_name"],
     "document_missing": ["esperado", "exigido_por"],
     "divergence": ["fontes"],
+    # ativado pela migração 0003 (leituras dirigidas do VS2)
+    "fact": [],
 }
 
 
@@ -213,6 +215,13 @@ class RepoFake:
 
     def sha_existe(self, sha256):
         return sha256 in self.source_files
+
+    def origens_do_sha(self, sha256):
+        row = self.source_files.get(sha256)
+        if not row:
+            return set()
+        return {s["origin"] for s in self.sightings
+                if s["source_file_id"] == row["id"]}
 
     def contagem_censo(self, unit_id):
         out: dict[str, dict[str, Any]] = {}
@@ -426,7 +435,8 @@ class RepoFake:
     def criar_collection_item(self, unit_id, title, method, target,
                               research_item_id=None):
         for i in self.items:
-            if i["unit_id"] == unit_id and i["title"] == title:
+            if i["unit_id"] == unit_id and i["title"] == title \
+                    and i["status"] != "cancelado":
                 return i["id"]
         row = {"id": len(self.items) + 1, "unit_id": unit_id,
                "title": title, "method": method, "target": target,
