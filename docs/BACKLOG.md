@@ -29,3 +29,6 @@ here.
 - `minorh ship --continuar`: retomar do ledger salvo por turno em vez de re-projetar do zero após queda/teto. Alavanca nº3 do CP3 §6.
 - Driver de replay: gravar a prova de quarentena em finally (hoje um crash no comando pula o registro da sonda — a proteção fica, o registro não).
 - Projecao pode introduzir escape HTML no valor (&amp; onde a memoria tem &): 2-3 celulas no replay 2, ausente na memoria, nasce na sessao de projecao. A auditoria de 100% pega (o trecho citado nao sustenta o escape) — mas vale um teste de regressao quando a auditoria rodar no corpus real.
+- Casefile/triagem relista TODOS os pendentes a cada turno (~1.400 nomes): com Sonnet o teto de $3 rendeu só 145 rótulos no smoke E7 (02/09). Fatiar a lista em lotes por sessão (mesma lição F1 do continuar).
+- Casefile/sessao: queda no meio do run_loop (5x 529 em 02/09) deixa model_sessions aberta e o custo dos turnos pagos fora de cost_entries (fica só no progresso jsonl). Fechar sessão e contabilizar em finally.
+- Casefile/triagem com nome ambíguo (2 conteúdos, mesmo logical) rotula ambos os hashes com o mesmo rótulo — aceitável no VS1, mas o VS3 deve rotular por conteúdo.
