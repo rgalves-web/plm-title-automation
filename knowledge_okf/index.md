@@ -4,6 +4,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 
 - [auditoria celulas ordinais sao estrutura](auditoria-celulas-ordinais-sao-estrutura.md) `regra` — ## Célula ordinal é ESTRUTURA do artefato, não fato de title
 - [bpm-plm-due-diligence-leasehold-escopo](bpm-plm-due-diligence-leasehold-escopo.md) `formulario` — ## BPM: Due Diligence (Leasehold) — o memorando que define o escopo de cada aba do DDR
+- [bra-de-top-leases-2011-vol-555-montague](bra-de-top-leases-2011-vol-555-montague.md) `cadeia` — ## Bra-De Oil & Gas: as leases do Vol. 555 (jan/2011) sao TOP LEASES, nao ratificacoes
 - [cadeia-bra-de-oil-and-gas-para-eog-montague](cadeia-bra-de-oil-and-gas-para-eog-montague.md) `cadeia` — ## Bra-De Oil & Gas, Inc. → EOG Resources, Inc. (Montague County)
 - [cartorio courthousedirect arvore e busca](cartorio-courthousedirect-arvore-e-busca.md) `regra` — ## Cartório de Cooke via CourthouseDirect — como achar um instrumento
 - [cartorio-montague-courthousedirect](cartorio-montague-courthousedirect.md) `regra` — ## Cartório de Montague — pull list e faixa de volumes
@@ -145,4 +146,5 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [template-ddr-sintetico-semeado-com-linha-de-outra-unidade](template-ddr-sintetico-semeado-com-linha-de-outra-unidade.md) `formulario` — ## O template do DDR chega com a linha 2 da aba `Lease Review` SEMEADA
 - [transmittal_cover_is_not_the_document/fixture](transmittal-cover-is-not-the-document-fixture.md) `regra` — - **lesson_id**: transmittal_cover_is_not_the_document
 - [unidade-josh-b-unit-montague](unidade-josh-b-unit-montague.md) `unidade` — ## JOSH B UNIT — Montague County, Texas
+- [varredura-por-pasta-nao-acha-doc-na-raiz-de-files](varredura-por-pasta-nao-acha-doc-na-raiz-de-files.md) `regra` — ## Documento faltante pode estar na RAIZ de `files/`, fora de qualquer pasta
 - [veredito-grao-da-aba-ownership-worksheet-uma-linha-por-lease](veredito-grao-da-aba-ownership-worksheet-uma-linha-por-lease.md) `veredito` — ## VEREDITO — grão de linha da aba `Ownership - Worksheet`

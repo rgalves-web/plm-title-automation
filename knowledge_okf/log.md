@@ -150,3 +150,5 @@ Uma linha por escrita. Quem escreveu foi o modelo; este arquivo e o rastro.
 - criou `padrao-montagem-pacote-phase-i` (regra-cliente)
 - criou `missing-files-rotulos-canonicos` (regra-cliente)
 - criou `coleta-courthousedirect-receita-provada` (regra)
+- criou `varredura-por-pasta-nao-acha-doc-na-raiz-de-files` (regra)
+- criou `bra-de-top-leases-2011-vol-555-montague` (cadeia)
