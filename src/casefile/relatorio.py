@@ -19,10 +19,15 @@ def gerar(repo: Any, unit: dict[str, Any], pasta: Path,
     agora = datetime.now(timezone.utc).isoformat(timespec="seconds")
     versao = 1 + len(repo.deliverables(uid, "relatorio_coleta_vs2"))
 
+    estado = repo.estado_da_unit(uid)
+    cadeia = " -> ".join(
+        [t["from_state"] for t in repo.transicoes(uid)[-2:]][:1]
+        + [t["to_state"] for t in repo.transicoes(uid)[-2:]]) \
+        if len(repo.transicoes(uid)) >= 2 else estado
     md: list[str] = [
         f"# RELATORIO DE COLETA VS2 — {unit['canonical_name']} (v{versao})",
-        f"_gerado em {agora} · estado da unit: "
-        f"{repo.estado_da_unit(uid)}_", ""]
+        f"_gerado em {agora} · **estado da unit: {estado}** "
+        f"(transições finais: {cadeia})_", ""]
 
     # 1. pesquisas realizadas -------------------------------------------------
     md.append("## 1. Pesquisas realizadas")
@@ -33,8 +38,12 @@ def gerar(repo: Any, unit: dict[str, Any], pasta: Path,
               f"{len(repo.xref_rows_da_unit(uid))} linhas recuperadas — "
               f"nenhuma janela enviada ao modelo.")
     for b in repo.buscas(uid):
-        md.append(f"- **Busca {b['target']}** (id {b['id']}): "
-                  f"{b['result']} — {b['scope'][:180]}")
+        # A busca por conteúdo só alcançou as camadas de texto; TIFs sem OCR
+        # NÃO foram pesquisados internamente — o resultado é sempre parcial.
+        rotulo = ("NAO_ENCONTRADO_EM_BUSCA_PARCIAL"
+                  if b["result"] == "nao_encontrado" else b["result"])
+        md.append(f"- **Busca {b['target']}** (id {b['id']}): {rotulo} — "
+                  f"{b['scope'][:220]}")
     md.append("")
 
     # 2. resultados negativos com auditoria ----------------------------------
@@ -56,20 +65,25 @@ def gerar(repo: Any, unit: dict[str, Any], pasta: Path,
                   + (" …" if len(chaves_sem) > 12 else ""))
     md.append("")
 
-    # 3. documentos adquiridos ------------------------------------------------
-    md.append("## 3. Documentos adquiridos")
+    # 3. documentos ----------------------------------------------------------
+    md.append("## 3. Documentos")
     itens = repo.collection_items(uid)
+    locais = [i for i in itens
+              if i.get("provenance", {}).get("origem") == "ja_no_pc"]
+    md.append(f"- **Localizados e validados no corpus local** "
+              f"({len(locais)}) — NÃO adquiridos nesta execução: "
+              + ", ".join(i["title"] for i in locais[:8]))
     por_status: dict[str, list[str]] = {}
     for i in itens:
+        if i in locais:
+            continue
         por_status.setdefault(i["status"], []).append(i["title"])
-    if itens:
-        for status in ("promovido", "validado", "staged", "falhou",
-                       "requer_intervencao", "pendente"):
-            if status in por_status:
-                md.append(f"- {status}: {len(por_status[status])} — "
-                          + ", ".join(por_status[status][:10]))
-    else:
-        md.append("- (nenhum item de coleta criado)")
+    for status in ("promovido", "validado", "staged", "bloqueado_simulacao",
+                   "falhou", "requer_intervencao", "cancelado", "pendente"):
+        if status in por_status:
+            md.append(f"- {status}: {len(por_status[status])} — "
+                      + ", ".join(por_status[status][:10]))
+    md.append("- **Adquiridos nesta execução: 0** (nenhuma operação paga).")
     md.append("")
 
     # 4. custos ---------------------------------------------------------------
@@ -83,7 +97,16 @@ def gerar(repo: Any, unit: dict[str, Any], pasta: Path,
 
     # 5. populações e alterações no censo ------------------------------------
     md.append("## 5. Populações (denominador preservado)")
-    for pop, n in sorted(repo.populacoes_contagens(uid).items()):
+    pops = repo.populacoes_contagens(uid)
+    dpu_n = pops.get("dpu_exhibit_a", 0)
+    zero_n = pops.get("in_dpu_but_zero_unit_acres", 0)
+    md.append(f"- **{dpu_n} leases listadas no Exhibit A** (população "
+              f"original PRESERVADA).")
+    md.append(f"- **{dpu_n - zero_n} leases potencialmente contribuintes**.")
+    md.append(f"- **{zero_n} leases `in_dpu_but_zero_unit_acres`** — "
+              f"exclusivamente A-811 (leitura declarada dos 7 instrumentos; "
+              f"permanecem no Exhibit A e na trilha).")
+    for pop, n in sorted(pops.items()):
         md.append(f"- {pop}: {n}")
     deltas = resumo_fases.get("populacoes", {})
     if deltas.get("dpu_sem_linha_no_xref"):
@@ -172,15 +195,62 @@ def gerar(repo: Any, unit: dict[str, Any], pasta: Path,
                   + (" — OK, $0 como exige a política."
                      if custo_portal_real == 0
                      else " — **ALERTA: deveria ser $0!**"))
+        md.append("- **Bloqueio técnico de compras ATIVO** "
+                  "(simulacao.exigir_bloqueio_pagamento antes de qualquer "
+                  "abertura, env + política no banco).")
+        md.append("")
+        md.append("### Limitações da simulação, por categoria")
+        md.append("1. **Documentos de cartório ausentes**: "
+                  + (", ".join(i["title"] for i in bloqueados)
+                     or "(nenhum)")
+                  + " — required_in_production_but_unavailable_in_"
+                    "simulation.")
+        md.append("2. **DOTO/DOI**: NAO_ENCONTRADO_EM_BUSCA_PARCIAL "
+                  "(somente as camadas de texto foram pesquisáveis; TIFs "
+                  "sem OCR não foram pesquisados internamente).")
+        md.append("3. **Instrumentos do curative Stewart não localizados**: "
+                  "Quitclaim Deed, Affidavit of Identity e Landman "
+                  "Statement (citados no e-mail, sem recording).")
+        md.append("4. **Solicitações que a produção faria e a simulação NÃO "
+                  "enviou**: DOTO/DOI ao PM/seller; reexportação legível do "
+                  "release; instrumentos Stewart ao PM/seller.")
+        md.append("")
+        md.append("### Release-of-suspense Stewart (claim 127) — o que "
+                  "prova e o que não prova")
+        md.append("- PROVA que a EOG colocou o interesse de Marlee "
+                  "McConnell Stewart **em pay** (Josh A/B e Deaton, "
+                  "03/2013).")
+        md.append("- INDICA que a EOG **recebeu o curative** ('Curative "
+                  "materials and revised DOI's are attached').")
+        md.append("- **NÃO substitui a prova registral** — sem "
+                  "volume/página, sem file number, sem data do Quitclaim.")
+        md.append("- Gera **requisito separado**: "
+                  "Quitclaim/Affidavit/Landman Statement (categoria 3 "
+                  "acima).")
         md.append("")
 
-    # 10. recomendação do modelo ----------------------------------------------
-    md.append("## 10. Recomendação para o próximo estado")
-    rec = caneta.caminho(pasta) / "RECOMENDACAO_VS2.md"
-    if rec.exists():
-        md.append(rec.read_text(encoding="utf-8").strip())
+    # 10. posição atual --------------------------------------------------------
+    # A recomendação HISTÓRICA do exame dirigido (permanecer em COLETANDO,
+    # aguardar pulls) vale apenas enquanto a unit estava em COLETANDO; depois
+    # das transições da simulação ela sai integralmente do relatório —
+    # correção da Parte A da ordem de 02/09.
+    md.append("## 10. Posição atual")
+    if estado == "COLETANDO":
+        rec = caneta.caminho(pasta) / "RECOMENDACAO_VS2.md"
+        if rec.exists():
+            md.append(rec.read_text(encoding="utf-8").strip())
+        else:
+            md.append("(a sessão de exame ainda não propôs recomendação)")
     else:
-        md.append("(a sessão de exame ainda não propôs recomendação)")
+        ultimas = repo.transicoes(uid)[-2:]
+        md.append(f"A unit está em **{estado}** por determinação do "
+                  f"operador (política de simulação de 02/09/2026):")
+        for t in ultimas:
+            md.append(f"- {t['from_state']} -> {t['to_state']} "
+                      f"[{t['event']}]: {t['note'][:260]}")
+        md.append("Próxima etapa: exame documental (VS3) sob simulação; "
+                  "avanço ao VS4 (projeção no DDR) somente após aprovação "
+                  "do VS3 pelo operador.")
     md.append("")
     md.append("_Nenhuma certificação de WI/NRI foi feita nesta etapa._")
 
