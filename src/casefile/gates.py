@@ -55,14 +55,24 @@ def _gate(slug: str, status: str, detalhe: str) -> dict[str, str]:
     return {"condicao": slug, "status": status, "detalhe": detalhe}
 
 
+def _facts_de(facts: list[dict[str, Any]], no_entity: str,
+              chaves_valor: tuple[str, ...] = ()) -> list[dict[str, Any]]:
+    alvo = no_entity.lower()
+    return [c for c in facts
+            if alvo in c["entity"].lower()
+            and all(k in c["value"] for k in chaves_valor)]
+
+
 def _tem_fact(facts: list[dict[str, Any]], no_entity: str,
               chaves_valor: tuple[str, ...] = ()) -> dict[str, Any] | None:
-    alvo = no_entity.lower()
-    for c in facts:
-        if alvo in c["entity"].lower() and \
-                all(k in c["value"] for k in chaves_valor):
-            return c
-    return None
+    # Vários facts podem casar (uma leitura falhada e uma completa): o que
+    # decide o gate é o MELHOR qualificado, nunca o primeiro da lista.
+    candidatos = _facts_de(facts, no_entity, chaves_valor)
+    if not candidatos:
+        return None
+    completos = [c for c in candidatos
+                 if c["value"].get("leitura_completa")]
+    return (completos or candidatos)[-1]
 
 
 def _pergunta_aberta(repo: Any, uid: int, assunto: str) -> bool:

@@ -127,6 +127,7 @@ Uma ficha por conceito. Lida uma vez, consultada sempre.
 - [precedente missing documents no summary](precedente-missing-documents-no-summary.md) `veredito` — O Summary carrega um bloco **MISSING DOCUMENTS espelhando o Missing Files log** — ausências materiais aparecem
 - [precedente operator eog ou project log](precedente-operator-eog-ou-project-log.md) `veredito` — Operator = **EOG Resources, Inc.**, salvo o project log (`Well List – Prelim AV%`) indicar outro operador para
 - [precedente-recording-manuscrito-fora-de-sequencia-fica-branco](precedente-recording-manuscrito-fora-de-sequencia-fica-branco.md) `veredito` — ## VEREDITO (operador, 24/08/2026) — Vol/Page MANUSCRITO sobre campo impresso no Exhibit "A": recording fica B
+- [precedente-release-of-suspense-nao-e-release-de-instrumento](precedente-release-of-suspense-nao-e-release-de-instrumento.md) `regra` — ## "Release" com dois sentidos: de SUSPENSE (fundos) vs. de INSTRUMENTO (registro)
 - [precedente-template-da-casa-chega-preenchido-com-outra-unidade](precedente-template-da-casa-chega-preenchido-com-outra-unidade.md) `veredito` — ## VEREDITO (operador, 24/08/2026) — template mapeado que descreve OUTRO ativo = dados de exemplo, não troca d
 - [project log aba missing files formato](project-log-aba-missing-files-formato.md) `regra` — ## Aba Missing Files do Project Log — formato de escrita
 - [protocolo captura viewer cartorio](protocolo-captura-viewer-cartorio.md) `regra` — ## Protocolo de captura do viewer do cartório
