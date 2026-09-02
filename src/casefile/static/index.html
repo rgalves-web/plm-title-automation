@@ -87,12 +87,16 @@ const gateBadge=s=>({ok:["OK","ok"],ok_parcial:["OK-PARCIAL","warn"],
 
 async function refresh(){
   try{
-    const units=await j("/api/units"); cache.units=units;
-    renderPortfolio(units);
+    const units=await j("/api/units");
+    const assinatura=JSON.stringify(units);
+    if(assinatura!==cache.assinatura){   // sem mudança, sem re-render:
+      cache.units=units;cache.assinatura=assinatura;   // clique e scroll
+      renderPortfolio(units);                          // sobrevivem
+    }
     if(unitSel) await loadUnit(unitSel,false);
     $("#hdr-upd").textContent="atualizado "+new Date().toLocaleTimeString();
     const sim=units.some(u=>u.modo==="SIMULATION");
-    $("#hdr-mode").innerHTML=sim?badge("SIMULATION MODE","sim").replace("b-sim","b-sim"):"";
+    $("#hdr-mode").innerHTML=sim?badge("SIMULATION MODE","sim"):"";
   }catch(e){$("#hdr-upd").textContent="erro: "+e.message;}
 }
 
@@ -120,7 +124,10 @@ async function loadUnit(id,scroll){
     j(`/api/units/${id}`),j(`/api/units/${id}/claims`),
     j(`/api/units/${id}/documentos`),j(`/api/units/${id}/timeline`),
     j(`/api/units/${id}/intervencoes`),j(`/api/units/${id}/grafo`)]);
-  cache.det=det;cache.claims=claims;cache.docs=docs;cache.tl=tl;cache.fila=fila;cache.grafo=grafo;
+  const assinatura=JSON.stringify([det,claims,docs,tl,fila,grafo]);
+  if(assinatura===cache.assinaturaDet && !scroll) return;
+  cache.det=det;cache.claims=claims;cache.docs=docs;cache.tl=tl;
+  cache.fila=fila;cache.grafo=grafo;cache.assinaturaDet=assinatura;
   renderDetail(); if(scroll)$("#detail").scrollTop=0;
 }
 
@@ -216,6 +223,13 @@ function renderTab(){
       <p class="muted">Somente decisões de landman/operador — tarefas técnicas não entram aqui. Ações chegam no VS-D1.</p></div>`;
   }
   return "";
+}
+
+function tabela(rows,cols){
+  if(!rows||!rows.length)return '<p class="muted">(vazio)</p>';
+  return `<div class="wrap"><table><thead><tr>${cols.map(([,t])=>`<th>${esc(t)}</th>`).join("")}</tr></thead><tbody>${
+    rows.map(r=>`<tr>${cols.map(([k])=>`<td>${esc(Array.isArray(r[k])?r[k].join(", "):(r[k]??""))}</td>`).join("")}</tr>`).join("")
+  }</tbody></table></div>`;
 }
 
 function claimsTable(rows){
