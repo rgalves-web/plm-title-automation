@@ -103,8 +103,10 @@ def gerar_todos(repo: Any, unit: dict[str, Any], pasta: Path
                   f"{corte['value'].get('fonte', '?')} (claim "
                   f"{corte['id']}; trecho: {corte['evidence'][:140]})")
     else:
-        md.append("- **NAO DETERMINADA** — intervenção registrada; nenhum "
-                  "exame de supplemental usa 'até o presente'.")
+        md.append("- **NAO DETERMINADA** — a sessão de exame foi "
+                  "interrompida antes deste dever (créditos da API); "
+                  "pendente na retomada. Nenhum exame de supplemental usa "
+                  "'até o presente'.")
     md += ["", "## Posições canônicas por população"]
     for p in posicoes:
         md.append(f"- **{p['population_item']}**: {p['classification']} — "

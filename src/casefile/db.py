@@ -42,9 +42,12 @@ def connect(override: str | None = None) -> Any:
 
 
 def _carregar_dotenv() -> None:
+    # O dashboard/uvicorn pode subir com cwd fora do repo: o .env do
+    # próprio repositório é sempre tentado além do do diretório corrente.
     try:
         from dotenv import load_dotenv
         load_dotenv(Path(".env"))
+        load_dotenv(Path(__file__).resolve().parents[2] / ".env")
     except Exception:
         pass
 

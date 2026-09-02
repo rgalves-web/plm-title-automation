@@ -328,8 +328,14 @@ def executar_verificacao(*, repo: Any, unit: dict[str, Any], pasta: Path,
 
     # 1) lote: transcrição independente do Exhibit A (p.3 e p.4 da DPU).
     leases = repo.claims_da_unit(unit["id"], "lease_in_unit")
+    # O unit dec CERTO: pastas de lease carregam designations de OUTRAS
+    # units (0126714-* tem A-730) — o nome tem que carregar os tokens desta.
+    from src.casefile.referencia import unit_identity_tokens
+    tokens = {t.lower() for t in
+              unit_identity_tokens(unit["canonical_name"])}
     dpu_nome = next((n for n in acervo.names()
-                     if "unit dec" in n and "rec" in n), None)
+                     if "unit dec" in n and "rec" in n
+                     and all(t in n for t in tokens)), None)
     ja = {v["claim_id"] for v in repo.verificacoes(unit["id"])}
     pendentes_lote = [c for c in leases if c["id"] not in ja]
     if dpu_nome and pendentes_lote:

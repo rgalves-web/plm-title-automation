@@ -315,7 +315,8 @@ class RepoFake:
     def abrir_sessao(self, unit_id, command, model):
         row = {"id": len(self.sessions) + 1, "unit_id": unit_id,
                "command": command, "model": model, "stop_reason": "",
-               "turns": 0, "usage": {}, "cost_usd": None, "log_path": ""}
+               "turns": 0, "usage": {}, "cost_usd": None, "log_path": "",
+               "started_at": _now(), "ended_at": None}
         self.sessions.append(row)
         return row["id"]
 
@@ -323,7 +324,7 @@ class RepoFake:
                       log_path):
         row = self.sessions[session_id - 1]
         row.update(stop_reason=stop_reason, turns=turns, usage=usage,
-                   cost_usd=cost_usd, log_path=log_path)
+                   cost_usd=cost_usd, log_path=log_path, ended_at=_now())
 
     def registrar_custo(self, unit_id, category, amount_usd, detail):
         self.costs.append({"unit_id": unit_id, "category": category,

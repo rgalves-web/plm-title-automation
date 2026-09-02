@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Case File — Control Tower</title>
+<style>
+  :root{
+    --bg:#12141a; --panel:#1a1e27; --panel2:#20252f; --line:#2c3340;
+    --tx:#d7dce4; --tx2:#8b94a3; --ok:#3fb36f; --warn:#d9a441;
+    --bad:#d96459; --info:#5b8dd9; --sim:#9a6fd9; --mono:ui-monospace,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);
+       font:13px/1.45 "Segoe UI",system-ui,sans-serif}
+  header{display:flex;align-items:center;gap:12px;padding:10px 16px;
+         background:var(--panel);border-bottom:1px solid var(--line)}
+  header h1{font-size:15px;margin:0;font-weight:600}
+  .badge{font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600}
+  .b-sim{background:#2c2140;color:#c9aef5;border:1px solid #4c3a70}
+  .b-ok{background:#173424;color:#7fd6a4}.b-warn{background:#3a2f14;color:#e8c069}
+  .b-bad{background:#3d1f1c;color:#eb9a90}.b-info{background:#1b2a44;color:#9dbdf0}
+  .muted{color:var(--tx2)} .mono{font-family:var(--mono);font-size:12px}
+  main{display:grid;grid-template-columns:330px 1fr;height:calc(100vh - 45px)}
+  #portfolio{border-right:1px solid var(--line);overflow-y:auto;background:var(--panel)}
+  #detail{overflow-y:auto;padding:14px 18px}
+  .unit-card{padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+  .unit-card:hover,.unit-card.sel{background:var(--panel2)}
+  .row{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+  .kpis{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:6px;
+       padding:8px 12px;min-width:110px}
+  .kpi b{display:block;font-size:17px}
+  .kpi span{font-size:11px;color:var(--tx2)}
+  nav.tabs{display:flex;flex-wrap:wrap;gap:2px;margin:12px 0;border-bottom:1px solid var(--line)}
+  nav.tabs button{background:none;border:none;color:var(--tx2);padding:7px 11px;
+       cursor:pointer;font-size:12.5px;border-bottom:2px solid transparent}
+  nav.tabs button.on{color:var(--tx);border-bottom-color:var(--info)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{color:var(--tx2);text-align:left;font-weight:600;padding:5px 8px;
+     border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg)}
+  td{padding:5px 8px;border-bottom:1px solid #232a35;vertical-align:top}
+  tr.click{cursor:pointer} tr.click:hover{background:var(--panel2)}
+  .wrap{overflow-x:auto}
+  .gate{display:flex;gap:8px;align-items:baseline;padding:6px 0;border-bottom:1px solid #232a35}
+  .drawer{position:fixed;top:0;right:0;width:520px;max-width:92vw;height:100vh;
+          background:var(--panel);border-left:1px solid var(--line);padding:16px;
+          overflow-y:auto;box-shadow:-8px 0 24px rgba(0,0,0,.45);z-index:9}
+  .drawer h3{margin-top:0}
+  .x{float:right;cursor:pointer;color:var(--tx2);font-size:18px;background:none;border:none}
+  dl{display:grid;grid-template-columns:150px 1fr;gap:4px 10px;margin:8px 0}
+  dt{color:var(--tx2)} dd{margin:0;word-break:break-word}
+  .sec{margin:14px 0} .sec h4{margin:0 0 6px;font-size:12px;color:var(--tx2);
+       text-transform:uppercase;letter-spacing:.4px}
+  footer{position:fixed;bottom:0;right:0;padding:3px 10px;font-size:11px;
+         color:var(--tx2);background:var(--bg)}
+  pre{background:var(--panel2);padding:8px;border-radius:5px;overflow-x:auto;
+      font-size:11.5px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<header>
+  <h1>Case File · Control Tower</h1>
+  <span class="badge b-info">VS-D0 · read-only</span>
+  <span id="hdr-mode"></span>
+  <span class="muted" id="hdr-upd"></span>
+</header>
+<main>
+  <aside id="portfolio"></aside>
+  <section id="detail"><p class="muted">Selecione uma Unit.</p></section>
+</main>
+<footer>local · sem ações · dados direto do banco do Case File</footer>
+<div id="drawer-host"></div>
+
+<script>
+"use strict";
+const $=s=>document.querySelector(s);
+let unitSel=null, tabSel="visao", cache={}, timer=null;
+
+const j=async u=>{const r=await fetch(u);if(!r.ok)throw new Error(u+" "+r.status);return r.json();};
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const money=v=>"$"+Number(v??0).toFixed(2);
+const badge=(t,k)=>`<span class="badge b-${k}">${esc(t)}</span>`;
+const gateBadge=s=>({ok:["OK","ok"],ok_parcial:["OK-PARCIAL","warn"],
+  pendente:["PENDENTE","bad"],pendente_operador:["PEND. OPERADOR","bad"],
+  pendente_evidencia:["PEND. EVIDÊNCIA","bad"]}[s]||[s,"info"]);
+
+async function refresh(){
+  try{
+    const units=await j("/api/units"); cache.units=units;
+    renderPortfolio(units);
+    if(unitSel) await loadUnit(unitSel,false);
+    $("#hdr-upd").textContent="atualizado "+new Date().toLocaleTimeString();
+    const sim=units.some(u=>u.modo==="SIMULATION");
+    $("#hdr-mode").innerHTML=sim?badge("SIMULATION MODE","sim").replace("b-sim","b-sim"):"";
+  }catch(e){$("#hdr-upd").textContent="erro: "+e.message;}
+}
+
+function renderPortfolio(units){
+  $("#portfolio").innerHTML=units.map(u=>`
+    <div class="unit-card ${u.id===unitSel?"sel":""}" onclick="selUnit(${u.id})">
+      <div class="row"><b>${esc(u.unit)}</b>
+        ${badge(u.saude==="ok"?"saúde ok":"atenção",u.saude==="ok"?"ok":"warn")}</div>
+      <div class="row muted"><span>${esc(u.projeto)}</span>
+        <span class="mono">${esc(u.estado)}</span></div>
+      <div class="row" style="margin-top:4px">
+        ${badge(u.modo,u.modo==="SIMULATION"?"sim":"info")}
+        <span class="muted">IA ${money(u.custo_ia)} · portal ${money(u.custo_portal)} / ${money(u.orcamento)}</span></div>
+      <div class="row muted" style="margin-top:3px">
+        <span>${u.blockers} blocker(s) · ${u.decisoes_aguardando} decisão(ões)</span>
+        <span>${u.agente_ativo?badge("sessão ativa","info"):""}</span></div>
+      <div class="muted" style="margin-top:2px;font-size:11px">últ. atividade: ${esc((u.ultima_atividade||"—").slice(0,19).replace("T"," "))}</div>
+    </div>`).join("");
+}
+
+window.selUnit=async id=>{unitSel=id;tabSel="visao";await loadUnit(id,true);renderPortfolio(cache.units||[]);};
+
+async function loadUnit(id,scroll){
+  const [det,claims,docs,tl,fila,grafo]=await Promise.all([
+    j(`/api/units/${id}`),j(`/api/units/${id}/claims`),
+    j(`/api/units/${id}/documentos`),j(`/api/units/${id}/timeline`),
+    j(`/api/units/${id}/intervencoes`),j(`/api/units/${id}/grafo`)]);
+  cache.det=det;cache.claims=claims;cache.docs=docs;cache.tl=tl;cache.fila=fila;cache.grafo=grafo;
+  renderDetail(); if(scroll)$("#detail").scrollTop=0;
+}
+
+const TABS=[["visao","Visão geral"],["docs","Documentos"],["pops","Populações"],
+  ["cadeias","Cadeias"],["claims","Claims"],["div","Divergências"],
+  ["cur","Curatives"],["ddr","DDR"],["custos","Custos"],
+  ["tl","Timeline"],["audit","Auditoria"],["fila","Fila p/ Renato"]];
+
+function renderDetail(){
+  const d=cache.det,u=d.unit,p=d.progresso;
+  $("#detail").innerHTML=`
+    <div class="row"><h2 style="margin:4px 0">${esc(u.canonical_name)}
+      ${badge(u.state,"info")} ${badge(d.modo,d.modo==="SIMULATION"?"sim":"ok")}</h2></div>
+    <div class="kpis">
+      <div class="kpi"><b>${money(d.custos.total)}</b><span>custo total · teto ${money(d.custos.orcamento)}</span></div>
+      <div class="kpi"><b>${money(d.custos.por_categoria.coleta||0)}</b><span>portal (deve ser $0 em simulação)</span></div>
+      <div class="kpi"><b>${p.leases.exhibit_a} / ${p.leases.potencialmente_contribuintes} / ${p.leases.zero_unit_acres}</b><span>leases Exhibit A / contribuintes / zero-acres</span></div>
+      <div class="kpi"><b>${p.claims.ativos}</b><span>claims · ${p.claims.com_verificacao} verificados · ${p.claims.prontos_para_ddr} p/ DDR</span></div>
+      <div class="kpi"><b>${(cache.fila||[]).length}</b><span>intervenções na fila</span></div>
+    </div>
+    <nav class="tabs">${TABS.map(([k,t])=>
+      `<button class="${k===tabSel?"on":""}" onclick="setTab('${k}')">${t}</button>`).join("")}</nav>
+    <div id="tabbody">${renderTab()}</div>`;
+}
+window.setTab=k=>{tabSel=k;$("#tabbody").innerHTML=renderTab();
+  document.querySelectorAll("nav.tabs button").forEach((b,i)=>b.classList.toggle("on",TABS[i][0]===k));};
+
+function renderTab(){
+  const d=cache.det,p=d.progresso;
+  switch(tabSel){
+  case "visao":return `
+    <div class="sec"><h4>Gates (condições da aprovação)</h4>
+      ${d.gates.map(g=>{const[t,k]=gateBadge(g.status);
+        return `<div class="gate">${badge(t,k)}<b>${esc(g.condicao)}</b>
+                <span class="muted">${esc(g.detalhe)}</span></div>`;}).join("")}</div>
+    <div class="sec"><h4>Progresso por população (sem percentual único)</h4>
+      <div class="kpis">
+        <div class="kpi"><b>${Object.values(p.documentos.no_censo_por_origem).reduce((a,b)=>a+b,0)}</b><span>docs no censo · ${p.documentos.ausentes_declarados} ausentes · ${p.documentos.bloqueados_simulacao} bloq. simulação</span></div>
+        <div class="kpi"><b>${p.leases.examinadas_com_claim}</b><span>leases com claim · ${p.leases.verificadas} verificadas</span></div>
+        <div class="kpi"><b>${p.tracts}</b><span>tracts</span></div>
+        <div class="kpi"><b>${p.divergencias}</b><span>divergências</span></div>
+        <div class="kpi"><b>${p.curativas}</b><span>curatives</span></div>
+        <div class="kpi"><b>${p.posicoes_canonicas}</b><span>posições canônicas</span></div>
+        <div class="kpi"><b>${p.prontidao_proxima_etapa.gates_bloqueando}</b><span>gates bloqueando avanço</span></div>
+      </div></div>
+    <div class="sec"><h4>Posições canônicas</h4>${tabela(d.posicoes,
+      [["population_item","item"],["classification","classificação"],
+       ["claim_ids","claims"],["note","nota"]])}</div>`;
+  case "docs":{const dd=cache.docs;return `
+    <div class="sec"><h4>Censo por origem</h4>${tabela(
+      Object.entries(dd.censo_por_origem).map(([o,v])=>({origem:o,...v})),
+      [["origem","origem"],["conteudos","conteúdos"],["sightings","caminhos"]])}</div>
+    <div class="sec"><h4>Ausentes declarados (com fonte que exige)</h4>${tabela(dd.ausentes,
+      [["claim","claim"],["entidade","entidade"],["esperado","esperado"]])}</div>
+    <div class="sec"><h4>Itens de coleta</h4>${tabela(dd.itens_coleta,
+      [["title","alvo"],["method","método"],["status","status"],["note","nota"]])}</div>
+    <div class="sec"><h4>Buscas negativas</h4>${tabela(dd.buscas,
+      [["target","alvo"],["result","resultado"],["names_scanned","nomes varridos"],["evidence","veredito"]])}</div>`;}
+  case "pops":return `<div class="sec"><h4>Populações</h4>${tabela(
+      Object.entries(d.populacoes).map(([k,v])=>({populacao:k,n:v})),
+      [["populacao","população"],["n","membros"]])}
+      <p class="muted">67 Exhibit A preservadas · ${p.leases.potencialmente_contribuintes} potencialmente contribuintes · ${p.leases.zero_unit_acres} in_dpu_but_zero_unit_acres (A-811).</p></div>`;
+  case "cadeias":{const g=cache.grafo;
+    if(!g.disponivel)return `<p class="muted">Grafo ainda não proposto (VS3 em execução).</p>`;
+    return `<div class="sec"><h4>Grafo de título — ${g.nodes.length} nós · ${g.edges.length} ligações</h4>
+      ${tabela(g.edges.map(e=>({de:e.de,tipo:e.tipo,para:e.para,claim:e.claim_id,
+        doc:(e.documento||"").slice(0,50),nota:e.nota||""})),
+        [["de","de"],["tipo","ligação"],["para","para"],["claim","claim"],["doc","documento"],["nota","nota"]])}</div>`;}
+  case "claims":return claimsTable(cache.claims);
+  case "div":return claimsTable(cache.claims.filter(c=>c.tipo==="divergence"));
+  case "cur":return claimsTable(cache.claims.filter(c=>/curative/i.test(c.entidade)));
+  case "ddr":return `<p class="muted">Células CANDIDATAS — nada foi escrito no workbook (VS4 pendente de aprovação).</p>`
+      +claimsTable(cache.claims.filter(c=>c.ddr_candidatas>0));
+  case "custos":return `<div class="sec"><h4>Custos</h4>${tabela(
+      Object.entries(d.custos.por_categoria).map(([k,v])=>({categoria:k,usd:money(v)})),
+      [["categoria","categoria"],["usd","US$"]])}
+      <p>Total <b>${money(d.custos.total)}</b> de ${money(d.custos.orcamento)} · teto de coleta ${money(d.custos.teto_coleta)}.</p></div>
+    <div class="sec"><h4>Entregáveis registrados</h4>${tabela(
+      Object.entries(d.deliverables).flatMap(([k,arr])=>arr.map(x=>({tipo:k,v:x.version,path:x.path}))),
+      [["tipo","tipo"],["v","v"],["path","arquivo"]])}</div>`;
+  case "tl":case "audit":{const rows=cache.tl.map(e=>({q:(e.quando||"").slice(0,19).replace("T"," "),
+      ator:e.ator,acao:e.acao,mud:e.de?`${e.de} → ${e.para}`:"",motivo:e.motivo,
+      custo:e.custo!=null?money(e.custo):"",vp:e.versao_prompt||""}));
+    return `<div class="sec"><h4>${tabSel==="tl"?"Timeline":"Auditoria (todos os eventos)"}</h4>
+      ${tabela(tabSel==="tl"?rows:rows,[["q","quando"],["ator","ator"],["acao","ação"],
+        ["mud","estado"],["motivo","motivo"],["custo","custo"],["vp","prompt/versão"]])}</div>`;}
+  case "fila":return `<div class="sec"><h4>Fila consolidada para o operador</h4>${tabela(
+      cache.fila.map(f=>({crit:f.criticidade,perg:f.pergunta,motivo:f.motivo,
+        impacto:f.impacto,acao:f.acao_necessaria,
+        espera:f.horas_aguardando!=null?f.horas_aguardando+"h":"—"})),
+      [["crit","criticidade"],["perg","pergunta"],["motivo","motivo"],
+       ["impacto","impacto"],["acao","ação necessária"],["espera","aguardando"]])}
+      <p class="muted">Somente decisões de landman/operador — tarefas técnicas não entram aqui. Ações chegam no VS-D1.</p></div>`;
+  }
+  return "";
+}
+
+function claimsTable(rows){
+  return `<div class="wrap"><table><thead><tr><th>id</th><th>tipo</th><th>entidade</th>
+    <th>mat.</th><th>verificação</th><th>contam.</th><th>DDR</th></tr></thead><tbody>
+    ${rows.map(c=>`<tr class="click" onclick="openClaim(${c.id})">
+      <td class="mono">${c.id}</td><td>${esc(c.tipo)}</td>
+      <td>${esc(c.entidade.slice(0,80))}</td><td>${esc(c.materialidade)}</td>
+      <td>${c.verificacao.length?c.verificacao.map(v=>{const k=v==="concordancia"?"ok":
+        v==="divergencia"?"bad":"warn";return badge(v,k);}).join(" "):'<span class="muted">—</span>'}</td>
+      <td>${c.benchmark_contamination?badge("entrega","sim"):""}</td>
+      <td>${c.ddr_candidatas||""}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+window.openClaim=async id=>{
+  const c=await j(`/api/claims/${id}`);
+  $("#drawer-host").innerHTML=`<div class="drawer">
+    <button class="x" onclick="document.getElementById('drawer-host').innerHTML=''">×</button>
+    <h3>Claim ${id} ${c.benchmark_contamination?badge("benchmark contamination","sim"):""}</h3>
+    <dl>
+      <dt>entidade</dt><dd>${esc(c.claim.entity)}</dd>
+      <dt>tipo</dt><dd>${esc(c.claim.claim_type)} · materialidade ${esc(c.materialidade)}</dd>
+      <dt>documento</dt><dd class="mono">${c.documento.nomes.map(esc).join("<br>")||"(sha)"}<br>
+        <span class="muted">sha256:${esc(c.documento.sha256.slice(0,16))}… · pág. ${esc(c.documento.pagina)}</span></dd>
+      <dt>origem</dt><dd>${esc(c.origem)}</dd>
+      <dt>examinador</dt><dd>${esc(c.examinador.modelo)} · <span class="mono">${esc(c.examinador.comando_versao_prompt)}</span></dd>
+      <dt>limitações</dt><dd>${esc(c.limitacoes||"—")}</dd>
+      <dt>células DDR</dt><dd>${(c.celulas_candidatas_ddr||[]).map(esc).join(", ")||"—"}</dd>
+    </dl>
+    <div class="sec"><h4>Trecho (evidência do examinador)</h4><pre>${esc(c.documento.trecho)}</pre></div>
+    <div class="sec"><h4>Valor do examinador</h4><pre>${esc(JSON.stringify(c.claim.value,null,1))}</pre></div>
+    <div class="sec"><h4>Verificação cega</h4>
+      ${c.verificacoes.length?c.verificacoes.map(v=>`<div class="gate">
+        ${(()=>{const k=v.verdict==="concordancia"?"ok":v.verdict==="divergencia"?"bad":"warn";
+          return badge(v.verdict,k);})()}
+        <span class="muted">${esc(v.verifier_model)}</span>
+        <span>${esc(v.question.slice(0,90))}</span></div>
+        <pre>${esc(JSON.stringify(v.verifier_value,null,1).slice(0,600))}</pre>`).join("")
+      :'<p class="muted">sem verificação registrada</p>'}
+      <p class="muted">Divergência não se resolve aqui: vai para adjudicação (VS-D1).</p></div>
+  </div>`;
+};
+
+refresh(); timer=setInterval(refresh,4000);
+</script>
+</body>
+</html>

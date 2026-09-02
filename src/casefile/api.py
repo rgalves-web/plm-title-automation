@@ -1,0 +1,347 @@
+"""VS-D0 — API read-only do Control Tower, servida do Case File.
+
+Arquitetura obrigatória (ordem de 02/09): Agentes → Case File → API →
+Dashboard. A API NUNCA infere estado de logs nem lê relatórios Markdown para
+calcular progresso: toda resposta nasce das tabelas do Case File via
+`repo.py`. Read-only por construção: nenhum endpoint escreve, nenhuma
+credencial aparece, nenhum botão de ação existe no D0.
+
+Execução local:  uvicorn --app-dir <repo> src.casefile.api:app --port 8788
+"""
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
+
+from src.casefile import custo as custo_mod
+from src.casefile import gates as gates_mod
+from src.casefile import portal, simulacao
+
+app = FastAPI(title="Case File — Control Tower (VS-D0, read-only)")
+
+_STATIC = Path(__file__).parent / "static" / "index.html"
+
+
+def get_repo() -> Any:
+    from src.casefile.db import connect
+    from src.casefile.repo import Repo
+    conn = connect()
+    try:
+        yield Repo(conn)
+    finally:
+        conn.close()
+
+
+def _iso(v: Any) -> Any:
+    return v.isoformat() if hasattr(v, "isoformat") else v
+
+
+def _linha(row: dict[str, Any]) -> dict[str, Any]:
+    return {k: _iso(v) for k, v in row.items()}
+
+
+def _unit_ou_404(repo: Any, unit_id: int) -> dict[str, Any]:
+    for u in repo.listar_units():
+        if u["id"] == unit_id:
+            return u
+    raise HTTPException(404, f"unit {unit_id} nao existe")
+
+
+def _modo(repo: Any, unit_id: int) -> str:
+    return "SIMULATION" if simulacao.ativa(repo, unit_id) else "PRODUCTION"
+
+
+def _ultima_atividade(repo: Any, unit_id: int) -> str | None:
+    ts = []
+    for t in repo.transicoes(unit_id):
+        ts.append(t["at"])
+    for s in repo.sessoes_da_unit(unit_id):
+        ts.append(s.get("ended_at") or s.get("started_at"))
+    ts = [x for x in ts if x is not None]
+    return _iso(max(ts)) if ts else None
+
+
+def _blockers(repo: Any, unit_id: int) -> dict[str, Any]:
+    itens = repo.collection_items(unit_id)
+    return {
+        "bloqueados_simulacao": [i["title"] for i in itens
+                                 if i["status"] == "bloqueado_simulacao"],
+        "requer_intervencao": [i["title"] for i in itens
+                               if i["status"] == "requer_intervencao"],
+        "perguntas_abertas": len(repo.perguntas_vs2_abertas(unit_id)),
+        "gates_bloqueando": [g["condicao"] for g in
+                             gates_mod.avaliar(repo,
+                                               {"id": unit_id,
+                                                "canonical_name": ""})
+                             if g["status"] in gates_mod.BLOQUEIAM],
+    }
+
+
+def _progresso(repo: Any, unit_id: int) -> dict[str, Any]:
+    """Progresso por POPULAÇÕES, nunca um percentual único (item C6)."""
+    pops = repo.populacoes_contagens(unit_id)
+    claims = repo.claims_da_unit(unit_id)
+    verifs = repo.verificacoes(unit_id)
+    com_verif = {v["claim_id"] for v in verifs}
+    leases = repo.claims_da_unit(unit_id, "lease_in_unit")
+    posicoes = repo.posicoes(unit_id)
+    censo = repo.contagem_censo(unit_id)
+    return {
+        "documentos": {
+            "no_censo_por_origem": {o: d["conteudos"]
+                                    for o, d in censo.items()},
+            "ausentes_declarados": pops.get(
+                "documentos_ausentes_incompletos", 0),
+            "bloqueados_simulacao": len(
+                repo.collection_items(unit_id, "bloqueado_simulacao")),
+        },
+        "leases": {"exhibit_a": pops.get("dpu_exhibit_a", 0),
+                   "potencialmente_contribuintes":
+                       pops.get("dpu_exhibit_a", 0)
+                       - pops.get("in_dpu_but_zero_unit_acres", 0),
+                   "zero_unit_acres":
+                       pops.get("in_dpu_but_zero_unit_acres", 0),
+                   "examinadas_com_claim": len(leases),
+                   "verificadas": sum(1 for c in leases
+                                      if c["id"] in com_verif)},
+        "tracts": len(repo.claims_da_unit(unit_id, "tract")),
+        "wells": len([c for c in claims
+                      if "api 42" in c["entity"].lower()
+                      or c["claim_type"] == "well"]),
+        "claims": {"ativos": len(claims),
+                   "com_verificacao": len(com_verif),
+                   "prontos_para_ddr": sum(1 for c in claims
+                                           if c.get("ddr_candidates"))},
+        "divergencias": len(repo.claims_da_unit(unit_id, "divergence")),
+        "curativas": sum(1 for c in claims
+                         if "curative" in c["entity"].lower()),
+        "gates": {g["condicao"]: g["status"]
+                  for g in gates_mod.avaliar(
+                      repo, {"id": unit_id, "canonical_name": ""})},
+        "posicoes_canonicas": len(posicoes),
+        "prontidao_proxima_etapa": {
+            "gates_bloqueando": sum(
+                1 for g in gates_mod.avaliar(
+                    repo, {"id": unit_id, "canonical_name": ""})
+                if g["status"] in gates_mod.BLOQUEIAM),
+            "aguarda_aprovacao_operador": True},
+    }
+
+
+# --- endpoints ---------------------------------------------------------------
+
+@app.get("/", response_class=HTMLResponse)
+def index() -> str:
+    return _STATIC.read_text(encoding="utf-8")
+
+
+@app.get("/api/units")
+def units(repo: Any = Depends(get_repo)) -> list[dict[str, Any]]:
+    out = []
+    for u in repo.listar_units():
+        custos = repo.custo_por_categoria(u["id"])
+        bl = _blockers(repo, u["id"])
+        sess_ativa = next((s for s in repo.sessoes_da_unit(u["id"])
+                           if s.get("ended_at") is None), None)
+        out.append({
+            "id": u["id"], "projeto": u.get("engagement", ""),
+            "unit": u["canonical_name"], "estado": u["state"],
+            "modo": _modo(repo, u["id"]),
+            "ultima_atividade": _ultima_atividade(repo, u["id"]),
+            "etapa_atual": u["state"],
+            "agente_ativo": (f"{sess_ativa['command']} "
+                             f"({sess_ativa['model']})"
+                             if sess_ativa else None),
+            "progresso": _progresso(repo, u["id"]),
+            "blockers": (len(bl["bloqueados_simulacao"])
+                         + len(bl["requer_intervencao"])
+                         + len(bl["gates_bloqueando"])),
+            "decisoes_aguardando": bl["perguntas_abertas"],
+            "custo_ia": round(custos.get("modelo", 0.0)
+                              + custos.get("verificacao", 0.0), 4),
+            "custo_portal": custos.get("coleta", 0.0),
+            "orcamento": custo_mod.teto_unit(),
+            "prazo_sla": None,
+            "saude": ("atencao" if bl["gates_bloqueando"]
+                      or bl["requer_intervencao"] else "ok"),
+        })
+    return out
+
+
+@app.get("/api/units/{unit_id}")
+def unit_detalhe(unit_id: int, repo: Any = Depends(get_repo)
+                 ) -> dict[str, Any]:
+    u = _unit_ou_404(repo, unit_id)
+    custos = repo.custo_por_categoria(unit_id)
+    return {
+        "unit": _linha(u), "modo": _modo(repo, unit_id),
+        "gates": gates_mod.avaliar(repo, u),
+        "populacoes": repo.populacoes_contagens(unit_id),
+        "posicoes": [_linha(p) for p in repo.posicoes(unit_id)],
+        "custos": {"por_categoria": custos,
+                   "total": repo.custo_acumulado(unit_id),
+                   "orcamento": custo_mod.teto_unit(),
+                   "teto_coleta": portal.teto_coleta()},
+        "progresso": _progresso(repo, unit_id),
+        "deliverables": {
+            kind: [_linha(d) for d in repo.deliverables(unit_id, kind)]
+            for kind in ("relatorio_coleta_vs2", "reconciliacao_recordings",
+                         "chain_graph_vs3", "title_examination_vs3",
+                         "claims_ready_vs3", "unresolved_vs3",
+                         "coverage_vs3", "cost_vs3")},
+    }
+
+
+@app.get("/api/units/{unit_id}/claims")
+def unit_claims(unit_id: int, tipo: str | None = None,
+                repo: Any = Depends(get_repo)) -> list[dict[str, Any]]:
+    _unit_ou_404(repo, unit_id)
+    verifs = repo.verificacoes(unit_id)
+    por_claim: dict[int, list[str]] = {}
+    for v in verifs:
+        por_claim.setdefault(v["claim_id"], []).append(v["verdict"])
+    return [{
+        "id": c["id"], "tipo": c["claim_type"], "entidade": c["entity"],
+        "materialidade": c["materiality"], "confianca": c["confidence"],
+        "benchmark_contamination":
+            bool(c["value"].get("benchmark_contamination")),
+        "verificacao": por_claim.get(c["id"], []),
+        "ddr_candidatas": len(c.get("ddr_candidates") or []),
+    } for c in repo.claims_da_unit(unit_id, tipo)]
+
+
+@app.get("/api/claims/{claim_id}")
+def claim_detalhe(claim_id: int, repo: Any = Depends(get_repo)
+                  ) -> dict[str, Any]:
+    c = repo.claim(claim_id)
+    if c is None:
+        raise HTTPException(404, f"claim {claim_id} nao existe")
+    sessoes = {s["id"]: s for s in repo.sessoes_da_unit(c["unit_id"])}
+    sess = sessoes.get(c["session_id"], {})
+    nomes = [n for n, shas in repo.sha_por_nome(c["unit_id"]).items()
+             if c["source_sha256"] in shas]
+    return {
+        "claim": _linha(c),
+        "documento": {"sha256": c["source_sha256"], "nomes": nomes[:5],
+                      "pagina": c["page"], "trecho": c["evidence"]},
+        "examinador": {"modelo": sess.get("model", ""),
+                       "comando_versao_prompt": sess.get("command", "")},
+        "verificacoes": [_linha(v)
+                         for v in repo.verificacoes_do_claim(claim_id)],
+        "origem": c["value"].get("origem_evidencia", "corpus_autonomo"),
+        "benchmark_contamination":
+            bool(c["value"].get("benchmark_contamination")),
+        "materialidade": c["materiality"],
+        "limitacoes": c.get("limitations", ""),
+        "celulas_candidatas_ddr": c.get("ddr_candidates", []),
+    }
+
+
+@app.get("/api/units/{unit_id}/documentos")
+def unit_documentos(unit_id: int, repo: Any = Depends(get_repo)
+                    ) -> dict[str, Any]:
+    _unit_ou_404(repo, unit_id)
+    return {
+        "censo_por_origem": repo.contagem_censo(unit_id),
+        "ausentes": [{"claim": c["id"], "entidade": c["entity"],
+                      "esperado": c["value"].get("esperado", "")}
+                     for c in repo.claims_da_unit(unit_id,
+                                                  "document_missing")],
+        "itens_coleta": [_linha(i)
+                         for i in repo.collection_items(unit_id)],
+        "buscas": [_linha(b) for b in repo.buscas(unit_id)],
+    }
+
+
+@app.get("/api/units/{unit_id}/timeline")
+def unit_timeline(unit_id: int, repo: Any = Depends(get_repo)
+                  ) -> list[dict[str, Any]]:
+    _unit_ou_404(repo, unit_id)
+    eventos: list[dict[str, Any]] = []
+    for t in repo.transicoes(unit_id):
+        eventos.append({"quando": _iso(t["at"]), "ator": t["actor"],
+                        "acao": t["event"], "de": t["from_state"],
+                        "para": t["to_state"], "motivo": t["note"],
+                        "custo": None, "tipo": "transicao"})
+    for s in repo.sessoes_da_unit(unit_id):
+        eventos.append({"quando": _iso(s["started_at"]),
+                        "ator": f"modelo:{s['model']}",
+                        "acao": f"sessao {s['command']}",
+                        "de": None, "para": None,
+                        "motivo": s.get("stop_reason", ""),
+                        "custo": float(s["cost_usd"] or 0),
+                        "versao_prompt": s["command"],
+                        "tipo": "sessao"})
+    for d in repo.decisoes_da_unit(unit_id):
+        eventos.append({"quando": _iso(d.get("decided_at")),
+                        "ator": "operador", "acao": d["kind"],
+                        "de": None, "para": None,
+                        "motivo": (d["question"] + " " +
+                                   (d.get("answer") or ""))[:300],
+                        "custo": None, "tipo": "decisao"})
+    return sorted(eventos, key=lambda e: e["quando"] or "")
+
+
+@app.get("/api/units/{unit_id}/intervencoes")
+def unit_intervencoes(unit_id: int, repo: Any = Depends(get_repo)
+                      ) -> list[dict[str, Any]]:
+    """Fila do operador — decisões de landman, sem tarefas técnicas."""
+    _unit_ou_404(repo, unit_id)
+    agora = datetime.now(timezone.utc)
+    fila = []
+    for q in repo.perguntas_vs2_abertas(unit_id):
+        fila.append({"criticidade": "alta", "unit_id": unit_id,
+                     "pergunta": q["question"],
+                     "motivo": "ambiguidade que sobreviveu as leituras",
+                     "impacto": "trava o gate da condicao correspondente",
+                     "evidencias": f"claim {q.get('claim_id')}",
+                     "acao_necessaria": "responder a pergunta",
+                     "aguardando_desde": None, "id": q["id"]})
+    for i in repo.collection_items(unit_id, "bloqueado_simulacao"):
+        idade = None
+        if i.get("at"):
+            try:
+                idade = round((agora - i["at"]).total_seconds() / 3600, 1)
+            except TypeError:
+                idade = None
+        fila.append({"criticidade": "media", "unit_id": unit_id,
+                     "pergunta": f"Coleta em producao: {i['title']}",
+                     "motivo": i["note"][:160],
+                     "impacto": "conclusoes dependentes ficam impedidas",
+                     "evidencias": json.dumps(i["target"],
+                                              ensure_ascii=False)[:160],
+                     "acao_necessaria": "autorizar coleta em producao "
+                                        "(fora da simulacao)",
+                     "aguardando_desde": _iso(i.get("at")),
+                     "horas_aguardando": idade, "id": f"coleta-{i['id']}"})
+    for p in repo.pesquisas(unit_id, "aberta"):
+        if "pm" in p["where_"].lower() or "seller" in p["where_"].lower():
+            fila.append({"criticidade": "media", "unit_id": unit_id,
+                         "pergunta": p["title"],
+                         "motivo": p["what"][:160],
+                         "impacto": "campo do DDR fica em branco declarado",
+                         "evidencias": p["where_"],
+                         "acao_necessaria": "solicitacao externa "
+                                            "(em producao)",
+                         "aguardando_desde": None,
+                         "id": f"pesquisa-{p['id']}"})
+    return fila
+
+
+@app.get("/api/units/{unit_id}/grafo")
+def unit_grafo(unit_id: int, repo: Any = Depends(get_repo)
+               ) -> dict[str, Any]:
+    _unit_ou_404(repo, unit_id)
+    delivs = repo.deliverables(unit_id, "chain_graph_vs3")
+    if not delivs:
+        return {"disponivel": False}
+    path = Path(delivs[-1]["path"])
+    if not path.exists():
+        return {"disponivel": False}
+    return {"disponivel": True,
+            **json.loads(path.read_text(encoding="utf-8"))}

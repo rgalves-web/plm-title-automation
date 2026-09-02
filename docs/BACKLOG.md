@@ -32,3 +32,5 @@ here.
 - Casefile/triagem relista TODOS os pendentes a cada turno (~1.400 nomes): com Sonnet o teto de $3 rendeu só 145 rótulos no smoke E7 (02/09). Fatiar a lista em lotes por sessão (mesma lição F1 do continuar).
 - Casefile/sessao: queda no meio do run_loop (5x 529 em 02/09) deixa model_sessions aberta e o custo dos turnos pagos fora de cost_entries (fica só no progresso jsonl). Fechar sessão e contabilizar em finally.
 - Casefile/triagem com nome ambíguo (2 conteúdos, mesmo logical) rotula ambos os hashes com o mesmo rótulo — aceitável no VS1, mas o VS3 deve rotular por conteúdo.
+- VS3/verificacao: a transcricao independente do Exhibit A (paginas 3-4 da DPU) nao devolve o bloco 0220604/001-018 em nenhuma das duas passadas (sub-serie/ditto na tabela?). 18 leases ficam evidencia_insuficiente — investigar recorte por regiao/zoom da pagina antes da proxima rodada.
+- VS3: sessao interrompida por credito nao registra intervencao de data de corte; a retomada (posicoes/grafo ausentes => re-roda) cobre, mas vale fechar sessao+custo em finally (item ja aberto) e registrar pergunta automatica.

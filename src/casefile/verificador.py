@@ -48,7 +48,8 @@ class _CustoB:
         return custo
 
 
-def _chamar_b(prompt: str, png: bytes | None = None) -> tuple[str, Any]:
+def _chamar_b(prompt: str, png: bytes | None = None,
+              max_tokens: int = 4000) -> tuple[str, Any]:
     """Uma chamada à família B. Devolve (texto, usage)."""
     from dotenv import load_dotenv
     load_dotenv(".env")
@@ -60,7 +61,7 @@ def _chamar_b(prompt: str, png: bytes | None = None) -> tuple[str, Any]:
             "url": "data:image/png;base64,"
                    + base64.standard_b64encode(png).decode("ascii")}})
     resp = openai.OpenAI().chat.completions.create(
-        model=modelo_b(), max_completion_tokens=4000,
+        model=modelo_b(), max_completion_tokens=max_tokens,
         messages=[{"role": "user", "content": conteudo}])
     return resp.choices[0].message.content or "", resp.usage
 
@@ -92,7 +93,12 @@ def normalizar(valor: Any) -> str:
 
 def comparar(esperado: Any, extraido: Any) -> dict[str, Any]:
     e, x = normalizar(esperado), normalizar(extraido)
-    iguais = bool(e) and (e == x or (len(e) > 6 and (e in x or x in e)))
+    # Valor curto (ex. 'a-811', 'b', '386') casa por TOKEN dentro da frase
+    # extraída — 'a-811' concorda com 't.e.l. co. survey a-811'; substring
+    # solta não basta ('1' não casa '311').
+    iguais = bool(e) and (
+        e == x or (len(e) > 6 and (e in x or x in e))
+        or e in x.split())
     return {"esperado_norm": e, "extraido_norm": x, "igual": iguais}
 
 
@@ -154,7 +160,10 @@ def verificar_lote_exhibit_a(*, repo: Any, unit: dict[str, Any],
             "sem pular linhas. Responda APENAS JSON:\n"
             '{"linhas": [{"lease_no": "...", "lessor": "...", '
             '"vol": "...", "page": "..."}]}')
-        texto, usage = chamar(prompt, png)
+        try:
+            texto, usage = chamar(prompt, png, max_tokens=9000)
+        except TypeError:                    # chamador injetado sem o param
+            texto, usage = chamar(prompt, png)
         custo.somar(usage)
         got = _json_de(texto)
         if got:
