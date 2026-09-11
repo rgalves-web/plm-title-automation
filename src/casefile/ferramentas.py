@@ -122,12 +122,26 @@ def montar_dispatch(*, acervo: Any, repo: Any, unit: dict[str, Any],
 
     def _read_knowledge(conceito: str) -> dict[str, Any]:
         local = kb_unidade.read(conceito)
-        if local.get("encontrado"):
-            return {"origem": "unidade", **local}
         alheio = kb_global.read(conceito)
+        from src.casefile.training import file_hash, legacy_candidates
+        from src.examinador.okf import slug
+        versions = []
+        for origin, card, kb in [('unidade', local, kb_unidade), ('global', alheio, kb_global)]:
+            if card.get('encontrado'):
+                path = kb.root / f'{slug(conceito)}.md'
+                versions.append({'origem': origin, 'status': 'legacy_unreviewed',
+                    'version': file_hash(path), 'source_path': str(path),
+                    'source_text': path.read_text('utf-8'), **card})
+        if session_ref.get('knowledge'):
+            repo.knowledge_event(unit['id'], session_ref['id'], 'legacy_read',
+                                 {'query': conceito, 'versions': versions})
+        if local.get("encontrado"):
+            return {"origem": "unidade", **local, 'versoes_relevantes': versions,
+                    'nota': 'Legado sem aprovacao retroativa; compare escopos e conflitos.'}
         if alheio.get("encontrado"):
-            return {"origem": "global", **alheio}
+            return {"origem": "global", **alheio, 'versoes_relevantes': versions}
         return {"origem": "nenhuma", "encontrado": False,
+                'sugestoes_por_assunto': legacy_candidates(kb_global.root, conceito),
                 "conceito": conceito,
                 "parecidas_na_unidade": local.get("fichas_parecidas", []),
                 "parecidas_globais": alheio.get("fichas_parecidas", []),
@@ -138,10 +152,21 @@ def montar_dispatch(*, acervo: Any, repo: Any, unit: dict[str, Any],
                          fontes: list[str] | None = None,
                          links: list[str] | None = None,
                          confianca: str = "") -> dict[str, Any]:
-        kb = kb_unidade if escopo == "unidade" else kb_global
-        got = kb.write(conceito, ficha, type=tipo, sources=fontes,
-                       links=links, confidence=confianca)
-        return {"escopo": escopo, **got}
+        from src.casefile.training import digest, immutable
+        from src.casefile import caneta
+        candidate = dict(conceito=conceito, corpo=ficha, tipo=tipo, escopo=escopo,
+                         fontes=fontes or [], links=links or [], confianca=confianca,
+                         status='candidate',
+                         anterior_unidade=kb_unidade.read(conceito),
+                         anterior_global=kb_global.read(conceito))
+        version = digest(candidate)
+        immutable(caneta.caminho(pasta) / 'fichas_candidatas' / f'{version}.json', candidate)
+        if session_ref.get('knowledge'):
+            repo.knowledge_event(unit['id'], session_ref['id'], 'candidate_written',
+                                 {'version': version, 'conceito': conceito, 'status': 'candidate',
+                                  'proposal': candidate})
+        return {'escopo': escopo, 'gravado': conceito, 'version': version,
+                'status': 'candidate', 'substituiu': False, 'requires_review': True}
 
     def _registrar_claims(claims: list[dict[str, Any]]) -> dict[str, Any]:
         aceitos: list[int] = []

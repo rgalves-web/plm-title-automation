@@ -1,6 +1,26 @@
 # Workbench — status de implementação
 _Dono: o Code (ordem de 23/08). Baseline vigente abaixo; tudo sob "HISTÓRICO" descreve o estado PRÉ-CONSERTO e vale como registro, não como mapa do sistema._
 
+## CASE FILE — Training Suite · 2026-09-11
+
+Integração funcional na branch `training-suite-integration`, baseline `6374eb9`.
+**1.047 testes passaram** (baseline novo: 1.018), com PostgreSQL em schemas de
+teste e sem chamadas pagas. Migração 0008 aplicada localmente; hash dos registros
+de units/claims/sessões/custos/decisões igual antes/depois. Inventário: 788 fontes,
+23 duplicatas, 652 fontes com texto, 2.618 fragmentos. Pacote: 61 candidatas,
+incluindo 40 critérios A/C/D/F/I/L, com F9 ausente como na fonte. Reimportação
+idêntica criou zero versões. Fichas antigas preservadas; consultas, aplicações
+e revisões no banco; contexto fixado por publicação; painel Training Suite.
+Fechamento de sessões e custo por resposta corrigidos; lifecycle final agora
+exige população/revisões completas e aceite do snapshot. Josh B isolada em perfil.
+
+**Nenhuma ficha nova aprovada ou ativada em unit operacional.** Restam revisão
+das candidatas, reconciliação semântica do restante e mídia não examinada.
+Ensaio roteirizado: 12/12 orientações esperadas recuperadas por assunto, versus
+0/12 pelas mesmas consultas livres no lookup por slug. Isso não mede melhoria de
+title. VS3/VS4 e saldo de APIs não foram reavaliados ou liberados.
+Artefatos, contratos, comandos e limites: [Training Suite](TRAINING_SUITE_INTEGRACAO.md).
+
 ## CASE FILE — VEREDITO CTO aplicado (auditoria) · 2026-09-02 (fim de tarde)
 
 **"Corrigir antes de avançar", zero chamadas de modelo.** Migração 0007: verificações agora gravam rastreabilidade completa (source_sha256, página, evidence_payload_sha256, prompt_sha256, resposta bruta, request_id, model_params) + status `invalidada`; `verificador.afirmar_identidade` recusa mecanicamente antes da chamada se o SHA/página renderizados ≠ os do claim. **Verification 142 invalidada como verifier_error** (o "A-1272" era alucinação do verificador; claim 128/A-811 mantido pela inspeção visual do operador) — regressão prova que a evidência entregue não contém 1272 e que verifier_error sai das métricas de título. **Métricas corrigidas**: verificacao_tentada 67 / concordante **49** / insuficiente **18** (não "67 verificadas"); tracts **4** (TOTAL excluído); wells **1** (API normalizado); saúde **ATENÇÃO** (exame interrompido + marco incompleto). **Higiene**: perguntas 7/8 respondidas, pesquisas substituídas canceladas, divergências 100/102/108/124 supersedidas, claim 111→129 (indexação local); fila **mode-aware** (4 dependências de produção fora da fila; fila acionável = 0). **Lifecycle** nos deliverables (VS3 = partial, banner STATUS). **Preflight resume-aware** (exclui as 70 verificações válidas + sessão 10 interrompida; máx restante **$4,50 ≤ $5,26** — passaria). **D0**: última atividade abrangente, imagem da evidência no drawer (`/api/claims/<id>/evidencia.png`), `python -m src.casefile dashboard`, indicador OFFLINE. `openai` no requirements; ajuda do CLI completa; 12 testes novos. `AUDIT_FIX_REPORT_VS3.md` emitido. Custo intacto **$19,74/$25**, portal $0. Suíte **1018 verdes**; commits até `18d2759`. Josh B permanece EXAMINANDO; sem avanço a VS4.

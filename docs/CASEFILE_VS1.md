@@ -1,5 +1,9 @@
 # Case File por Unit — Fundação + Vertical Slice 1 (Unit → Investigation Plan)
 
+Atualização posterior (11/09/2026): [integração da Training Suite](TRAINING_SUITE_INTEGRACAO.md),
+migração 0008, publicações/contextos versionados e revisão rastreável. O registro
+do VS1 abaixo permanece histórico.
+
 _Implementado em 2026-08-30, branch `casefile-vs1`. Direção estratégica aceita
 pelo operador: reorganizar o produto em torno de um Case File por Unit; o
 `minorh` congela e permanece para replays. Doc governante

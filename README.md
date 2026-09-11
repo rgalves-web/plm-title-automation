@@ -1,5 +1,10 @@
 # plm-title-automation
 
+**Direção vigente:** Case File por Unit em PostgreSQL (`src/casefile/`).
+Integração Training Suite: [operação, cobertura e limites](docs/TRAINING_SUITE_INTEGRACAO.md).
+Veja também [status atual](docs/WORKBENCH_STATUS.md) e [Case File](docs/CASEFILE_VS1.md).
+Os pipelines e comandos anteriores descritos abaixo permanecem como histórico e legado congelado.
+
 Local-first title automation for Purple Land Management: the **DD pipeline**
 (per-unit Due Diligence Reports for Project Emirates) and the **MOR pipeline**
 (Master Ownership Report / runsheet), operated through the **Minorh Title

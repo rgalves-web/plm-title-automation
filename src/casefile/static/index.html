@@ -137,7 +137,7 @@ async function loadUnit(id,scroll){
 const TABS=[["visao","Visão geral"],["docs","Documentos"],["pops","Populações"],
   ["cadeias","Cadeias"],["claims","Claims"],["div","Divergências"],
   ["cur","Curatives"],["ddr","DDR"],["custos","Custos"],
-  ["tl","Timeline"],["audit","Auditoria"],["fila","Fila p/ Renato"]];
+  ["tl","Timeline"],["audit","Auditoria"],["training","Training Suite"],["fila","Fila p/ Renato"]];
 
 function renderDetail(){
   const d=cache.det,u=d.unit,p=d.progresso;
@@ -162,6 +162,18 @@ window.setTab=k=>{tabSel=k;$("#tabbody").innerHTML=renderTab();
 function renderTab(){
   const d=cache.det,p=d.progresso;
   switch(tabSel){
+  case "training": {
+    const t=d.training||{contexts:[],events:[],review_coverage:[]};
+    return `<div class="sec"><h4>Orientação metodológica e cobertura</h4>
+      <p class="muted">O treinamento orienta a análise. A prova dos fatos permanece nos documentos citados pelos claims.</p>
+      ${!t.contexts.length?'<p>Nenhuma publicação fornecida a uma sessão desta unit.</p>':t.contexts.map(c=>`
+        <details><summary>Sessão ${esc(c.session_id)} · ${esc(c.manifest.status)} · publicação ${esc(c.manifest.release_id||'pendente')}</summary>
+        <pre>${esc(JSON.stringify(c.manifest,null,2))}</pre></details>`).join('')}
+      <h4>Ofertas, consultas, aplicações e lacunas</h4>
+      ${t.events.map(e=>`<details><summary>Sessão ${esc(e.session_id)} · ${esc(e.kind)} · ${esc(e.detail.rule_id||e.detail.query||'')}</summary>
+        <pre>${esc(JSON.stringify(e.detail,null,2))}</pre></details>`).join('')}
+      <h4>Critérios esperados e revisados</h4><pre>${esc(JSON.stringify(t.review_coverage,null,2))}</pre></div>`;
+  }
   case "visao":return `
     <div class="sec"><h4>Gates (condições da aprovação)</h4>
       ${d.gates.map(g=>{const[t,k]=gateBadge(g.status);
@@ -272,6 +284,7 @@ window.openClaim=async id=>{
            style="max-width:100%;border:1px solid var(--line);border-radius:4px"
            onerror="this.replaceWith(Object.assign(document.createElement('p'),{className:'muted',textContent:'página não renderizável em pixels (ex.: planilha) — ver trecho abaixo'}))"></div>
     <div class="sec"><h4>Trecho (evidência do examinador)</h4><pre>${esc(c.documento.trecho)}</pre></div>
+    <div class="sec"><h4>Orientações aplicadas, razão, lacuna e responsável</h4><pre>${esc(JSON.stringify(c.orientacoes||[],null,2))}</pre></div>
     <div class="sec"><h4>Valor do examinador</h4><pre>${esc(JSON.stringify(c.claim.value,null,1))}</pre></div>
     <div class="sec"><h4>Verificação cega</h4>
       ${c.verificacoes.length?c.verificacoes.map(v=>`<div class="gate">

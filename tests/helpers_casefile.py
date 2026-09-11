@@ -571,6 +571,41 @@ class RepoFake:
     def sessoes_da_unit(self, unit_id):
         return [s for s in self.sessions if s["unit_id"] == unit_id]
 
+    def knowledge_context(self, unit_id, session_id, manifest):
+        import copy
+        from src.casefile.training import digest
+        if not any(s['id'] == session_id and s['unit_id'] == unit_id for s in self.sessions):
+            raise ValueError('session_outside_unit')
+        if not hasattr(self, '_knowledge_contexts'):
+            self._knowledge_contexts = []
+            self._knowledge_events = []
+        old = next((c for c in self._knowledge_contexts if c['session_id'] == session_id), None)
+        if old:
+            if digest(old['manifest']) != digest(manifest):
+                raise ValueError('immutable_context_mismatch')
+            return
+        self._knowledge_contexts.append(dict(unit_id=unit_id, session_id=session_id,
+                                             manifest=copy.deepcopy(manifest)))
+
+    def knowledge_event(self, unit_id, session_id, kind, detail):
+        import copy
+        if not any(c['session_id'] == session_id for c in self.knowledge_audit(unit_id)['contexts']):
+            raise ValueError('context_outside_unit')
+        if detail.get('claim_id') is not None and not self.claim_existe(unit_id, detail['claim_id']):
+            raise ValueError('claim_outside_unit')
+        if detail.get('research_id') is not None and not any(r['id'] == detail['research_id'] and
+                r['unit_id'] == unit_id for r in self.research):
+            raise ValueError('research_outside_unit')
+        eid = len(self._knowledge_events) + 1
+        self._knowledge_events.append(dict(id=eid, unit_id=unit_id, session_id=session_id,
+                                           kind=kind, detail=copy.deepcopy(detail)))
+        return eid
+
+    def knowledge_audit(self, unit_id):
+        import copy
+        return copy.deepcopy({'contexts': [c for c in getattr(self, '_knowledge_contexts', []) if c['unit_id'] == unit_id],
+                'events': [e for e in getattr(self, '_knowledge_events', []) if e['unit_id'] == unit_id]})
+
     def decisoes_da_unit(self, unit_id):
         return [d for d in self.decisions if d["unit_id"] == unit_id]
 

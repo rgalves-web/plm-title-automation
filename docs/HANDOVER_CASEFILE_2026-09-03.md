@@ -1,5 +1,11 @@
 # HANDOVER — Case File por Unit (plm-title-automation) · 2026-09-03
 
+**Nota de 11/09/2026:** este handover é histórico. Consulte
+[Training Suite](TRAINING_SUITE_INTEGRACAO.md) para a migração 0008, correção de
+contabilização/fechamento, nova condição de lifecycle, perfil explícito Josh B
+e estado de revisão do conhecimento. Não use a antiga regra de existência de
+posição/grafo/corte como critério vigente de `final`.
+
 _Documento de passagem de bastão do agente anterior (Claude Code) para o próximo agente/desenvolvedor. Tudo o que está aqui é verificável no repositório, no banco local e na pasta da unit. Onde houver dúvida entre este documento e o código/banco, o código/banco vencem — e a divergência deve ser reportada ao operador._
 
 ---

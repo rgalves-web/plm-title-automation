@@ -10,13 +10,20 @@ A local-first title-automation system for Purple Land Management (PLM) land work
 
 **The governing architecture is LLM-first — decided by the operator on 2026-08-23. Read `docs/ARQUITETURA_GOVERNANTE.md` first; it prevails over every other document, including this one's history.** In one line: no title decision in Python; AI judges, a second AI head verifies, Python only opens files, renders pages, calls models, saves bytes — and protects bytes (see "the pen" below).
 
-Three generations coexist in the tree:
+Current direction (2026-09-11): **Case File per Unit in PostgreSQL** (`src/casefile/`).
+Training Suite implementation, coverage, activation and limitations:
+`docs/TRAINING_SUITE_INTEGRACAO.md`. No VS3 acceptance or VS4 authorization is implied.
 
-- **`src/minorh` + `src/examinador`** — the production path. CLI: `unidade`, `continuar`, `estado`, `perguntas`, `ship` (see `COMO_USAR.md`). Knowledge base in `knowledge_okf/` (OKF fichas, written and consulted by the model).
+The generations coexist in the tree:
+
+- **`src/casefile`** — current direction. Versioned methodology, sessions, claims, research and reviews flow through the database to the API/dashboard.
+- **`src/minorh` + `src/examinador`** — frozen previous path, retained for replays and plumbing imports. Legacy knowledge base in `knowledge_okf/`; Case File reads both local/global versions and writes candidates without overwriting it.
 - **`src/dd`, `src/knowledge`, MOR (`src/*.py` root)** — the frozen deterministic generations. History, regression fixtures, and a source of *plumbing* to extract (file copying, template reading, md5). They never re-enter the decision path.
 - `docs/WORKBENCH_STATUS.md` is owned by Code and records the current baseline; assessments (`FULL_SYSTEM_ASSESSMENT.md`, `SYSTEM_ASSESSMENT.md`) are historical.
 
-Current work order, when one is active: `docs/CODE_INSTRUCTIONS_CONSERTO_DEFINITIVO.md` (single order, 3 mandatory checkpoints with operator acceptance).
+Historical repair order: `docs/CODE_INSTRUCTIONS_CONSERTO_DEFINITIVO.md`.
+Later Case File decisions and the current Training Suite request govern their
+own scope; the still-applicable operator checkpoints are preserved.
 
 ---
 

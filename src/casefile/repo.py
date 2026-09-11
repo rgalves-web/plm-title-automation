@@ -7,6 +7,7 @@ julga title — inserem-se fatos, contam-se linhas, confere-se identidade.
 from __future__ import annotations
 
 from typing import Any
+from src.casefile.training_repo import TrainingRepo
 
 
 def _json(valor: Any) -> Any:
@@ -14,7 +15,7 @@ def _json(valor: Any) -> Any:
     return Json(valor)
 
 
-class Repo:
+class Repo(TrainingRepo):
     def __init__(self, conn: Any) -> None:
         self.conn = conn
 

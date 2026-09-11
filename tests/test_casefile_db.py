@@ -31,9 +31,9 @@ def test_migrar_aplica_reaplicar_e_noop_e_seeds_presentes(pg):
     assert novas == ["0001_fundacao", "0002_seed_claim_types",
                      "0003_vs2_coleta", "0004_semantica_vs2",
                      "0005_simulacao", "0006_vs3_exame",
-                     "0007_auditoria_verificacao"]
+                     "0007_auditoria_verificacao", "0008_training_suite"]
     assert migrar(pg) == []                      # reaplicar é no-op
-    assert [m["version"] for m in estado_migracoes(pg)] == [1, 2, 3, 4, 5, 6, 7]
+    assert [m["version"] for m in estado_migracoes(pg)] == [1, 2, 3, 4, 5, 6, 7, 8]
     # 11 do VS1 + `fact` ativado pela 0003 (leituras dirigidas do VS2)
     ativos = pg.execute(
         "SELECT count(*) AS n FROM claim_types WHERE active").fetchone()["n"]

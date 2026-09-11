@@ -64,3 +64,9 @@ tests/fixtures/*.xlsx
 # documents, keyed by page hash. It is a cache — re-derivable from FILES/ —
 # and it is client material (invariant 7): never commit.
 data/_page_cache/
+
+# Local confidential Training Suite sources, extracts, reviews and reports.
+data/training_suite/
+.pytest-training-*/
+scratch_baseline_training*.txt
+scratch_training_*.txt

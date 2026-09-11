@@ -29,14 +29,52 @@ def _grava(repo: Any, unit: dict[str, Any], pasta: Path, kind: str,
 
 
 def _lifecycle(repo: Any, unit: dict[str, Any]) -> str:
-    """PARTIAL enquanto o exame não fechou (posições + grafo + data de
-    corte) — nenhum consumidor trata parcial como 'latest final'."""
-    tem_posicoes = bool(repo.posicoes(unit["id"]))
-    tem_grafo = bool(repo.deliverables(unit["id"], "chain_graph_vs3"))
-    tem_corte = any("data de corte" in c["entity"].lower()
-                    for c in repo.claims_da_unit(unit["id"]))
-    return "final" if (tem_posicoes and tem_grafo and tem_corte) \
-        else "partial"
+    """Technical completeness plus explicit acceptance of the exact snapshot."""
+    status = completude(repo, unit)
+    if status['missing']:
+        return 'partial'
+    for d in reversed(repo.decisoes_da_unit(unit['id'])):
+        if d.get('kind') == 'vs3_acceptance' and d.get('decided_at'):
+            try:
+                answer = json.loads(d.get('answer') or '{}')
+            except (ValueError, TypeError):
+                continue
+            if answer.get('approved') is True and answer.get('snapshot') == status['snapshot']:
+                return 'final'
+    return 'partial'
+
+
+def completude(repo: Any, unit: dict[str, Any]) -> dict[str, Any]:
+    from src.casefile.training import digest
+    from src.casefile.training_runtime import review_coverage
+    uid = unit['id']
+    populations = {name: [m['member'] for m in repo.populacao(uid, name)]
+                   for name in repo.populacoes_contagens(uid)}
+    positions = repo.posicoes(uid)
+    expected = {f'{name}::{member}' for name, members in populations.items() for member in members}
+    present = {p['population_item'] for p in positions}
+    graphs = repo.deliverables(uid, 'chain_graph_vs3')
+    claims = repo.claims_da_unit(uid)
+    audit = repo.knowledge_audit(uid)
+    coverage = review_coverage(audit)
+    exam = [r for r in coverage if any(c['session_id'] == r['session_id'] and
+            c['manifest'].get('command') == 'exame.vs3' for c in audit['contexts'])]
+    missing = ['population:' + m for m in sorted(expected - present)]
+    if not expected:
+        missing.append('declared_population')
+    if not graphs:
+        missing.append('graph')
+    if not any('data de corte' in c['entity'].lower() for c in claims):
+        missing.append('cutoff_claim')
+    if not exam or not exam[-1]['expected']:
+        missing.append('required_review_population')
+    elif exam[-1]['missing']:
+        missing += ['criterion:' + r for r in exam[-1]['missing']]
+    snapshot = digest(json.loads(json.dumps({'populations': populations, 'positions': positions,
+                         'graph': graphs[-1]['sha256'] if graphs else None,
+                         'claims': claims, 'reviews': exam[-1] if exam else None,
+                         'verifications': repo.verificacoes(uid)}, default=str)))
+    return {'snapshot': snapshot, 'missing': missing, 'title_approved_by_code': False}
 
 
 def reconciliar(repo: Any, unit: dict[str, Any]) -> dict[str, Any]:

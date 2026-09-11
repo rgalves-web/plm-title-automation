@@ -1,5 +1,22 @@
 # BACKLOG
 
+## Atualização de 11/09/2026 — Training Suite
+
+- Resolvido no Case File: sessões interrompidas fecham em `finally`; custo de
+  cada resposta recebida é registrado antes do dispatch. Queda abrupta do SO ou
+  ausência de usage do provedor ainda exige reconciliação.
+- Resolvido: presença isolada de posição/grafo/corte não produz mais `final`.
+  População inteira e revisão registrada, mais aceite do snapshot, são exigidos.
+- Pendente: revisão/aprovação das 61 candidatas, reconciliação semântica dos
+  fragmentos restantes, inspeção de mídia e eventual avaliação com modelos reais.
+  Inventário integral e comandos: `docs/TRAINING_SUITE_INTEGRACAO.md`.
+- Fichas antigas da unit que representam grupos precisam de cobertura explícita
+  por `population::member` antes de um novo aceite técnico do VS3. Não migrar
+  automaticamente a interpretação de grupos por heurística de nomes.
+
+O backlog anterior abaixo é preservado como histórico; as duas correções acima
+substituem seus apontamentos abertos correspondentes.
+
 Findings that do **not** change the current target's deliverable. Per CLAUDE.md
 invariant 17 they do not become commits — they wait here until they do.
 

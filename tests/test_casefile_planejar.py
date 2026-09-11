@@ -113,7 +113,9 @@ def test_vs1_fim_a_fim(ambiente, capsys):
                           f"log_{s['command']}.json")
                          .read_text(encoding="utf-8"))
         assert log["turnos"] >= 1
-    assert len(repo.costs) == 2
+    # Per-response accounting survives interrupted sessions; totals still agree.
+    assert {c['detail']['session_id'] for c in repo.costs} == {s['id'] for s in repo.sessions}
+    assert repo.custo_acumulado(unit['id']) == round(sum(s['cost_usd'] for s in repo.sessions), 4)
     assert repo.custo_acumulado(unit["id"]) > 0
 
     # a caneta: nada novo fora de _casefile/

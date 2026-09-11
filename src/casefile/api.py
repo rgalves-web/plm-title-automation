@@ -246,6 +246,7 @@ def unit_detalhe(unit_id: int, repo: Any = Depends(get_repo)
                    "orcamento": custo_mod.teto_unit(),
                    "teto_coleta": portal.teto_coleta()},
         "progresso": _progresso(repo, unit_id),
+        "training": unit_training(unit_id, repo),
         "deliverables": {
             kind: [_linha(d) for d in repo.deliverables(unit_id, kind)]
             for kind in ("relatorio_coleta_vs2", "reconciliacao_recordings",
@@ -253,6 +254,14 @@ def unit_detalhe(unit_id: int, repo: Any = Depends(get_repo)
                          "claims_ready_vs3", "unresolved_vs3",
                          "coverage_vs3", "cost_vs3")},
     }
+
+
+@app.get("/api/units/{unit_id}/training")
+def unit_training(unit_id: int, repo: Any = Depends(get_repo)) -> dict[str, Any]:
+    from src.casefile.training_runtime import review_coverage
+    _unit_ou_404(repo, unit_id)
+    audit = repo.knowledge_audit(unit_id)
+    return {**audit, 'review_coverage': review_coverage(audit)}
 
 
 @app.get("/api/units/{unit_id}/claims")
@@ -285,6 +294,8 @@ def claim_detalhe(claim_id: int, repo: Any = Depends(get_repo)
              if c["source_sha256"] in shas]
     return {
         "claim": _linha(c),
+        "orientacoes": [e for e in repo.knowledge_audit(c['unit_id'])['events']
+                         if e['kind'] == 'applied' and e['detail'].get('claim_id') == claim_id],
         "documento": {"sha256": c["source_sha256"], "nomes": nomes[:5],
                       "pagina": c["page"], "trecho": c["evidence"]},
         "examinador": {"modelo": sess.get("model", ""),
