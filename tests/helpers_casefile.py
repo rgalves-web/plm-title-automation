@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from tests.helpers_orquestracao import OrquestracaoFake
+
 # --- cliente roteirizado (padrão de test_minorh_etapa_h.py) -----------------
 
 
@@ -104,7 +106,7 @@ def conectar_pg_ou_skip():
     return conn, schema
 
 
-class RepoFake:
+class RepoFake(OrquestracaoFake):
     """A interface de Repo, em memória. Encanamento fiel, sem SQL."""
 
     def __init__(self) -> None:
