@@ -32,6 +32,11 @@
                                               (http://localhost:8788)
     python -m src.casefile avancar ["<unit>"] coleta_concluida — RECUSA com
                                               gate pendente
+    python -m src.casefile agentes validar|listar [--raiz=DIR]
+                                              fichas OKF de agentes/: valida
+                                              forma (sai != 0 com erro) ou
+                                              lista funcoes/pacotes/licoes
+                                              com versao (sem modelo)
 
 Teto duro por unit: US$ 25 (`CASEFILE_TETO_UNIT_USD`). Ao bater, qualquer
 comando com modelo recusa, reporta e espera ordem — nunca estoura em silêncio.
@@ -832,8 +837,13 @@ def main(argv: list[str] | None = None) -> None:
         cmd_dashboard(int(_flag(resto, "porta") or "8788"))
     elif comando == "avancar":
         cmd_avancar(_nome_de(resto))
+    elif comando == "agentes":
+        from src.casefile import agentes
+        codigo = agentes.cmd_agentes(resto)
+        if codigo:
+            raise SystemExit(codigo)
     else:
         raise SystemExit(f"comando desconhecido: {comando!r}. Comandos: db, "
                          f"indicar, planejar, plano, aprovar, rejeitar, "
                          f"estado, unidades, coletar, gates, reconciliar, "
-                         f"examinar, dashboard, avancar.")
+                         f"examinar, dashboard, avancar, agentes.")

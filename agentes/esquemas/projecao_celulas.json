@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://plm.local/agentes/esquemas/projecao_celulas.json",
+  "title": "projecao_celulas",
+  "description": "Saída do Redator: células do template com proveniência e brancos declarados.",
+  "$comment": "Formato existente: derived_cells (0001: sheet, cell_ref, value, claim_ids). Ficha redator.md: regra 1 (nenhuma célula sem proveniência → claim_ids com pelo menos 1), regra 4 (branco com motivo e dono). A recusa de célula com fórmula é da caneta (código), não do esquema.",
+  "type": "object",
+  "required": ["celulas", "brancos"],
+  "additionalProperties": false,
+  "properties": {
+    "celulas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["sheet", "cell_ref", "value", "claim_ids"],
+        "additionalProperties": false,
+        "properties": {
+          "sheet": {"type": "string", "minLength": 1},
+          "cell_ref": {"type": "string", "pattern": "^\\$?[A-Z]{1,3}\\$?[1-9][0-9]*$"},
+          "value": {"type": ["string", "number", "boolean"]},
+          "claim_ids": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 1, "uniqueItems": true}
+        }
+      }
+    },
+    "brancos": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["sheet", "cell_ref", "motivo", "dono"],
+        "additionalProperties": false,
+        "properties": {
+          "sheet": {"type": "string", "minLength": 1},
+          "cell_ref": {"type": "string", "pattern": "^\\$?[A-Z]{1,3}\\$?[1-9][0-9]*$"},
+          "motivo": {"type": "string", "minLength": 1},
+          "dono": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

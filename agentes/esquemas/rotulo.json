@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://plm.local/agentes/esquemas/rotulo.json",
+  "title": "rotulo",
+  "description": "Saída do Classificador: o que o documento é e a que se vincula, com trecho literal.",
+  "$comment": "Ficha classificador.md, seção Saída: sha256, categoria do vocabulário fechado do pacote, vínculo (unit/tract/lease), trecho literal, confiança, unplaced com motivo; regra 3 (alocacao_pendente). Enum de confiança e `resumo` seguem triage_labels (0001). `categoria` não é enum aqui: o vocabulário fechado é do pacote e ainda não existe para surface (pendência 2 do pacote).",
+  "type": "object",
+  "required": ["sha256", "categoria", "vinculo", "trecho", "confianca"],
+  "additionalProperties": false,
+  "properties": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "categoria": {"type": "string", "minLength": 1},
+    "resumo": {"type": "string"},
+    "vinculo": {
+      "type": "object",
+      "required": ["estado"],
+      "additionalProperties": false,
+      "properties": {
+        "unit": {"type": "string"},
+        "tract": {"type": "string"},
+        "lease": {"type": "string"},
+        "estado": {"enum": ["vinculado", "alocacao_pendente", "sem_vinculo"]},
+        "motivo": {"type": "string"}
+      },
+      "if": {"properties": {"estado": {"const": "alocacao_pendente"}}},
+      "then": {"required": ["motivo"], "properties": {"motivo": {"minLength": 1}}}
+    },
+    "trecho": {"type": "string", "minLength": 1},
+    "pagina": {"type": "string"},
+    "confianca": {"enum": ["alta", "media", "baixa"]},
+    "motivo_unplaced": {"type": "string"}
+  },
+  "if": {"properties": {"categoria": {"const": "unplaced"}}, "required": ["categoria"]},
+  "then": {"required": ["motivo_unplaced"], "properties": {"motivo_unplaced": {"minLength": 1}}}
+}

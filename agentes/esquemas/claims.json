@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://plm.local/agentes/esquemas/claims.json",
+  "title": "claims",
+  "description": "Saída do Examinador: claims com citação literal.",
+  "$comment": "Formato existente: entrada de src/casefile/validacao.py::validar_claim (tipo, entidade, valor, documento, pagina, trecho, confianca, materialidade; enums de 0001_fundacao.sql). `valor.tipo_resultado` e seu vocabulário: src/casefile/exame_vs3.py::TIPOS_RESULTADO. `celulas_candidatas`/`limitacoes`: ferramenta propor_claims_ddr (0006, claims.ddr_candidates/limitations). `tipo` não é enum: o vocabulário ativo vive em claim_types (0002) e é conferido em runtime por validar_claim.",
+  "type": "object",
+  "required": ["claims"],
+  "additionalProperties": false,
+  "properties": {
+    "claims": {"type": "array", "items": {"$ref": "#/$defs/claim"}}
+  },
+  "$defs": {
+    "claim": {
+      "type": "object",
+      "required": ["tipo", "entidade", "valor", "documento", "pagina", "trecho", "confianca"],
+      "additionalProperties": false,
+      "properties": {
+        "tipo": {"type": "string", "minLength": 1},
+        "entidade": {"type": "string", "minLength": 1},
+        "valor": {
+          "type": "object",
+          "required": ["tipo_resultado"],
+          "properties": {
+            "tipo_resultado": {"enum": ["fato_documental", "inferencia", "conclusao_titulo", "divergencia", "nao_verificavel", "documento_ausente", "impedido_pela_simulacao"]}
+          }
+        },
+        "documento": {"type": "string", "minLength": 1, "$comment": "nome lógico do censo ou sha256:<64 hex>, como em validar_claim"},
+        "pagina": {"type": "string", "minLength": 1},
+        "trecho": {"type": "string", "minLength": 1},
+        "confianca": {"enum": ["alta", "media", "baixa"]},
+        "materialidade": {"enum": ["alta", "media", "baixa"], "default": "media"},
+        "celulas_candidatas": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "limitacoes": {"type": "string"}
+      }
+    }
+  }
+}

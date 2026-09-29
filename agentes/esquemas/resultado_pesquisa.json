@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://plm.local/agentes/esquemas/resultado_pesquisa.json",
+  "title": "resultado_pesquisa",
+  "description": "Saída do Pesquisador: achados, buscas negativas com população declarada e pedidos de captura.",
+  "$comment": "Ficha pesquisador.md, seção Saída (encontrados, busca_negativa, pedidos_de_captura) e regras 1 e 3 (população, intervalo, tipos, variantes; saldo do portal antes/depois). Busca negativa segue a tabela negative_searches (0003) e repo.registrar_busca: target, terms (lista de nomes/variantes), scope, names_scanned, hits; `result` não é da saída, nasce pendente_julgamento. populacao, intervalo, tipos_documentais e cobertura_fonte vêm da ficha (invariante 12).",
+  "type": "object",
+  "required": ["fonte", "encontrados", "busca_negativa", "pedidos_de_captura"],
+  "additionalProperties": false,
+  "properties": {
+    "fonte": {"type": "string", "minLength": 1},
+    "encontrados": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["referencia_registro", "tipo", "localizador"],
+        "additionalProperties": false,
+        "properties": {
+          "referencia_registro": {"type": "string", "minLength": 1},
+          "tipo": {"type": "string", "minLength": 1},
+          "data": {"type": "string"},
+          "partes": {"type": "array", "items": {"type": "string"}},
+          "localizador": {"type": "string", "minLength": 1},
+          "custo_previsto_captura_usd": {"type": "number", "minimum": 0}
+        }
+      }
+    },
+    "busca_negativa": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["target", "terms", "scope", "populacao", "intervalo", "tipos_documentais", "cobertura_fonte"],
+        "additionalProperties": false,
+        "properties": {
+          "target": {"type": "string", "minLength": 1},
+          "terms": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},
+          "scope": {"type": "string", "minLength": 1},
+          "names_scanned": {"type": "integer", "minimum": 0},
+          "hits": {"type": "array", "items": {"type": "object"}},
+          "populacao": {"type": "string", "minLength": 1},
+          "intervalo": {
+            "type": "object",
+            "required": ["de", "ate"],
+            "additionalProperties": false,
+            "properties": {"de": {"type": "string", "minLength": 1}, "ate": {"type": "string", "minLength": 1}}
+          },
+          "tipos_documentais": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},
+          "cobertura_fonte": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "pedidos_de_captura": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["referencia_registro", "localizador"],
+        "additionalProperties": false,
+        "properties": {
+          "referencia_registro": {"type": "string", "minLength": 1},
+          "localizador": {"type": "string", "minLength": 1},
+          "custo_previsto_usd": {"type": "number", "minimum": 0},
+          "motivo": {"type": "string"}
+        }
+      }
+    },
+    "saldo_portal": {
+      "type": "object",
+      "required": ["antes", "depois"],
+      "additionalProperties": false,
+      "properties": {"antes": {"type": "number"}, "depois": {"type": "number"}, "unidade": {"type": "string"}}
+    }
+  }
+}

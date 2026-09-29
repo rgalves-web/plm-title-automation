@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://plm.local/agentes/esquemas/documento_registrado.json",
+  "title": "documento_registrado",
+  "description": "Saída do Arquivista: documento capturado, conferido, nomeado e com hash.",
+  "$comment": "Ficha arquivista.md, seção Saída: sha256, nome canônico, número de páginas, checagens (margens, rodapé, ordem, legibilidade), caminho em staging, estado capturado_completo | rejeitado com motivo. sha256 em hex puro de 64 caracteres, como collection_items.sha256 (0003). O ciclo de estados da regra 3 (identificado … vinculado) não coincide com collection_items.status; ver divergências.",
+  "type": "object",
+  "required": ["nome_canonico", "paginas", "checagens", "estado"],
+  "additionalProperties": false,
+  "properties": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "nome_canonico": {"type": "string", "minLength": 1},
+    "paginas": {"type": "integer", "minimum": 1},
+    "checagens": {
+      "type": "object",
+      "required": ["margens", "rodape", "ordem", "legibilidade"],
+      "additionalProperties": false,
+      "properties": {
+        "margens": {"type": "boolean"},
+        "rodape": {"type": "boolean"},
+        "ordem": {"type": "boolean"},
+        "legibilidade": {"type": "boolean"},
+        "nota": {"type": "string"}
+      }
+    },
+    "caminho_staging": {"type": "string", "minLength": 1},
+    "estado": {"enum": ["capturado_completo", "rejeitado"]},
+    "motivo": {"type": "string"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"estado": {"const": "rejeitado"}}, "required": ["estado"]},
+      "then": {"required": ["motivo"], "properties": {"motivo": {"minLength": 1}}}
+    },
+    {
+      "if": {"properties": {"estado": {"const": "capturado_completo"}}, "required": ["estado"]},
+      "then": {
+        "required": ["sha256", "caminho_staging"],
+        "properties": {"checagens": {"properties": {"margens": {"const": true}, "rodape": {"const": true}, "ordem": {"const": true}, "legibilidade": {"const": true}}}}
+      }
+    }
+  ]
+}

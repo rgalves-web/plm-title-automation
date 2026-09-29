@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://plm.local/agentes/esquemas/plano_tarefas.json",
+  "title": "plano_tarefas",
+  "description": "Saída do Coordenador: grafo de tarefas com dependências e orçamento.",
+  "$comment": "Ficha coordenador.md, seção Saída: role, title, input_json, acceptance, depends_on, budget_usd, priority, justificativa. `ref` (identificador local da tarefa no plano) é acréscimo necessário para depends_on apontar para tarefas ainda sem id no banco. `gate` vem da exigência 'justificativa citando o gate do pacote' (regra 1). `parada` vem da regra 6. Nomes das colunas seguem a tabela tasks proposta em ARQUITETURA_AGENTICA_v1 §6.",
+  "type": "object",
+  "required": ["tarefas"],
+  "additionalProperties": false,
+  "properties": {
+    "tarefas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["ref", "role", "title", "input_json", "acceptance", "depends_on", "budget_usd", "priority", "justificativa"],
+        "additionalProperties": false,
+        "properties": {
+          "ref": {"type": "string", "minLength": 1},
+          "role": {"enum": ["coordenador", "pesquisador", "arquivista", "classificador", "examinador", "verificador", "arbitro", "redator", "qa_pacote", "retrospectivo"]},
+          "title": {"type": "string", "minLength": 1},
+          "input_json": {"type": "object"},
+          "acceptance": {"type": "string", "minLength": 1},
+          "depends_on": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+          "budget_usd": {"type": "number", "minimum": 0},
+          "priority": {"type": "integer"},
+          "gate": {"type": "string"},
+          "justificativa": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "parada": {
+      "type": "object",
+      "required": ["declarada"],
+      "additionalProperties": false,
+      "properties": {
+        "declarada": {"type": "boolean"},
+        "dependencias_externas": {"type": "array", "items": {"type": "string"}},
+        "decisoes_do_operador": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

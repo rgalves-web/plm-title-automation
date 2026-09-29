@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://plm.local/agentes/esquemas/fichas_candidatas.json",
+  "title": "fichas_candidatas",
+  "description": "Saída do Retrospectivo: lições candidatas (draft) separadas dos fatos da unit.",
+  "$comment": "Ficha retrospectivo.md, seção Saída: regra, interpretação, escopo, condições, exceções e sources estruturadas; separação lição de método × fato da unit; regras 1–3. Campos de cabeçalho (type Lesson, funcao, escopo.pacote, sources resource/id, status draft) seguem o validador de Lesson desta etapa. `generated` e `verified` são carimbados pelo código ao gravar a ficha, não pelo modelo.",
+  "type": "object",
+  "required": ["fichas", "fatos_da_unit"],
+  "additionalProperties": false,
+  "properties": {
+    "fichas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "title", "description", "status", "funcao", "escopo", "destino", "regra", "interpretacao", "sources"],
+        "additionalProperties": false,
+        "properties": {
+          "type": {"const": "Lesson"},
+          "title": {"type": "string", "minLength": 1},
+          "description": {"type": "string", "minLength": 1},
+          "status": {"const": "draft"},
+          "funcao": {"type": "string", "minLength": 1},
+          "escopo": {
+            "type": "object",
+            "required": ["pacote"],
+            "properties": {"pacote": {"type": "string", "minLength": 1}, "fonte": {"type": "string"}}
+          },
+          "destino": {"enum": ["pacote", "nucleo"]},
+          "regra": {"type": "string", "minLength": 1},
+          "interpretacao": {"type": "string", "minLength": 1},
+          "condicoes": {"type": "array", "items": {"type": "string"}},
+          "excecoes": {"type": "array", "items": {"type": "string"}},
+          "sources": {"$ref": "#/$defs/sources"}
+        }
+      }
+    },
+    "fatos_da_unit": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["descricao", "sources"],
+        "additionalProperties": false,
+        "properties": {
+          "descricao": {"type": "string", "minLength": 1},
+          "sources": {"$ref": "#/$defs/sources"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["resource", "id"],
+        "properties": {"resource": {"type": "string", "minLength": 1}, "id": {"type": "string", "minLength": 1}}
+      }
+    }
+  }
+}

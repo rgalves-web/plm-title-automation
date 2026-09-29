@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://plm.local/agentes/esquemas/relatorio_qa.json",
+  "title": "relatorio_qa",
+  "description": "Saída do Controlador de qualidade do pacote: estado real item por item.",
+  "$comment": "Ficha qa_pacote.md, seção Checagens (lista fechada abaixo) e Regra (nunca declara pronto com item faltando: pronto=true exige nenhum item em falha ou pendente). lifecycle segue deliverable_versions.lifecycle (0007: draft | partial | final).",
+  "type": "object",
+  "required": ["lifecycle", "itens", "pronto"],
+  "additionalProperties": false,
+  "properties": {
+    "lifecycle": {"enum": ["draft", "partial", "final"]},
+    "pronto": {"type": "boolean"},
+    "itens": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["checagem", "estado", "detalhe"],
+        "additionalProperties": false,
+        "properties": {
+          "checagem": {"enum": ["estrutura_formatacao", "formulas_hash", "pdf_por_linha", "datas_partes_referencias", "duplicatas", "controles_internos", "links", "lifecycle"]},
+          "alvo": {"type": "string"},
+          "estado": {"enum": ["ok", "falha", "pendente", "nao_aplicavel"]},
+          "detalhe": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  },
+  "if": {"properties": {"pronto": {"const": true}}, "required": ["pronto"]},
+  "then": {
+    "properties": {
+      "itens": {"items": {"properties": {"estado": {"enum": ["ok", "nao_aplicavel"]}}}}
+    }
+  }
+}
