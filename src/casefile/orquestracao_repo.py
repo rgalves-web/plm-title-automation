@@ -280,6 +280,65 @@ class OrquestracaoRepo:
             "SELECT claim_id FROM task_claims WHERE task_id = %s "
             "ORDER BY claim_id", (task_id,)).fetchall()]
 
+    # --- propostas de grafo do Coordenador ---------------------------------
+    def registrar_proposta(self, unit_id: int, task_id: int,
+                           run_id: int | None, pack: str, plan: Any,
+                           targets: Any, coverage: Any) -> int:
+        """Grava a proposta; propostas ainda abertas da unit viram
+        `substituida` (preservadas, nunca apagadas)."""
+        from src.casefile.repo import _json
+        with self.conn.transaction():
+            self.conn.execute(
+                "UPDATE plan_proposals SET status = 'substituida' "
+                "WHERE unit_id = %s AND status = 'proposta'", (unit_id,))
+            return self.conn.execute(
+                "INSERT INTO plan_proposals (unit_id, task_id, run_id, pack, "
+                "plan, targets, coverage) VALUES (%s, %s, %s, %s, %s, %s, %s) "
+                "RETURNING id",
+                (unit_id, task_id, run_id, pack, _json(plan), _json(targets),
+                 _json(coverage))).fetchone()["id"]
+
+    def proposta(self, proposal_id: int) -> dict[str, Any] | None:
+        return self.conn.execute(
+            "SELECT * FROM plan_proposals WHERE id = %s",
+            (proposal_id,)).fetchone()
+
+    def propostas(self, unit_id: int) -> list[dict[str, Any]]:
+        return self.conn.execute(
+            "SELECT * FROM plan_proposals WHERE unit_id = %s ORDER BY id",
+            (unit_id,)).fetchall()
+
+    def aprovar_proposta(self, proposal_id: int,
+                         linhas: list[dict[str, Any]], criado_por: str,
+                         decidido_por: str, nota: str) -> list[dict[str, Any]]:
+        """proposta → aprovada e criação das tarefas na MESMA transação."""
+        with self.conn.transaction():
+            got = self.conn.execute(
+                "SELECT unit_id, status FROM plan_proposals WHERE id = %s "
+                "FOR UPDATE", (proposal_id,)).fetchone()
+            if got is None or got["status"] != "proposta":
+                raise TransicaoInvalida(
+                    f"proposta {proposal_id} não está aberta "
+                    f"({got and got['status']!r})")
+            criadas = self.criar_tarefas(got["unit_id"], linhas, criado_por)
+            self.conn.execute(
+                "UPDATE plan_proposals SET status = 'aprovada', "
+                "decided_by = %s, decided_at = now(), decision_note = %s, "
+                "applied_task_ids = %s WHERE id = %s",
+                (decidido_por, nota, [t["id"] for t in criadas],
+                 proposal_id))
+        return criadas
+
+    def recusar_proposta(self, proposal_id: int, decidido_por: str,
+                         nota: str) -> None:
+        got = self.conn.execute(
+            "UPDATE plan_proposals SET status = 'recusada', decided_by = %s, "
+            "decided_at = now(), decision_note = %s WHERE id = %s "
+            "AND status = 'proposta' RETURNING id",
+            (decidido_por, nota, proposal_id)).fetchone()
+        if got is None:
+            raise TransicaoInvalida(f"proposta {proposal_id} não está aberta")
+
     # --- escalonamentos ------------------------------------------------------
     def abrir_escalonamento(self, unit_id: int, task_id: int | None,
                             motivo: str, pergunta: str,

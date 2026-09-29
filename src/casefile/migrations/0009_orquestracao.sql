@@ -104,3 +104,28 @@ CREATE TABLE escalations (
   created_at     timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX ON escalations (unit_id) WHERE respondido_em IS NULL;
+
+-- Proposta de grafo do Coordenador (correção da etapa D): a saída válida
+-- do Coordenador NÃO cria tarefas; fica aqui como proposta até o operador
+-- aprovar ou recusar. Recusada ou substituída, a proposta é preservada.
+CREATE TABLE plan_proposals (
+  id               bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  unit_id          bigint NOT NULL REFERENCES units,
+  task_id          bigint NOT NULL REFERENCES tasks,
+  run_id           bigint REFERENCES task_runs,
+  pack             text   NOT NULL DEFAULT '',
+  plan             jsonb  NOT NULL,
+  targets          jsonb  NOT NULL DEFAULT '{}',
+  coverage         jsonb  NOT NULL DEFAULT '{}',
+  status           text   NOT NULL DEFAULT 'proposta' CHECK (status IN
+                     ('proposta','aprovada','recusada','substituida')),
+  decided_by       text   NOT NULL DEFAULT '',
+  decided_at       timestamptz,
+  decision_note    text   NOT NULL DEFAULT '',
+  applied_task_ids bigint[] NOT NULL DEFAULT '{}',
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  CHECK (status NOT IN ('aprovada','recusada')
+         OR (decided_by <> '' AND decided_at IS NOT NULL
+             AND decision_note <> ''))
+);
+CREATE INDEX ON plan_proposals (unit_id, status);

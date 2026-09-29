@@ -40,9 +40,14 @@
     python -m src.casefile trabalhar ["<unit>"] [--max=N]
                                               worker generico: executa
                                               tarefas prontas COM MODELO
-    python -m src.casefile cobertura ["<unit>"] [--versao=N]
+    python -m src.casefile cobertura ["<unit>"] [--versao=N] [--proposta=N]
                                               pendencias do plano x tarefas
-                                              (sem modelo)
+                                              ou x proposta (sem modelo)
+    python -m src.casefile propostas ["<unit>"] propostas do Coordenador
+    python -m src.casefile aprovar-proposta|recusar-proposta --id=N
+                        --por=<operador> --nota="..."
+                                              decisao explicita; so a
+                                              aprovacao cria tarefas
     python -m src.casefile agentes validar|listar [--raiz=DIR]
                                               fichas OKF de agentes/: valida
                                               forma (sai != 0 com erro) ou
@@ -249,6 +254,7 @@ def cmd_coordenar(nome: str, pacote: str, orcamento: float,
     from src.casefile import coordenacao
     repo = repo or _repo()
     unit = _unit_de(repo, nome)
+    project_profile.require_supported(repo, unit, "coordenar")
     n = 1 + sum(1 for t in repo.tarefas(unit["id"])
                 if t["role"] == "coordenador")
     t = coordenacao.semear_coordenador(
@@ -257,7 +263,8 @@ def cmd_coordenar(nome: str, pacote: str, orcamento: float,
         ref=f"coordenador-{n}")
     print(f"tarefa {t['ref']} ({t['status']}) — pacote {pacote}, "
           f"orcamento ${orcamento:.2f}; rode `trabalhar` para executar "
-          f"(chama modelo, custa).")
+          f"(chama modelo, custa). A saída vira PROPOSTA: nenhuma tarefa "
+          f"nasce antes de `aprovar-proposta`.")
     _fecho(repo, unit)
 
 
@@ -267,6 +274,7 @@ def cmd_trabalhar(nome: str, maximo: int, repo: Any = None,
     from src.casefile import worker
     repo = repo or _repo()
     unit = _unit_de(repo, nome)
+    project_profile.require_supported(repo, unit, "trabalhar")
     got = worker.executar_ate_parar(repo, unit["id"], "human:operador/cli",
                                     teto=custo.teto_unit(),
                                     max_tarefas=maximo, client=client)
@@ -276,24 +284,33 @@ def cmd_trabalhar(nome: str, maximo: int, repo: Any = None,
               f"{e['modelo']} ${e['custo_usd']:.4f}"
               + (f" · {len(e['gravados'])} gravado(s)" if e["gravados"]
                  else "")
+              + (f" · PROPOSTA #{e['proposta_id']} aguarda aprovação"
+                 if e.get("proposta_id") else "")
               + (f" · ERROS: {e['erros'][0]}" if e["erros"] else ""))
     print(f"parada: {got['parada']} · custo desta chamada "
           f"${got['custo_usd']:.4f}")
     _fecho(repo, unit)
 
 
-def cmd_cobertura(nome: str, versao: int | None, repo: Any = None) -> None:
-    """Pendências do plano de investigação × tarefas (conta referências)."""
+def cmd_cobertura(nome: str, versao: int | None, repo: Any = None,
+                  proposta: int | None = None) -> None:
+    """Pendências do plano de investigação × tarefas criadas ou × uma
+    proposta (conta referências; não julga se a tarefa resolve)."""
     from src.casefile import coordenacao
     repo = repo or _repo()
     unit = _unit_de(repo, nome)
     alvos = coordenacao.alvos_do_plano(repo, unit["id"], versao)
-    tarefas = [t for t in repo.tarefas(unit["id"])
-               if t["role"] != "coordenador"]
+    if proposta is not None:
+        tarefas = repo.proposta(proposta)["plan"]["tarefas"]
+        origem = f"proposta #{proposta}"
+    else:
+        tarefas = [t for t in repo.tarefas(unit["id"])
+                   if t["role"] != "coordenador"]
+        origem = "tarefas criadas"
     c = coordenacao.cobertura(tarefas, alvos,
                               coordenacao.pendencias_validas(repo, unit["id"]))
-    print(f"cobertura: {len(c['cobertos'])}/{c['alvos']} pendências abertas "
-          f"do plano citadas por tarefas "
+    print(f"cobertura ({origem}, plano v{alvos['plano_versao']}): "
+          f"{len(c['cobertos'])}/{c['alvos']} pesquisas abertas citadas "
           f"({'COMPLETA' if c['completa'] else 'INCOMPLETA'})")
     for a, refs in c["cobertos"].items():
         print(f"  {a:<14} <- {', '.join(refs)}")
@@ -304,6 +321,35 @@ def cmd_cobertura(nome: str, versao: int | None, repo: Any = None) -> None:
     if alvos["canceladas"]:
         print(f"  (canceladas pelo operador, fora do alvo: "
               f"{', '.join(alvos['canceladas'])})")
+
+
+def cmd_propostas(nome: str, repo: Any = None) -> None:
+    """Propostas de grafo do Coordenador da unit (leitura)."""
+    repo = repo or _repo()
+    unit = _unit_de(repo, nome)
+    for p in repo.propostas(unit["id"]):
+        c = p["coverage"] or {}
+        print(f"  #{p['id']} {p['status']:<11} tarefa {p['task_id']} · "
+              f"{len(p['plan'].get('tarefas', []))} tarefas · cobertura "
+              f"{len(c.get('cobertos', {}))}/{c.get('alvos', '?')}"
+              + (f" · {p['decided_by']} em {str(p['decided_at'])[:19]}: "
+                 f"{p['decision_note']}" if p["decided_by"] else ""))
+
+
+def cmd_decidir_proposta(proposta: int, aprovar: bool, por: str, nota: str,
+                         repo: Any = None) -> None:
+    """Aprovação/recusa EXPLÍCITA do operador (sem modelo)."""
+    from src.casefile import coordenacao
+    repo = repo or _repo()
+    ator = por if por.startswith("human:") else f"human:{por}"
+    if aprovar:
+        criadas = coordenacao.aprovar_proposta(
+            repo, proposta, ator=ator, nota=nota, teto=custo.teto_unit())
+        print(f"proposta #{proposta} APROVADA por {ator}: "
+              f"{len(criadas)} tarefa(s) criada(s)")
+    else:
+        coordenacao.recusar_proposta(repo, proposta, ator=ator, nota=nota)
+        print(f"proposta #{proposta} RECUSADA por {ator} (preservada)")
 
 
 def cmd_unidades(repo: Any = None) -> None:
@@ -943,7 +989,19 @@ def main(argv: list[str] | None = None) -> None:
         cmd_trabalhar(_nome_de(resto), int(_flag(resto, "max") or "50"))
     elif comando == "cobertura":
         versao = _flag(resto, "versao")
-        cmd_cobertura(_nome_de(resto), int(versao) if versao else None)
+        prop = _flag(resto, "proposta")
+        cmd_cobertura(_nome_de(resto), int(versao) if versao else None,
+                      proposta=int(prop) if prop else None)
+    elif comando == "propostas":
+        cmd_propostas(_nome_de(resto))
+    elif comando in ("aprovar-proposta", "recusar-proposta"):
+        pid, por, nota = (_flag(resto, "id"), _flag(resto, "por"),
+                          _flag(resto, "nota"))
+        if not (pid and por and nota):
+            raise SystemExit(f"uso: {comando} --id=N --por=<operador> "
+                             f"--nota=\"motivo\"")
+        cmd_decidir_proposta(int(pid), comando == "aprovar-proposta", por,
+                             nota)
     elif comando == "agentes":
         from src.casefile import agentes
         codigo = agentes.cmd_agentes(resto)
@@ -954,4 +1012,5 @@ def main(argv: list[str] | None = None) -> None:
                          f"indicar, planejar, plano, aprovar, rejeitar, "
                          f"estado, unidades, coletar, gates, reconciliar, "
                          f"examinar, dashboard, avancar, tarefas, coordenar, "
-                         f"trabalhar, cobertura, agentes.")
+                         f"trabalhar, cobertura, propostas, aprovar-proposta, "
+                         f"recusar-proposta, agentes.")

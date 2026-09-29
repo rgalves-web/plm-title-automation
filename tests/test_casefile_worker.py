@@ -68,6 +68,8 @@ def _entrega(saida, uid="u1"):
     return [Use("entregar_saida", {"saida": saida}, id=uid)]
 
 
+PROJECAO = {"celulas": [], "brancos": []}
+
 PESQUISA = {"fonte": "CountyRecords", "encontrados": [{
     "referencia_registro": "OR 50/611", "tipo": "deed",
     "localizador": "Terrell OR 50/611"}], "busca_negativa": [{
@@ -195,7 +197,7 @@ def test_ficha_e_a_lista_de_permissao_de_ferramentas(repo, unit):
 # --- falhas viram estado, nunca silêncio -------------------------------------------
 
 def test_sem_entrega_tres_vezes_vira_recusada(repo, unit):
-    _planejar(repo, unit, _t("co", "coordenador"))
+    _planejar(repo, unit, _t("co", "redator"))
     cliente = Cliente([[Texto("pensei, mas não entreguei")]] * 3)
     for n in (1, 2, 3):
         r = wk.executar_uma(repo, unit["id"], "w1", teto=TETO, client=cliente)
@@ -215,7 +217,7 @@ def test_entrega_invalida_nao_grava_claims(repo, unit):
 
 
 def test_erro_do_modelo_fecha_o_run_e_conta_o_gasto(repo, unit):
-    _planejar(repo, unit, _t("co", "coordenador"))
+    _planejar(repo, unit, _t("co", "redator"))
 
     class Quebra(Cliente):
         def create(self, **kw):
@@ -229,28 +231,28 @@ def test_erro_do_modelo_fecha_o_run_e_conta_o_gasto(repo, unit):
     run = repo.run(r["run_id"])
     assert run["stop_reason"] == "erro_do_modelo"
     assert r["parada"].startswith("erro_do_modelo: RuntimeError")
-    esperado = round((10 * 5.0 + 5 * 25.0) / 1e6, 4)     # 1 turno de opus
+    esperado = round((10 * 3.0 + 5 * 15.0) / 1e6, 4)     # 1 turno de sonnet
     assert run["cost_usd"] == esperado == r["custo_usd"]
     assert r["tarefa"]["status"] == "pronta"
 
 
 def test_custo_por_tarifa_da_tabela_e_no_livro_da_unit(repo, unit):
-    _planejar(repo, unit, _t("co", "coordenador"))
-    cliente = Cliente([_entrega({"tarefas": []}), [Texto("ok")]])
+    _planejar(repo, unit, _t("co", "redator"))
+    cliente = Cliente([_entrega(PROJECAO), [Texto("ok")]])
     r = wk.executar_uma(repo, unit["id"], "w1", teto=TETO, client=cliente)
-    rate = RATES["claude-opus-5"]
+    rate = RATES["claude-sonnet-5"]
     esperado = round((20 * rate["input"] + 10 * rate["output"]) / 1e6, 4)
     run = repo.run(r["run_id"])
     assert run["cost_usd"] == esperado and run["model_family"] == "A"
     assert run["tokens_in"] == 20 and run["tokens_out"] == 10
     assert len(run["prompt_sha256"]) == 64
     assert repo.custo_acumulado(unit["id"]) == esperado
-    assert r["tarefa"]["status"] == "aceita"
+    assert r["tarefa"]["status"] == "aguardando_operador"   # redator
 
 
 def test_trava_perdida_no_meio_nao_vale_mas_o_gasto_conta(repo, unit):
-    _planejar(repo, unit, _t("co", "coordenador"))
-    cliente = Cliente([[Use("entregar_saida", {"saida": {"tarefas": []}})],
+    _planejar(repo, unit, _t("co", "redator"))
+    cliente = Cliente([[Use("entregar_saida", {"saida": PROJECAO})],
                        [Texto("ok")]])
 
     real = repo.renovar_lease
@@ -274,7 +276,7 @@ def test_trava_perdida_no_meio_nao_vale_mas_o_gasto_conta(repo, unit):
 
 
 def test_teto_para_o_replay(repo, unit):
-    _planejar(repo, unit, _t("a", "coordenador"), _t("b", "coordenador"))
+    _planejar(repo, unit, _t("a", "redator"), _t("b", "redator"))
     repo.registrar_custo(unit["id"], "vs3", TETO, {})
     got = wk.executar_ate_parar(repo, unit["id"], "w1", teto=TETO,
                                 client=Cliente([]))
@@ -283,25 +285,29 @@ def test_teto_para_o_replay(repo, unit):
 
 
 def test_executar_ate_parar_roda_a_cadeia(repo, unit):
-    _planejar(repo, unit, _t("a", "coordenador"),
-              _t("b", "coordenador", deps=["a"]),
-              _t("c", "coordenador", deps=["b"]))
-    cliente = Cliente([_entrega({"tarefas": []}), [Texto("ok")]] * 3)
-    got = wk.executar_ate_parar(repo, unit["id"], "w1", teto=TETO,
-                                client=cliente)
-    assert [e["tarefa"]["ref"] for e in got["execucoes"]] == ["a", "b", "c"]
-    assert got["parada"] == "sem tarefa pronta para este worker"
+    """Cada elo espera o aceite do operador (redator: modo operador); o
+    worker nunca aceita nada sozinho."""
+    _planejar(repo, unit, _t("a", "redator"),
+              _t("b", "redator", deps=["a"]),
+              _t("c", "redator", deps=["b"]))
+    cliente = Cliente([_entrega(PROJECAO), [Texto("ok")]] * 3)
+    for ref in ("a", "b", "c"):
+        got = wk.executar_ate_parar(repo, unit["id"], "w1", teto=TETO,
+                                    client=cliente)
+        assert [e["tarefa"]["ref"] for e in got["execucoes"]] == [ref]
+        assert got["parada"] == "sem tarefa pronta para este worker"
+        assert got["custo_usd"] == got["execucoes"][0]["custo_usd"]
+        orq.decidir(repo, got["execucoes"][0]["tarefa"]["id"], aceitar=True,
+                    ator="human:renato", nota="projeção conferida")
     assert {t["status"] for t in repo.tarefas(unit["id"])} == {"aceita"}
-    assert got["custo_usd"] == round(
-        sum(e["custo_usd"] for e in got["execucoes"]), 4)
 
 
 def test_modelo_sem_tarifa_nao_roda(repo, unit):
-    _planejar(repo, unit, _t("co", "coordenador"))
+    _planejar(repo, unit, _t("co", "redator"))
     with pytest.raises(ValueError, match="modelo_sem_tarifa"):
         wk.executar_uma(repo, unit["id"], "w1", teto=TETO,
                         client=Cliente([]),
-                        modelos={"forte": "modelo-desconhecido"})
+                        modelos={"medio": "modelo-desconhecido"})
 
 
 def test_modelo_por_nivel_segue_a_decisao_do_operador():
@@ -314,9 +320,95 @@ def test_modelo_por_nivel_segue_a_decisao_do_operador():
 
 def test_cli_tarefas_lista_o_grafo(repo, unit, capsys, monkeypatch):
     from src.casefile import cli
-    _planejar(repo, unit, _t("a", "coordenador"),
-              _t("b", "coordenador", deps=["a"]))
+    _planejar(repo, unit, _t("a", "redator"),
+              _t("b", "redator", deps=["a"]))
     cli.cmd_tarefas(unit["canonical_name"], repo=repo)
     saida = capsys.readouterr().out
     assert "2 tarefa(s)" in saida
     assert "depende de a" in saida and "pronta" in saida
+
+
+# --- teto real de custo (correção da etapa D, item 4) --------------------------
+
+class ClienteCaro(Cliente):
+    """Resposta com uso grande: força o teto a agir entre chamadas."""
+
+    def __init__(self, roteiro, entrada_tokens):
+        super().__init__(roteiro)
+        self.entrada_tokens = entrada_tokens
+
+    def create(self, **kw):
+        from tests.helpers_casefile import Msg, _Uso
+        self.chamadas.append(dict(kw, messages=list(kw["messages"])))
+        return Msg(content=self.roteiro.pop(0),
+                   usage=_Uso(input_tokens=self.entrada_tokens,
+                              output_tokens=10))
+
+
+def test_orcamento_zero_nao_chama_modelo(repo, unit):
+    _planejar(repo, unit, _t("r0", "redator", budget=0.0))
+    cliente = Cliente([])                      # qualquer chamada quebraria
+    r = wk.executar_uma(repo, unit["id"], "w1", teto=TETO, client=cliente)
+    assert cliente.chamadas == [] and r["custo_usd"] == 0.0
+    assert r["parada"] == "sem_saldo" and r["limite_usd"] == 0.0
+    assert r["tarefa"]["status"] == "bloqueada"
+    run = repo.run(r["run_id"])
+    assert run["stop_reason"] == "sem_saldo" and run["output_valid"] is None
+    [e] = repo.escalonamentos(unit["id"], abertos=True)
+    assert e["motivo"] == "orcamento_tarefa"
+    assert repo.custo_acumulado(unit["id"]) == 0.0
+
+
+def test_saldo_menor_que_o_pior_caso_da_primeira_chamada_nao_chama(repo,
+                                                                   unit):
+    _planejar(repo, unit, _t("r1", "redator", budget=0.01))
+    cliente = Cliente([])
+    r = wk.executar_uma(repo, unit["id"], "w1", teto=TETO, client=cliente)
+    assert cliente.chamadas == []
+    assert r["parada"].startswith("teto_da_tarefa") and \
+        r["tarefa"]["status"] == "bloqueada"
+    assert repo.run(r["run_id"])["cost_usd"] == 0.0
+
+
+def test_teto_para_antes_da_chamada_que_passaria_do_saldo(repo, unit):
+    # 1ª resposta custa $0,75 (250k tokens de entrada no Sonnet); o pior
+    # caso da 2ª (~$0,13) passaria de $0,80 → a 2ª chamada não é feita
+    _planejar(repo, unit, _t("r2", "redator", budget=0.80))
+    cliente = ClienteCaro([_entrega(PROJECAO), [Texto("ok")]], 250_000)
+    r = wk.executar_uma(repo, unit["id"], "w1", teto=TETO, client=cliente)
+    assert len(cliente.chamadas) == 1
+    assert r["parada"].startswith("teto_da_tarefa")
+    assert r["custo_usd"] == round((250_000 * 3.0 + 10 * 15.0) / 1e6, 4)
+    assert r["custo_usd"] <= 0.80
+    assert r["tarefa"]["status"] == "aguardando_operador"   # entregou antes
+
+
+def test_saldo_da_unit_limita_mais_que_o_da_tarefa(repo, unit):
+    _planejar(repo, unit, _t("r3", "redator", budget=2.0))
+    repo.registrar_custo(unit["id"], "vs3", TETO - 0.005, {})
+    cliente = Cliente([])
+    r = wk.executar_uma(repo, unit["id"], "w1", teto=TETO, client=cliente)
+    assert cliente.chamadas == [] and r["limite_usd"] == 0.005
+    assert r["tarefa"]["status"] == "bloqueada"
+
+
+def test_saldo_da_tarefa_desconta_runs_anteriores(repo, unit):
+    _planejar(repo, unit, _t("r4", "redator", budget=0.80))
+    r1 = wk.executar_uma(repo, unit["id"], "w1", teto=TETO,
+                         client=ClienteCaro([[Texto("sem entrega")]],
+                                            250_000))
+    assert r1["tarefa"]["status"] == "pronta"            # sem_entrega
+    cliente = Cliente([])
+    r2 = wk.executar_uma(repo, unit["id"], "w1", teto=TETO, client=cliente)
+    assert r2["limite_usd"] == round(0.80 - r1["custo_usd"], 6)
+    assert cliente.chamadas == []                        # 0,05 < pior caso
+    assert r2["tarefa"]["status"] == "bloqueada"
+
+
+def test_estimativa_e_conservadora_e_cresce_com_a_carga():
+    kw = {"system": [{"type": "text", "text": "a" * 3000}], "messages": [],
+          "tools": [], "max_tokens": 8000}
+    base = wk.estimar_chamada(kw, "claude-sonnet-5")
+    assert base >= 8000 * 15.0 / 1e6
+    kw["messages"] = [{"role": "user", "content": "b" * 30000}]
+    assert wk.estimar_chamada(kw, "claude-sonnet-5") > base

@@ -20,7 +20,7 @@ class OrquestracaoFake:
         if not hasattr(self, "_orq_estado"):
             self._orq_estado = {"versoes": {}, "tasks": [], "trans": [],
                                 "runs": [], "task_claims": set(),
-                                "escal": []}
+                                "escal": [], "props": []}
         return self._orq_estado
 
     # --- versões ------------------------------------------------------------
@@ -234,6 +234,54 @@ class OrquestracaoFake:
     def claims_da_tarefa(self, task_id):
         return sorted(c for t, c in self._orq()["task_claims"]
                       if t == task_id)
+
+    # --- propostas de grafo -------------------------------------------------
+    def registrar_proposta(self, unit_id, task_id, run_id, pack, plan,
+                           targets, coverage):
+        props = self._orq()["props"]
+        for p in props:
+            if p["unit_id"] == unit_id and p["status"] == "proposta":
+                p["status"] = "substituida"
+        props.append({"id": len(props) + 1, "unit_id": unit_id,
+                      "task_id": task_id, "run_id": run_id, "pack": pack,
+                      "plan": copy.deepcopy(plan),
+                      "targets": copy.deepcopy(targets),
+                      "coverage": copy.deepcopy(coverage),
+                      "status": "proposta", "decided_by": "",
+                      "decided_at": None, "decision_note": "",
+                      "applied_task_ids": [], "created_at": _agora()})
+        return props[-1]["id"]
+
+    def _prop(self, proposal_id):
+        props = self._orq()["props"]
+        return props[proposal_id - 1] if 0 < proposal_id <= len(props)             else None
+
+    def proposta(self, proposal_id):
+        return copy.deepcopy(self._prop(proposal_id))
+
+    def propostas(self, unit_id):
+        return [copy.deepcopy(p) for p in self._orq()["props"]
+                if p["unit_id"] == unit_id]
+
+    def aprovar_proposta(self, proposal_id, linhas, criado_por, decidido_por,
+                         nota):
+        p = self._prop(proposal_id)
+        if p is None or p["status"] != "proposta":
+            raise TransicaoInvalida(
+                f"proposta {proposal_id} não está aberta "
+                f"({p and p['status']!r})")
+        criadas = self.criar_tarefas(p["unit_id"], linhas, criado_por)
+        p.update(status="aprovada", decided_by=decidido_por,
+                 decided_at=_agora(), decision_note=nota,
+                 applied_task_ids=[t["id"] for t in criadas])
+        return criadas
+
+    def recusar_proposta(self, proposal_id, decidido_por, nota):
+        p = self._prop(proposal_id)
+        if p is None or p["status"] != "proposta":
+            raise TransicaoInvalida(f"proposta {proposal_id} não está aberta")
+        p.update(status="recusada", decided_by=decidido_por,
+                 decided_at=_agora(), decision_note=nota)
 
     # --- escalonamentos -----------------------------------------------------
     def abrir_escalonamento(self, unit_id, task_id, motivo, pergunta, opcoes):

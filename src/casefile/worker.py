@@ -14,7 +14,13 @@ Fronteiras:
 - Verificador não roda aqui até o operador decidir o formato da saída dele
   (divergência 2 do checkpoint A) — a tarefa fica `pronta`, intocada;
 - o custo de cada run entra no livro da unit pelo `fechar_run`; se o run se
-  perdeu (trava vencida e retomada), o custo entra do mesmo jeito.
+  perdeu (trava vencida e retomada), o custo entra do mesmo jeito;
+- teto real: o limite do run é o menor saldo entre tarefa e unit; ≤ 0 não
+  chama modelo; antes de CADA chamada, gasto + pior caso estimado da
+  resposta não pode passar do limite (estimativa, não exatidão — ver
+  docs/ARQUITETURA_AGENTICA_ETAPA_D.md §4);
+- saída de `plano_tarefas` vira PROPOSTA (plan_proposals), nunca tarefas;
+- unit com perfil surface (Cibola) é recusada antes de qualquer efeito.
 """
 from __future__ import annotations
 
@@ -185,16 +191,18 @@ def _gravar_claims(repo: Any, task: dict[str, Any], saida: Any,
 
 def _checar_plano(repo: Any, task: dict[str, Any], saida: Any, *,
                   teto: float, raiz: Any) -> list[str]:
-    return orq.checar_plano(repo, task["unit_id"], saida, teto=teto,
-                            pacote=task.get("pack", ""), raiz=raiz)
+    from src.casefile import coordenacao
+    return coordenacao.checar_proposta(repo, task["unit_id"], saida,
+                                       teto=teto, pacote=task.get("pack", ""),
+                                       raiz=raiz)
 
 
 def _gravar_plano(repo: Any, task: dict[str, Any], saida: Any,
-                  session_id: int, *, teto: float, raiz: Any) -> list[int]:
-    criadas = orq.planejar(repo, task["unit_id"], saida,
-                           criado_por=f"coordenador/tarefa:{task['id']}",
-                           teto=teto, pacote=task.get("pack", ""), raiz=raiz)
-    return [t["id"] for t in criadas]
+                  session_id: int, *, run_id: int | None = None,
+                  **_: Any) -> list[int]:
+    """NÃO cria tarefas: guarda a PROPOSTA para o operador decidir."""
+    from src.casefile import coordenacao
+    return [coordenacao.registrar_proposta(repo, task, saida, run_id=run_id)]
 
 
 VALIDADORES: dict[str, Callable[..., list[str]]] = {
@@ -203,17 +211,52 @@ GRAVADORES: dict[str, Callable[..., list[int]]] = {
     "claims": _gravar_claims, "plano_tarefas": _gravar_plano}
 
 
+def ferramentas_padrao(repo: Any, task: dict[str, Any]
+                       ) -> dict[str, tuple[dict[str, Any], Callable]]:
+    """Ferramentas que o próprio código implementa para uma função. A ficha
+    continua sendo a lista de permissão (só se expõe o que ela declara)."""
+    if task["role"] == "coordenador":
+        from src.casefile import coordenacao
+        return coordenacao.ferramentas_do_coordenador(repo, task["unit_id"])
+    return {}
+
+
 # --- executar ---------------------------------------------------------------------
 
-class _ClienteContado:
-    """Soma o uso de cada resposta ANTES de o laço seguir: se a execução
-    cai no meio (erro da API, trava perdida), o gasto já está contado."""
+class TetoDaTarefa(RuntimeError):
+    """A próxima chamada poderia passar do saldo da tarefa: não é feita."""
 
-    def __init__(self, inner: Any, uso: Usage) -> None:
+
+def estimar_chamada(kw: dict[str, Any], modelo: str) -> float:
+    """Pior caso de UMA resposta antes de pedi-la: entrada ~ caracteres/3
+    (conservador: sem desconto de cache, imagem em base64 conta como texto)
+    + max_tokens inteiro de saída. É estimativa — a tokenização real e o
+    cache da API fazem o custo real divergir (em geral para menos)."""
+    rate = RATES[modelo]
+    carga = json.dumps({k: kw.get(k) for k in ("system", "messages", "tools")},
+                       ensure_ascii=False, default=str)
+    return (len(carga) / 3 * rate["input"]
+            + int(kw.get("max_tokens") or 0) * rate["output"]) / 1_000_000
+
+
+class _ClienteContado:
+    """Soma o uso de cada resposta ANTES de o laço seguir (erro da API ou
+    trava perdida não apagam o gasto) e recusa a próxima chamada quando o
+    gasto + o pior caso estimado dela passaria do teto da tarefa."""
+
+    def __init__(self, inner: Any, uso: Usage, modelo: str,
+                 teto: float) -> None:
         self.inner, self.uso, self.turnos = inner, uso, 0
+        self.modelo, self.teto = modelo, teto
         self.messages = self
 
     def create(self, **kw: Any) -> Any:
+        gasto = self.uso.cost(self.modelo) or 0.0
+        previsto = estimar_chamada(kw, self.modelo)
+        if gasto + previsto > self.teto:
+            raise TetoDaTarefa(
+                f"teto_da_tarefa: gasto ${gasto:.4f} + pior caso da próxima "
+                f"chamada ${previsto:.4f} > teto ${self.teto:.4f}")
         msg = self.inner.messages.create(**kw)
         self.uso.add(msg.usage)
         self.turnos += 1
@@ -224,6 +267,17 @@ def _sha(texto: str) -> str:
     return hashlib.sha256(texto.encode("utf-8")).hexdigest()
 
 
+def teto_do_run(repo: Any, task: dict[str, Any], run: dict[str, Any],
+                teto_unit: float) -> float:
+    """O menor entre o saldo da TAREFA (budget − runs anteriores) e o saldo
+    da UNIT. Zero ou negativo = nenhuma chamada paga."""
+    gasto_tarefa = sum(r["cost_usd"] for r in repo.runs_da_tarefa(task["id"])
+                       if r["id"] != run["id"])
+    saldo_tarefa = float(task["budget_usd"]) - gasto_tarefa
+    saldo_unit = teto_unit - repo.custo_acumulado(task["unit_id"])
+    return round(min(saldo_tarefa, saldo_unit), 6)
+
+
 def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
                  client: Any = None, raiz: str | Path | None = None,
                  ferramentas: dict[str, tuple[dict[str, Any], Callable]] | None = None,
@@ -231,21 +285,55 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
                  lease_segundos: int = orq.LEASE_PADRAO_S,
                  max_turnos: int = MAX_TURNOS_PADRAO) -> dict[str, Any] | None:
     """Uma tarefa, do `pegar` ao `entregar`. None quando não há tarefa pronta
-    para este worker. TetoAtingido sobe (pendentes já bloqueadas)."""
+    para este worker. TetoAtingido sobe (pendentes já bloqueadas). Unit com
+    perfil surface é recusada antes de qualquer efeito."""
+    from src.casefile import coordenacao
+    coordenacao.exigir_etapa_suportada(repo, unit_id, "trabalhar")
     got = orq.pegar(repo, unit_id, worker, teto=teto, raiz=raiz,
                     lease_segundos=lease_segundos,
                     excluir_roles=FUNCOES_FORA_DO_WORKER)
     if got is None:
         return None
     task, run = got
-    ferramentas = ferramentas or {}
+    ferramentas = {**ferramentas_padrao(repo, task), **(ferramentas or {})}
     ctx = montar_contexto(task, raiz=raiz,
                           ferramentas_disponiveis=set(ferramentas))
     nivel = ctx["funcao"].front["nivel_modelo"]
     modelo = (modelos or MODELO_POR_NIVEL)[nivel]
     if modelo not in RATES:
+        repo.fechar_run(run["id"], worker, output_json=None,
+                        output_valid=None, validation_errors=[],
+                        stop_reason="modelo_sem_tarifa", para="pronta",
+                        nota=f"modelo sem tarifa: {modelo}")
         raise ValueError(f"modelo_sem_tarifa: {modelo!r} — custo invisível "
                          f"não roda")
+
+    limite = teto_do_run(repo, task, run, teto)
+
+    def _bloquear(motivo: str, nota: str, **meta: Any) -> dict[str, Any]:
+        # sem saldo para (mais) uma chamada: nenhuma chamada paga começa; a
+        # tarefa para e o operador é avisado (orçamento zero ou insuficiente
+        # nunca vira execução ilimitada nem tentativa repetida)
+        t = repo.fechar_run(run["id"], worker, output_json=None,
+                            output_valid=None, validation_errors=[],
+                            stop_reason=motivo, para="bloqueada", nota=nota,
+                            **meta)
+        repo.abrir_escalonamento(
+            unit_id, task["id"], "orcamento_tarefa",
+            f"Tarefa {task['ref']!r} sem saldo para chamar modelo ({nota}). "
+            f"Aumentar o orçamento da tarefa ou cancelar?",
+            ["aumentar orçamento", "cancelar a tarefa"])
+        return {"tarefa": t, "run_id": run["id"], "erros": [nota],
+                "teto_atingido": False, "modelo": modelo,
+                "custo_usd": meta.get("cost_usd", 0.0), "parada": motivo,
+                "entregas": 0, "gravados": [], "proposta_id": None,
+                "limite_usd": limite, "licoes": ctx["licoes"],
+                "indisponiveis": ctx["indisponiveis"]}
+
+    if limite <= 0:
+        return _bloquear("sem_saldo",
+                         f"orcamento_da_tarefa_esgotado: saldo ${limite:.4f} "
+                         f"(budget ${task['budget_usd']:.2f})")
 
     checar = VALIDADORES.get(task["output_schema"])
     validar_extra = (lambda t, s: checar(repo, t, s, teto=teto, raiz=raiz)
@@ -272,20 +360,22 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
         from src.examinador.loop import _client
         client = _client()
     uso = Usage()
-    contado = _ClienteContado(client, uso)
+    contado = _ClienteContado(client, uso, modelo, limite)
     falha = ""
     perdido: TransicaoInvalida | None = None
     try:
         log, _ = run_loop(system=ctx["sistema"], task=ctx["tarefa"],
                           tools=tools, dispatch=dispatch, model=modelo,
-                          max_turns=max_turnos,
-                          max_cost_usd=task["budget_usd"] or None,
+                          max_turns=max_turnos, max_cost_usd=limite,
                           on_turn=_renovar, client=contado)
         parada = log.stop_reason
     except TransicaoInvalida as exc:              # trava perdida no meio
         perdido, parada = exc, f"trava_perdida: {exc}"
+    except TetoDaTarefa as exc:                   # parou ANTES de pedir
+        parada, falha = str(exc), "teto_da_tarefa"
     except Exception as exc:                      # o run não fica órfão
-        parada = falha = f"erro_do_modelo: {exc.__class__.__name__}: {exc}"
+        parada = f"erro_do_modelo: {exc.__class__.__name__}: {exc}"
+        falha = "erro_do_modelo"
     custo = uso.cost(modelo) or 0.0
     repo.fechar_sessao(session_id, parada, contado.turnos,
                        uso.to_dict(modelo), custo, "")
@@ -293,12 +383,18 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
         _custo_perdido(repo, unit_id, task, run, custo)
         raise perdido
 
-    motivo = ("erro_do_modelo" if falha else
-              "sem_entrega" if entrega["entregas"] == 0 else "")
     meta = {"model": modelo, "model_family": FAMILIA,
             "prompt_sha256": _sha(ctx["sistema"] + "\n\n" + ctx["tarefa"]),
             "tokens_in": uso.input + uso.cache_write + uso.cache_read,
             "tokens_out": uso.output, "cost_usd": custo}
+    if falha == "teto_da_tarefa" and entrega["entregas"] == 0:
+        return _bloquear("teto_da_tarefa", parada, **meta)
+    if falha == "erro_do_modelo":
+        motivo = falha
+    elif entrega["entregas"] == 0:
+        motivo = falha or "sem_entrega"
+    else:
+        motivo = ""
     try:
         res = orq.entregar(repo, run["id"], worker, entrega["saida"],
                            teto=teto, raiz=raiz, validar_extra=validar_extra,
@@ -312,23 +408,29 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
     if not res["erros"] and gravar is not None:
         try:
             gravados = gravar(repo, task, entrega["saida"], session_id,
-                              teto=teto, raiz=raiz)
+                              teto=teto, raiz=raiz, run_id=run["id"])
         except (orq.PlanoInvalido, validacao.ClaimInvalido, ValueError) as exc:
             # validou na entrega e falhou ao gravar (o estado mudou no meio):
             # nada fica aceito por omissão — volta ao operador, com motivo.
             atual = repo.tarefa(task["id"])
-            res["tarefa"] = repo.transicionar_tarefa(
-                task["id"], (atual["status"],), "aguardando_operador", ATOR,
-                f"saida_valida_nao_gravada: {exc}")
+            if atual["status"] != "aguardando_operador":
+                res["tarefa"] = repo.transicionar_tarefa(
+                    task["id"], (atual["status"],), "aguardando_operador",
+                    ATOR, f"saida_valida_nao_gravada: {exc}")
             repo.abrir_escalonamento(
                 unit_id, task["id"], "gravacao",
                 f"A saída da tarefa {task['ref']!r} passou na validação mas "
                 f"não pôde ser gravada: {exc}", ["reexecutar", "recusar"])
             res["erros"] = [f"saida_valida_nao_gravada: {exc}"]
+            gravados = []
+    proposta = gravados[0] if gravados and \
+        task["output_schema"] == "plano_tarefas" else None
     return {"tarefa": res["tarefa"], "run_id": run["id"],
             "erros": res["erros"], "teto_atingido": res["teto_atingido"],
             "modelo": modelo, "custo_usd": custo, "parada": parada,
-            "entregas": entrega["entregas"], "gravados": gravados,
+            "entregas": entrega["entregas"],
+            "gravados": [] if proposta else gravados,
+            "proposta_id": proposta, "limite_usd": limite,
             "licoes": ctx["licoes"], "indisponiveis": ctx["indisponiveis"]}
 
 

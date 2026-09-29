@@ -49,6 +49,9 @@ DESTINO_SAIDA_VALIDA = {
     "operador": "aguardando_operador",
 }
 EM_ABERTO = ("planejada", "pronta", "em_execucao")
+# Saídas que NUNCA se aceitam sem o operador, qualquer que seja o `verifica`
+# da ficha: um grafo de tarefas decide o que a firma vai gastar e fazer.
+ESQUEMAS_COM_ACEITE_HUMANO = frozenset({"plano_tarefas"})
 
 CAMPOS_ENTRADA_VERIFICADOR = frozenset(
     {"tarefa_verificada", "claim_id", "claim_type", "source_sha256",
@@ -196,10 +199,11 @@ def checar_plano(repo: Any, unit_id: int, plano: dict[str, Any], *,
     return []
 
 
-def planejar(repo: Any, unit_id: int, plano: dict[str, Any], *,
-             criado_por: str, teto: float, pacote: str = "",
-             raiz: str | Path | None = None) -> list[dict[str, Any]]:
-    """Grava o grafo de tarefas de um `plano_tarefas`. Tudo ou nada."""
+def linhas_do_plano(repo: Any, unit_id: int, plano: dict[str, Any], *,
+                    teto: float, pacote: str = "",
+                    raiz: str | Path | None = None) -> list[dict[str, Any]]:
+    """Checa o plano e devolve as linhas prontas para `criar_tarefas`, em
+    ordem topológica. Não grava."""
     ordem, funcoes = _checar(repo, unit_id, plano, teto=teto, pacote=pacote,
                              raiz=raiz)
     linhas = []
@@ -216,6 +220,17 @@ def planejar(repo: Any, unit_id: int, plano: dict[str, Any], *,
             "pendencias": list(t.get("pendencias", [])),
             "justificativa": (f"[{t['gate']}] " if t.get("gate") else "")
             + t["justificativa"]})
+    return linhas
+
+
+def planejar(repo: Any, unit_id: int, plano: dict[str, Any], *,
+             criado_por: str, teto: float, pacote: str = "",
+             raiz: str | Path | None = None) -> list[dict[str, Any]]:
+    """Grava o grafo de tarefas de um `plano_tarefas`. Tudo ou nada.
+    Uso direto só por quem já tem a autoridade (operador, semeadura); a
+    saída do Coordenador passa por `coordenacao.aprovar_proposta`."""
+    linhas = linhas_do_plano(repo, unit_id, plano, teto=teto, pacote=pacote,
+                             raiz=raiz)
     criadas = repo.criar_tarefas(unit_id, linhas, criado_por)
     repo.promover_prontas(unit_id, ATOR)
     return [repo.tarefa(t["id"]) for t in criadas]
@@ -277,6 +292,9 @@ def entregar(repo: Any, run_id: int, worker: str, saida: Any, *,
         nota = (f"saida_fora_do_esquema ({invalidas}/"
                 f"{MAX_RETENTATIVAS + 1}): {erros[0]}")
         motivo = motivo_invalida or "saida_invalida"
+    elif task["output_schema"] in ESQUEMAS_COM_ACEITE_HUMANO:
+        para, motivo = "aguardando_operador", "concluida"
+        nota = "proposta aguarda aprovação explícita do operador"
     else:
         para = DESTINO_SAIDA_VALIDA[task["verificacao"]]
         nota, motivo = "", "concluida"

@@ -30,7 +30,16 @@ def unit(repo, tmp_path):
     return unit_de_teste(repo, tmp_path / "UNIT")
 
 
-def _t(ref, role="coordenador", deps=(), budget=1.0, prio=1, entrada=None):
+# Função genérica dos testes de plumbing: o Verificador (verifica
+# nao_aplicavel → aceita direto). O Coordenador não serve mais para isso:
+# a saída dele nunca é aceita sem o operador (ESQUEMAS_COM_ACEITE_HUMANO).
+VERIF = {"claim_id": 1, "question": "q", "verdict": "concordancia",
+         "verifier_model": "gpt", "verifier_value": {},
+         "source_sha256": "a" * 64, "page": "1", "prompt_sha256": "b" * 64,
+         "raw_response": "{}", "request_id": "", "status": "valida"}
+
+
+def _t(ref, role="verificador", deps=(), budget=1.0, prio=1, entrada=None):
     return {"ref": ref, "role": role, "title": f"tarefa {ref}",
             "input_json": entrada or {}, "acceptance": "saída no esquema",
             "depends_on": list(deps), "budget_usd": budget, "priority": prio,
@@ -52,7 +61,7 @@ def _rodar(repo, unit, worker="w1", saida=None, **meta):
     assert got is not None
     task, run = got
     res = orq.entregar(repo, run["id"], worker,
-                       {"tarefas": []} if saida is None else saida,
+                       VERIF if saida is None else saida,
                        teto=TETO, **meta)
     return task, run, res
 
@@ -165,7 +174,7 @@ def test_verificador_sai_quando_a_tarefa_verificada_aguarda_verificacao(
     ent = {"tarefa_verificada": "ex", "pergunta": "Quem é o grantor?"}
     _planejar(repo, unit, _t("ex", role="examinador"),
               _t("v", role="verificador", deps=["ex"], entrada=ent),
-              _t("co", deps=["ex"]))
+              _t("co", role="redator", deps=["ex"]))
     _rodar(repo, unit, saida=CLAIM_SAIDA)
     assert _status(repo, unit) == {"ex": "aguardando_verificacao",
                                    "v": "planejada", "co": "planejada"}
@@ -202,8 +211,8 @@ def test_queda_do_worker_libera_a_tarefa_sem_perda(repo, unit):
     assert [x["note"] for x in repo.transicoes_da_tarefa(t1["id"])
             ].count("lease expirado") == 1
     with pytest.raises(TransicaoInvalida):
-        orq.entregar(repo, r1["id"], "w1", {"tarefas": []}, teto=TETO)
-    res = orq.entregar(repo, r2["id"], "w2", {"tarefas": []}, teto=TETO)
+        orq.entregar(repo, r1["id"], "w1", VERIF, teto=TETO)
+    res = orq.entregar(repo, r2["id"], "w2", VERIF, teto=TETO)
     assert res["tarefa"]["status"] == "aceita"
 
 
@@ -215,7 +224,7 @@ def test_trava_viva_nao_e_roubada_e_renovacao_e_do_dono(repo, unit):
     with pytest.raises(TransicaoInvalida):
         repo.renovar_lease(run["id"], "w2", 600)
     with pytest.raises(TransicaoInvalida):
-        orq.entregar(repo, run["id"], "w2", {"tarefas": []}, teto=TETO)
+        orq.entregar(repo, run["id"], "w2", VERIF, teto=TETO)
 
 
 # --- regra 3: saída contra o esquema ------------------------------------------
@@ -225,7 +234,7 @@ def test_saida_invalida_volta_com_erro_nomeado_ate_duas_vezes(repo, unit):
     for n in (1, 2):
         task, run, res = _rodar(repo, unit, saida={"tarefas": "nao-lista"})
         assert res["tarefa"]["status"] == "pronta"
-        assert res["erros"] and "tarefas" in res["erros"][0]
+        assert res["erros"] and "required property" in res["erros"][0]
         fechado = repo.run(run["id"])
         assert fechado["output_valid"] is False
         assert fechado["stop_reason"] == "saida_invalida"
@@ -437,3 +446,12 @@ def test_modo_verificacao_mapeia_e_cai_no_conservador():
         "obrigatoria_e_operador"
     for v in ("amostral", "gate_de_captura", "operador_em_material", "", None):
         assert orq.modo_verificacao(v) == "operador"
+
+
+def test_saida_do_coordenador_nunca_e_aceita_sem_o_operador(repo, unit):
+    """A ficha do Coordenador diz `verifica: nao`; ainda assim um grafo de
+    tarefas espera o operador (regra de código, não de ficha)."""
+    _planejar(repo, unit, _t("co", role="coordenador"))
+    _, _, res = _rodar(repo, unit, saida={"tarefas": []})
+    assert res["tarefa"]["verificacao"] == "nenhuma"
+    assert res["tarefa"]["status"] == "aguardando_operador"
