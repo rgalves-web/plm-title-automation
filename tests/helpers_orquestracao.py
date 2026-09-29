@@ -7,7 +7,8 @@ import copy
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from src.casefile.orquestracao_repo import PENDENTES, TransicaoInvalida
+from src.casefile.orquestracao_repo import (PENDENTES, VERIFICADOR,
+                                             TransicaoInvalida)
 
 
 def _agora() -> datetime:
@@ -112,7 +113,9 @@ class OrquestracaoFake:
         ids = []
         for t in self._orq()["tasks"]:
             if t["unit_id"] == unit_id and t["status"] == "planejada" and \
-                    all(self._t(d)["status"] == "aceita"
+                    all(self._t(d)["status"] == "aceita" or (
+                        t["role"] == VERIFICADOR
+                        and self._t(d)["status"] == "aguardando_verificacao")
                         for d in t["depends_on"]):
                 t.update(status="pronta", updated_at=_agora())
                 self._log_tarefa(t["id"], "planejada", "pronta", actor,
@@ -144,10 +147,11 @@ class OrquestracaoFake:
         return sorted(ids)
 
     def pegar_tarefa(self, unit_id, worker, versoes_funcao, versoes_pacote,
-                     lease_segundos):
+                     lease_segundos, excluir_roles=()):
         prontas = sorted((t for t in self._orq()["tasks"]
                           if t["unit_id"] == unit_id
-                          and t["status"] == "pronta"),
+                          and t["status"] == "pronta"
+                          and t["role"] not in excluir_roles),
                          key=lambda t: (t["priority"], t["id"]))
         if not prontas:
             return None

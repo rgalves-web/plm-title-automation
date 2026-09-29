@@ -13,6 +13,7 @@ from decimal import Decimal
 from typing import Any
 
 PENDENTES = ("planejada", "pronta")
+VERIFICADOR = "verificador"
 
 
 class TransicaoInvalida(AssertionError):
@@ -127,14 +128,19 @@ class OrquestracaoRepo:
             (task_id,)).fetchall()
 
     def promover_prontas(self, unit_id: int, actor: str) -> list[int]:
-        """planejada → pronta quando TODAS as dependências estão aceitas."""
+        """planejada → pronta quando TODAS as dependências estão aceitas.
+        Exceção única: para o Verificador, dependência em
+        aguardando_verificacao basta — é a tarefa que ele vai verificar, e
+        ela só é aceita depois dele."""
         with self.conn.transaction():
             rows = self.conn.execute(
                 "UPDATE tasks t SET status = 'pronta', updated_at = now() "
                 "WHERE t.unit_id = %s AND t.status = 'planejada' "
                 "AND NOT EXISTS (SELECT 1 FROM tasks d "
-                "  WHERE d.id = ANY(t.depends_on) AND d.status <> 'aceita') "
-                "RETURNING t.id", (unit_id,)).fetchall()
+                "  WHERE d.id = ANY(t.depends_on) AND d.status <> 'aceita' "
+                "  AND NOT (t.role = %s AND d.status = %s)) "
+                "RETURNING t.id",
+                (unit_id, VERIFICADOR, "aguardando_verificacao")).fetchall()
             ids = sorted(r["id"] for r in rows)
             for i in ids:
                 self._log_tarefa(i, "planejada", "pronta", actor,
@@ -171,13 +177,15 @@ class OrquestracaoRepo:
     def pegar_tarefa(self, unit_id: int, worker: str,
                      versoes_funcao: dict[str, str],
                      versoes_pacote: dict[str, str],
-                     lease_segundos: int
+                     lease_segundos: int,
+                     excluir_roles: tuple[str, ...] = ()
                      ) -> tuple[dict[str, Any], dict[str, Any]] | None:
         with self.conn.transaction():
             t = self.conn.execute(
                 "SELECT * FROM tasks WHERE unit_id = %s AND status = 'pronta' "
+                "AND NOT (role = ANY(%s)) "
                 "ORDER BY priority, id LIMIT 1 FOR UPDATE SKIP LOCKED",
-                (unit_id,)).fetchone()
+                (unit_id, list(excluir_roles))).fetchone()
             if t is None:
                 return None
             role_v = versoes_funcao.get(t["role"])

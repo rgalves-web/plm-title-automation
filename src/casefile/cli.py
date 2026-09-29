@@ -32,6 +32,8 @@
                                               (http://localhost:8788)
     python -m src.casefile avancar ["<unit>"] coleta_concluida — RECUSA com
                                               gate pendente
+    python -m src.casefile tarefas ["<unit>"]  grafo de tarefas, runs, custo
+                                              e escalonamentos (sem modelo)
     python -m src.casefile agentes validar|listar [--raiz=DIR]
                                               fichas OKF de agentes/: valida
                                               forma (sai != 0 com erro) ou
@@ -210,6 +212,25 @@ def cmd_estado(nome: str, repo: Any = None) -> None:
         print(f"  {str(t['at'])[:19]}  {t['from_state'] or '-'} -> "
               f"{t['to_state']}  [{t['event']}] {t['actor']}"
               + (f" — {t['note']}" if t["note"] else ""))
+    _fecho(repo, unit)
+
+
+def cmd_tarefas(nome: str, repo: Any = None) -> None:
+    """O grafo de tarefas da unit (etapa B/C) — leitura, sem modelo."""
+    repo = repo or _repo()
+    unit = _unit_de(repo, nome)
+    tarefas = repo.tarefas(unit["id"])
+    print(f"unit: {unit['canonical_name']} — {len(tarefas)} tarefa(s)")
+    refs = {t["id"]: t["ref"] for t in tarefas}
+    for t in tarefas:
+        runs = repo.runs_da_tarefa(t["id"])
+        gasto = sum(r["cost_usd"] for r in runs)
+        deps = ",".join(refs.get(d, str(d)) for d in t["depends_on"])
+        print(f"  {t['ref']:<24} {t['role']:<14} {t['status']:<23} "
+              f"runs {len(runs)} · ${gasto:.4f}/${t['budget_usd']:.2f}"
+              + (f" · depende de {deps}" if deps else ""))
+    for e in repo.escalonamentos(unit["id"], abertos=True):
+        print(f"  ESCALONAMENTO #{e['id']} [{e['motivo']}] {e['pergunta']}")
     _fecho(repo, unit)
 
 
@@ -837,6 +858,8 @@ def main(argv: list[str] | None = None) -> None:
         cmd_dashboard(int(_flag(resto, "porta") or "8788"))
     elif comando == "avancar":
         cmd_avancar(_nome_de(resto))
+    elif comando == "tarefas":
+        cmd_tarefas(_nome_de(resto))
     elif comando == "agentes":
         from src.casefile import agentes
         codigo = agentes.cmd_agentes(resto)
@@ -846,4 +869,4 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(f"comando desconhecido: {comando!r}. Comandos: db, "
                          f"indicar, planejar, plano, aprovar, rejeitar, "
                          f"estado, unidades, coletar, gates, reconciliar, "
-                         f"examinar, dashboard, avancar, agentes.")
+                         f"examinar, dashboard, avancar, tarefas, agentes.")

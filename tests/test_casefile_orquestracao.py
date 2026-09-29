@@ -158,6 +158,22 @@ def test_so_fica_pronta_quando_todas_as_dependencias_estao_aceitas(repo, unit):
     assert orq.pegar(repo, unit["id"], "w2", teto=TETO) is None
 
 
+def test_verificador_sai_quando_a_tarefa_verificada_aguarda_verificacao(
+        repo, unit):
+    """Sem esta exceção a verificação nunca começa: o Examinador só é aceito
+    depois do Verificador. Vale só para o Verificador."""
+    ent = {"tarefa_verificada": "ex", "pergunta": "Quem é o grantor?"}
+    _planejar(repo, unit, _t("ex", role="examinador"),
+              _t("v", role="verificador", deps=["ex"], entrada=ent),
+              _t("co", deps=["ex"]))
+    _rodar(repo, unit, saida=CLAIM_SAIDA)
+    assert _status(repo, unit) == {"ex": "aguardando_verificacao",
+                                   "v": "planejada", "co": "planejada"}
+    repo.promover_prontas(unit["id"], "process:teste")
+    assert _status(repo, unit) == {"ex": "aguardando_verificacao",
+                                   "v": "pronta", "co": "planejada"}
+
+
 def test_dependencia_recusada_nunca_libera(repo, unit):
     _planejar(repo, unit, _t("a"), _t("b", deps=["a"]))
     for _ in range(orq.MAX_RETENTATIVAS + 1):

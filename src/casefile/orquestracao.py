@@ -219,28 +219,34 @@ def checar_teto(repo: Any, unit_id: int, teto: float) -> None:
 
 def pegar(repo: Any, unit_id: int, worker: str, *, teto: float,
           raiz: str | Path | None = None,
-          lease_segundos: int = LEASE_PADRAO_S
+          lease_segundos: int = LEASE_PADRAO_S,
+          excluir_roles: tuple[str, ...] = ()
           ) -> tuple[dict[str, Any], dict[str, Any]] | None:
     """Libera travas vencidas, confere o teto, promove prontas e entrega a
-    próxima (menor priority, depois id) com a versão das fichas no run."""
+    próxima (menor priority, depois id) com a versão das fichas no run.
+    `excluir_roles`: funções que este worker não executa (ficam prontas)."""
     repo.liberar_leases_vencidos(unit_id, ATOR)
     checar_teto(repo, unit_id, teto)
     repo.promover_prontas(unit_id, ATOR)
     funcoes, pacotes = registrar_versoes(repo, raiz)
     return repo.pegar_tarefa(unit_id, worker, funcoes, pacotes,
-                             lease_segundos)
+                             lease_segundos, tuple(excluir_roles))
 
 
 def entregar(repo: Any, run_id: int, worker: str, saida: Any, *,
              teto: float, raiz: str | Path | None = None,
+             validar_extra: Any = None, motivo_invalida: str = "",
              **meta: Any) -> dict[str, Any]:
-    """Valida a saída contra o esquema da função, fecha o run e move a
-    tarefa. Devolve {tarefa, erros, teto_atingido}."""
+    """Valida a saída contra o esquema da função (e, se dado,
+    `validar_extra(task, saida) -> [erros]`, só quando o esquema passa),
+    fecha o run e move a tarefa. Devolve {tarefa, erros, teto_atingido}."""
     run = repo.run(run_id)
     if run is None:
         raise TransicaoInvalida(f"run {run_id} inexistente")
     task = repo.tarefa(run["task_id"])
     erros = agentes.validar_saida(task["output_schema"], saida, raiz)
+    if not erros and validar_extra is not None:
+        erros = list(validar_extra(task, saida))
     if erros:
         invalidas = 1 + sum(1 for r in repo.runs_da_tarefa(task["id"])
                             if r["output_valid"] is False)
@@ -248,7 +254,7 @@ def entregar(repo: Any, run_id: int, worker: str, saida: Any, *,
         para = "recusada" if esgotou else "pronta"
         nota = (f"saida_fora_do_esquema ({invalidas}/"
                 f"{MAX_RETENTATIVAS + 1}): {erros[0]}")
-        motivo = "saida_invalida"
+        motivo = motivo_invalida or "saida_invalida"
     else:
         para = DESTINO_SAIDA_VALIDA[task["verificacao"]]
         nota, motivo = "", "concluida"
