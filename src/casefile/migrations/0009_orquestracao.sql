@@ -73,6 +73,9 @@ CREATE TABLE task_runs (
   output_valid      boolean,
   validation_errors jsonb  NOT NULL DEFAULT '[]',
   cost_usd          numeric(10,4) NOT NULL DEFAULT 0 CHECK (cost_usd >= 0),
+  -- saldo reservado no banco para este run enquanto ele está aberto: dois
+  -- workers nunca contam o mesmo dinheiro (liberado quando o run fecha)
+  reserved_usd      numeric(10,4) NOT NULL DEFAULT 0 CHECK (reserved_usd >= 0),
   tokens_in         int    NOT NULL DEFAULT 0,
   tokens_out        int    NOT NULL DEFAULT 0,
   started_at        timestamptz NOT NULL DEFAULT now(),

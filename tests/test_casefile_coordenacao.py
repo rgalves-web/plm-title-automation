@@ -459,3 +459,86 @@ def test_cli_proposta_aprovar_recusar_cobertura(repo, caso, capsys,
     assert "aprovada" in capsys.readouterr().out
     cli.cmd_cobertura(nome, None, repo=repo)
     assert "2/2" in capsys.readouterr().out
+
+
+# --- atomicidade da decisão (falhas injetadas) ------------------------------------
+
+class Falha(RuntimeError):
+    pass
+
+
+def _estado(repo, uid, pid):
+    p = repo.proposta(pid)
+    return {"tarefas": sorted((t["ref"], t["status"])
+                              for t in repo.tarefas(uid)),
+            "proposta": {k: p[k] for k in ("status", "decided_by",
+                                           "decided_at", "decision_note",
+                                           "applied_task_ids")},
+            "transicoes": {t["ref"]: len(repo.transicoes_da_tarefa(t["id"]))
+                           for t in repo.tarefas(uid)},
+            "propostas": [q["status"] for q in repo.propostas(uid)]}
+
+
+def _injetar(repo, monkeypatch, ponto):
+    def boom(*a, **k):
+        raise Falha(f"falha injetada em {ponto}")
+    if ponto == "decidir":
+        monkeypatch.setattr(orq, "decidir", boom)
+    elif ponto in ("criar_tarefas", "recusar_proposta"):
+        original = getattr(repo, ponto)
+
+        def depois(*a, **k):                 # a operação ACONTECE, depois falha
+            original(*a, **k)
+            raise Falha(f"falha injetada depois de {ponto}")
+        monkeypatch.setattr(repo, ponto, depois)
+    else:
+        monkeypatch.setattr(repo, ponto, boom)
+
+
+@pytest.mark.parametrize("ponto", ["criar_tarefas", "promover_prontas",
+                                   "decidir"])
+def test_aprovacao_com_falha_injetada_nao_deixa_estado_parcial(
+        repo, caso, monkeypatch, ponto):
+    r = _propor(repo, caso)
+    pid, uid = r["proposta_id"], caso["unit"]["id"]
+    antes = _estado(repo, uid, pid)
+    _injetar(repo, monkeypatch, ponto)
+    with pytest.raises(Falha):
+        co.aprovar_proposta(repo, pid, ator="human:renato", nota="ok",
+                            teto=TETO)
+    depois = _estado(repo, uid, pid)
+    assert depois == antes
+    assert depois["proposta"]["status"] == "proposta"
+    assert depois["tarefas"] == [("coordenador-1", "aguardando_operador")]
+    monkeypatch.undo()
+    criadas = co.aprovar_proposta(repo, pid, ator="human:renato", nota="ok",
+                                  teto=TETO)
+    assert len(criadas) == 3 and repo.proposta(pid)["status"] == "aprovada"
+
+
+@pytest.mark.parametrize("ponto", ["recusar_proposta", "decidir"])
+def test_recusa_com_falha_injetada_nao_deixa_estado_parcial(
+        repo, caso, monkeypatch, ponto):
+    r = _propor(repo, caso)
+    pid, uid = r["proposta_id"], caso["unit"]["id"]
+    antes = _estado(repo, uid, pid)
+    _injetar(repo, monkeypatch, ponto)
+    with pytest.raises(Falha):
+        co.recusar_proposta(repo, pid, ator="human:renato", nota="não")
+    assert _estado(repo, uid, pid) == antes
+    monkeypatch.undo()
+    co.recusar_proposta(repo, pid, ator="human:renato", nota="não")
+    assert repo.proposta(pid)["status"] == "recusada"
+    assert repo.tarefa(r["tarefa"]["id"])["status"] == "recusada"
+
+
+def test_decisao_exige_coordenador_aguardando(repo, caso):
+    r = _propor(repo, caso)
+    repo.transicionar_tarefa(r["tarefa"]["id"], ("aguardando_operador",),
+                             "recusada", "human:renato", "fora do fluxo")
+    with pytest.raises(TransicaoInvalida, match="não aguarda o operador"):
+        co.aprovar_proposta(repo, r["proposta_id"], ator="human:renato",
+                            nota="ok", teto=TETO)
+    assert repo.proposta(r["proposta_id"])["status"] == "proposta"
+    assert [t["ref"] for t in repo.tarefas(caso["unit"]["id"])] == \
+        ["coordenador-1"]

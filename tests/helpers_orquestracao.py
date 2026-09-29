@@ -4,11 +4,12 @@ este fake e contra o Postgres real (schema temporário)."""
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.casefile.orquestracao_repo import (PENDENTES, VERIFICADOR,
-                                             TransicaoInvalida)
+                                             TransicaoInvalida, _conta_reserva)
 
 
 def _agora() -> datetime:
@@ -175,7 +176,8 @@ class OrquestracaoFake:
                "role_version": role_v, "pack_version": pack_v, "model": "",
                "model_family": "", "prompt_sha256": None,
                "output_json": None, "output_valid": None,
-               "validation_errors": [], "cost_usd": 0.0, "tokens_in": 0,
+               "validation_errors": [], "cost_usd": 0.0,
+               "reserved_usd": 0.0, "tokens_in": 0,
                "tokens_out": 0, "started_at": _agora(), "finished_at": None,
                "stop_reason": "",
                "lease_until": _agora() + timedelta(seconds=lease_segundos)}
@@ -235,6 +237,33 @@ class OrquestracaoFake:
         return sorted(c for t, c in self._orq()["task_claims"]
                       if t == task_id)
 
+    # --- transação e reserva ------------------------------------------------
+    @contextmanager
+    def transacao(self):
+        """Retrato do estado inteiro; exceção restaura (tudo ou nada)."""
+        retrato = copy.deepcopy(self.__dict__)
+        try:
+            yield
+        except BaseException:
+            self.__dict__.clear()
+            self.__dict__.update(retrato)
+            raise
+
+    def reservar_orcamento(self, run_id, worker, teto_unit):
+        r = self._run(run_id)
+        if r is None or r["worker"] != worker or r["finished_at"] is not None:
+            raise TransicaoInvalida(f"run {run_id} fechado ou de outro worker")
+        t = self._t(r["task_id"])
+        outros = sum(x.get("reserved_usd", 0.0) for x in self._orq()["runs"]
+                     if x["finished_at"] is None and x["id"] != run_id
+                     and self._t(x["task_id"])["unit_id"] == t["unit_id"])
+        gasto_tarefa = sum(x["cost_usd"] for x in self._orq()["runs"]
+                           if x["task_id"] == t["id"] and x["id"] != run_id)
+        conta = _conta_reserva(t["budget_usd"], gasto_tarefa, teto_unit,
+                               self.custo_acumulado(t["unit_id"]), outros)
+        r["reserved_usd"] = conta["reserva"]
+        return conta
+
     # --- propostas de grafo -------------------------------------------------
     def registrar_proposta(self, unit_id, task_id, run_id, pack, plan,
                            targets, coverage):
@@ -256,7 +285,7 @@ class OrquestracaoFake:
         props = self._orq()["props"]
         return props[proposal_id - 1] if 0 < proposal_id <= len(props)             else None
 
-    def proposta(self, proposal_id):
+    def proposta(self, proposal_id, travar=False):
         return copy.deepcopy(self._prop(proposal_id))
 
     def propostas(self, unit_id):

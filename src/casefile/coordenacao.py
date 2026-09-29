@@ -331,30 +331,42 @@ def _exigir_humano(ator: str, nota: str) -> None:
         raise orq.DecisaoInvalida("nota_ausente: decisão sem motivo")
 
 
+def _coordenador_aguardando(repo: Any, p: dict[str, Any]) -> dict[str, Any]:
+    coord = repo.tarefa(p["task_id"])
+    if coord is None or coord["status"] != "aguardando_operador":
+        raise orq.TransicaoInvalida(
+            f"tarefa do Coordenador {p['task_id']} não aguarda o operador "
+            f"({coord and coord['status']!r})")
+    return coord
+
+
 def aprovar_proposta(repo: Any, proposal_id: int, *, ator: str, nota: str,
                      teto: float, raiz: Any = None) -> list[dict[str, Any]]:
     """Único caminho da saída do Coordenador para tarefas: humano, com nota,
-    e a proposta rechecada contra o estado ATUAL do Case File."""
+    proposta rechecada contra o estado ATUAL. ATÔMICO de ponta a ponta:
+    status da proposta, criação e liberação das tarefas e decisão da tarefa
+    do Coordenador confirmam juntos ou revertem juntos."""
     _exigir_humano(ator, nota)
     p = repo.proposta(proposal_id)
     if p is None:
         raise orq.DecisaoInvalida(f"proposta {proposal_id} inexistente")
     exigir_etapa_suportada(repo, p["unit_id"], "aprovar_proposta")
-    if p["status"] != "proposta":
-        raise orq.TransicaoInvalida(
-            f"proposta {proposal_id} está {p['status']!r}")
-    erros = checar_proposta(repo, p["unit_id"], p["plan"], teto=teto,
-                            pacote=p["pack"], raiz=raiz)
-    if erros:
-        raise PropostaInvalida("; ".join(erros))
-    linhas = orq.linhas_do_plano(repo, p["unit_id"], p["plan"], teto=teto,
-                                 pacote=p["pack"], raiz=raiz)
-    criadas = repo.aprovar_proposta(
-        proposal_id, linhas, f"coordenador/tarefa:{p['task_id']}", ator,
-        nota)
-    repo.promover_prontas(p["unit_id"], orq.ATOR)
-    coord = repo.tarefa(p["task_id"])
-    if coord["status"] == "aguardando_operador":
+    with repo.transacao():
+        p = repo.proposta(proposal_id, travar=True)
+        if p["status"] != "proposta":
+            raise orq.TransicaoInvalida(
+                f"proposta {proposal_id} está {p['status']!r}")
+        coord = _coordenador_aguardando(repo, p)
+        erros = checar_proposta(repo, p["unit_id"], p["plan"], teto=teto,
+                                pacote=p["pack"], raiz=raiz)
+        if erros:
+            raise PropostaInvalida("; ".join(erros))
+        linhas = orq.linhas_do_plano(repo, p["unit_id"], p["plan"],
+                                     teto=teto, pacote=p["pack"], raiz=raiz)
+        criadas = repo.aprovar_proposta(
+            proposal_id, linhas, f"coordenador/tarefa:{p['task_id']}", ator,
+            nota)
+        repo.promover_prontas(p["unit_id"], orq.ATOR)
         orq.decidir(repo, coord["id"], aceitar=True, ator=ator,
                     nota=f"proposta {proposal_id} aprovada: {nota}")
     return [repo.tarefa(t["id"]) for t in criadas]
@@ -362,13 +374,18 @@ def aprovar_proposta(repo: Any, proposal_id: int, *, ator: str, nota: str,
 
 def recusar_proposta(repo: Any, proposal_id: int, *, ator: str,
                      nota: str) -> None:
+    """Recusa ATÔMICA: proposta recusada (preservada) e tarefa do
+    Coordenador recusada juntas, ou nada."""
     _exigir_humano(ator, nota)
-    p = repo.proposta(proposal_id)
-    if p is None:
+    if repo.proposta(proposal_id) is None:
         raise orq.DecisaoInvalida(f"proposta {proposal_id} inexistente")
-    repo.recusar_proposta(proposal_id, ator, nota)
-    coord = repo.tarefa(p["task_id"])
-    if coord["status"] == "aguardando_operador":
+    with repo.transacao():
+        p = repo.proposta(proposal_id, travar=True)
+        if p["status"] != "proposta":
+            raise orq.TransicaoInvalida(
+                f"proposta {proposal_id} está {p['status']!r}")
+        coord = _coordenador_aguardando(repo, p)
+        repo.recusar_proposta(proposal_id, ator, nota)
         orq.decidir(repo, coord["id"], aceitar=False, ator=ator,
                     nota=f"proposta {proposal_id} recusada: {nota}")
 

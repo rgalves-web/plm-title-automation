@@ -20,6 +20,19 @@ class TransicaoInvalida(AssertionError):
     """A tarefa (ou o run) não está no estado que a operação exige."""
 
 
+def _conta_reserva(budget: float, gasto_tarefa: float, teto_unit: float,
+                   gasto_unit: float, reservado_outros: float
+                   ) -> dict[str, float]:
+    """A mesma conta para o banco e para o fake (encanamento, não juízo)."""
+    saldo_tarefa = round(budget - gasto_tarefa, 6)
+    saldo_unit = round(teto_unit - gasto_unit, 6)
+    livre = round(saldo_unit - reservado_outros, 6)
+    limite = round(min(saldo_tarefa, livre), 4)
+    return {"limite": limite, "reserva": max(limite, 0.0),
+            "saldo_tarefa": saldo_tarefa, "saldo_unit": saldo_unit,
+            "reservado_por_outros": round(reservado_outros, 6)}
+
+
 def _num(row: dict[str, Any] | None) -> dict[str, Any] | None:
     if row is None:
         return None
@@ -280,6 +293,44 @@ class OrquestracaoRepo:
             "SELECT claim_id FROM task_claims WHERE task_id = %s "
             "ORDER BY claim_id", (task_id,)).fetchall()]
 
+    # --- transação e reserva de orçamento ------------------------------------
+    def transacao(self) -> Any:
+        """Tudo dentro confirma junto ou reverte junto (aninhado = savepoint)."""
+        return self.conn.transaction()
+
+    def reservar_orcamento(self, run_id: int, worker: str,
+                           teto_unit: float) -> dict[str, float]:
+        """Reserva, NO BANCO, o limite deste run: min(saldo da tarefa, saldo
+        da unit − reservas dos outros runs abertos). A linha da unit fica
+        travada durante a conta: reservas concorrentes se serializam e a soma
+        delas nunca passa do saldo. Limite ≤ 0 reserva zero."""
+        with self.conn.transaction():
+            r = self.conn.execute(
+                "SELECT r.id, r.worker, r.finished_at, r.task_id, t.unit_id, "
+                "t.budget_usd FROM task_runs r JOIN tasks t ON t.id = r.task_id "
+                "WHERE r.id = %s FOR UPDATE OF r", (run_id,)).fetchone()
+            if r is None or r["worker"] != worker or                     r["finished_at"] is not None:
+                raise TransicaoInvalida(
+                    f"run {run_id} fechado ou de outro worker")
+            self.conn.execute("SELECT id FROM units WHERE id = %s FOR UPDATE",
+                              (r["unit_id"],))
+            gasto = self.custo_acumulado(r["unit_id"])
+            outros = float(self.conn.execute(
+                "SELECT coalesce(sum(x.reserved_usd), 0) AS s FROM task_runs x "
+                "JOIN tasks t ON t.id = x.task_id WHERE t.unit_id = %s "
+                "AND x.finished_at IS NULL AND x.id <> %s",
+                (r["unit_id"], run_id)).fetchone()["s"])
+            gasto_tarefa = float(self.conn.execute(
+                "SELECT coalesce(sum(cost_usd), 0) AS s FROM task_runs "
+                "WHERE task_id = %s AND id <> %s",
+                (r["task_id"], run_id)).fetchone()["s"])
+            conta = _conta_reserva(float(r["budget_usd"]), gasto_tarefa,
+                                   teto_unit, gasto, outros)
+            self.conn.execute(
+                "UPDATE task_runs SET reserved_usd = %s WHERE id = %s",
+                (conta["reserva"], run_id))
+        return conta
+
     # --- propostas de grafo do Coordenador ---------------------------------
     def registrar_proposta(self, unit_id: int, task_id: int,
                            run_id: int | None, pack: str, plan: Any,
@@ -298,10 +349,11 @@ class OrquestracaoRepo:
                 (unit_id, task_id, run_id, pack, _json(plan), _json(targets),
                  _json(coverage))).fetchone()["id"]
 
-    def proposta(self, proposal_id: int) -> dict[str, Any] | None:
+    def proposta(self, proposal_id: int, travar: bool = False
+                 ) -> dict[str, Any] | None:
         return self.conn.execute(
-            "SELECT * FROM plan_proposals WHERE id = %s",
-            (proposal_id,)).fetchone()
+            "SELECT * FROM plan_proposals WHERE id = %s"
+            + (" FOR UPDATE" if travar else ""), (proposal_id,)).fetchone()
 
     def propostas(self, unit_id: int) -> list[dict[str, Any]]:
         return self.conn.execute(

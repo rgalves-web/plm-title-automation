@@ -21,8 +21,15 @@ Josh B (plano v1 aprovado): são 10 alvos, as pesquisas 1, 2, 3, 4, 5, 7, 8, 9, 
 ## 2. Proposta e aceite humano
 
 - Uma saída válida de `plano_tarefas` **não cria tarefas**. Ela vai para `plan_proposals` com status `proposta`, junto com os alvos e a cobertura calculados, e a tarefa do Coordenador fica em `aguardando_operador`. Isso é regra de código (`ESQUEMAS_COM_ACEITE_HUMANO`), independente do `verifica` da ficha.
-- `aprovar_proposta` exige ator `human:<id>` e nota não vazia. Antes de gravar, rechecha a proposta contra o estado **atual** do Case File. A aprovação cria as tarefas e marca a proposta como `aprovada`, gravando `decided_by`, `decided_at`, `decision_note` e `applied_task_ids`, tudo **na mesma transação**. Depois disso, a tarefa do Coordenador vai para `aceita`.
-- `recusar_proposta` marca `recusada` com autor, data e nota e preserva o plano integral. A tarefa do Coordenador vai para `recusada`, e nenhuma tarefa é criada.
+- `aprovar_proposta` exige ator `human:<id>` e nota não vazia. **Tudo acontece numa única transação** (`repo.transacao()`), que confirma junto ou reverte junto:
+  - trava a proposta;
+  - exige que a tarefa do Coordenador esteja em `aguardando_operador`;
+  - rechecha a proposta contra o estado **atual** do Case File;
+  - cria as tarefas e marca a proposta como `aprovada`, com `decided_by`, `decided_at`, `decision_note` e `applied_task_ids`;
+  - libera as tarefas sem dependência para `pronta`;
+  - leva a tarefa do Coordenador para `aceita`.
+- `recusar_proposta` também é uma transação única: marca a proposta como `recusada`, com autor, data e nota, preservando o plano integral, e leva a tarefa do Coordenador para `recusada`. Nenhuma tarefa é criada.
+- Há testes que injetam falha depois de `criar_tarefas`, em `promover_prontas`, em `decidir` e depois de `recusar_proposta`, no fake e no Postgres. Todos comprovam o estado idêntico ao anterior à tentativa. Uma checagem de mutação (a transação trocada por um contexto vazio) faz 9 dos 10 casos falharem.
 - Uma nova proposta marca a anterior ainda aberta como `substituida`, sem apagá-la.
 - O banco exige autor, data e nota em proposta aprovada ou recusada (CHECK na 0009).
 - CLI: `propostas`, `cobertura --proposta=N`, `aprovar-proposta|recusar-proposta --id=N --por=<operador> --nota="..."`.
@@ -48,12 +55,14 @@ A entrada (`coordenacao.entrada_do_coordenador`) **não é cópia integral do Ca
 
 Josh B, medido no replay: sistema com 5.359 caracteres e tarefa com 26.554, cerca de 10,6 mil tokens pela estimativa de caracteres/3. São 16 pendências abertas integrais e 25 decisões, nenhuma truncada.
 
-## 4. Teto real de custo
+## 4. Teto de custo: reservado no banco e estimado por chamada
 
-- O limite de um run é `min(budget da tarefa − custo dos runs anteriores dela, teto da unit − gasto da unit)`.
-- Se esse limite for **≤ 0**, nenhuma chamada paga é feita: a tarefa vai para `bloqueada`, com escalonamento `orcamento_tarefa`. Orçamento zero nunca vira execução ilimitada; o antigo `budget_usd or None` foi removido.
+- **Reserva no banco antes de qualquer chamada** (`reservar_orcamento`, coluna `task_runs.reserved_usd`). Numa transação, com a linha da unit travada (`SELECT … FOR UPDATE`), o limite do run é calculado assim: `min(budget da tarefa − custo dos runs anteriores dela, teto da unit − gasto da unit − reservas dos OUTROS runs abertos da unit)`. Esse valor fica reservado para o run. Reservas concorrentes se serializam pela trava, e a soma delas nunca passa do saldo. A reserva é liberada quando o run fecha: `fechar_run` e `liberar_leases_vencidos` gravam `finished_at` na mesma transação em que o custo real entra em `cost_entries`.
+- Se o limite for **≤ 0** porque a tarefa ou a unit não tem saldo, nenhuma chamada paga é feita: a tarefa vai para `bloqueada`, com escalonamento `orcamento_tarefa`. Orçamento zero nunca vira execução ilimitada; o antigo `budget_usd or None` foi removido.
+- Se o limite for **≤ 0** só porque o saldo está **reservado por outros runs abertos**, a tarefa volta a `pronta` sem gastar tentativa nem abrir escalonamento. `executar_ate_parar` para nesse caso, com a parada `saldo da unit reservado por outros workers`.
+- Há testes com duas conexões e duas threads reais no Postgres: reservas simultâneas nunca somam mais que o saldo (20 rodadas), e uma execução concorrente com saldo reservado não chama o modelo. Sem a trava da unit, uma checagem de mutação faz as duas reservas saírem com $0,80 sobre um saldo de $1,00.
 - Antes de **cada** chamada, o cliente contado soma o gasto do run e o **pior caso estimado** da próxima resposta. Se passar do limite, a chamada não é feita (`teto_da_tarefa`). Se nada foi entregue até ali, a tarefa vai para `bloqueada`, com escalonamento, em vez de gastar tentativas.
-- **Limite técnico:** o teto não é absolutamente exato. A API cobra por resposta, e o custo real só é conhecido depois dela. O pior caso é uma estimativa conservadora: entrada ≈ caracteres/3, sem desconto de cache, com `max_tokens` inteiro de saída. A tokenização real e as tarifas de cache fazem o custo real divergir, normalmente para menos. Uma imagem em base64 superestima muito a entrada.
+- **Limite técnico, e por isso o teto é *estimado*:** o que se garante é a reserva e a recusa antes de cada chamada, não o valor exato cobrado. A API cobra por resposta, e o custo real só é conhecido depois dela. O pior caso é uma estimativa conservadora: entrada ≈ caracteres/3, sem desconto de cache, com `max_tokens` inteiro de saída. A tokenização real e as tarifas de cache fazem o custo real divergir, normalmente para menos. Uma imagem em base64 superestima muito a entrada. Se a estimativa errar para baixo, o custo real de uma resposta pode passar da reserva; o livro (`cost_entries`) registra o valor real, e as reservas seguintes já o descontam.
 - O `run_loop` também recebe o limite como `max_cost_usd`, conferido depois de cada turno.
 
 ## 5. Perfil surface (Cibola)
@@ -67,6 +76,7 @@ python -X utf8 -m src.casefile.replay_coordenador "JOSH B UNIT" --saida=<pasta f
 ```
 
 Como o replay funciona:
+- **recusa programaticamente** um DSN de destino que aponte para o mesmo banco da origem (`destino_igual_a_origem`), antes de criar qualquer schema. A identidade é `(current_database, porta, início do postmaster)`, então `localhost` × `127.0.0.1` não engana a guarda. O núcleo `_replay` não tem essa guarda: os testes o usam porque o ambiente de teste tem um único banco disponível, e o role `plm` não pode criar bancos;
 - lê a produção numa conexão somente leitura;
 - copia as linhas da unit, com ids preservados, para um schema temporário no Postgres de **teste**, migrado até a 0009;
 - roda o Coordenador pelo worker real com cliente **roteirizado** (0 chamadas de API): a primeira entrega é parcial e é recusada por cobertura, a segunda é completa e vira proposta #1;

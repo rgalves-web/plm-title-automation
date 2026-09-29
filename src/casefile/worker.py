@@ -15,10 +15,12 @@ Fronteiras:
   (divergência 2 do checkpoint A) — a tarefa fica `pronta`, intocada;
 - o custo de cada run entra no livro da unit pelo `fechar_run`; se o run se
   perdeu (trava vencida e retomada), o custo entra do mesmo jeito;
-- teto real: o limite do run é o menor saldo entre tarefa e unit; ≤ 0 não
-  chama modelo; antes de CADA chamada, gasto + pior caso estimado da
-  resposta não pode passar do limite (estimativa, não exatidão — ver
-  docs/ARQUITETURA_AGENTICA_ETAPA_D.md §4);
+- teto ESTIMADO, com reserva no banco: antes de qualquer chamada o run
+  reserva (unit travada) o menor saldo entre tarefa e unit, descontadas as
+  reservas dos outros runs abertos — dois workers nunca contam o mesmo
+  dinheiro; ≤ 0 não chama modelo; antes de CADA chamada, gasto + pior caso
+  estimado da resposta não pode passar da reserva. A cobrança exata da API
+  só se conhece depois da resposta (docs/ARQUITETURA_AGENTICA_ETAPA_D.md §4);
 - saída de `plano_tarefas` vira PROPOSTA (plan_proposals), nunca tarefas;
 - unit com perfil surface (Cibola) é recusada antes de qualquer efeito.
 """
@@ -267,15 +269,13 @@ def _sha(texto: str) -> str:
     return hashlib.sha256(texto.encode("utf-8")).hexdigest()
 
 
-def teto_do_run(repo: Any, task: dict[str, Any], run: dict[str, Any],
-                teto_unit: float) -> float:
-    """O menor entre o saldo da TAREFA (budget − runs anteriores) e o saldo
-    da UNIT. Zero ou negativo = nenhuma chamada paga."""
-    gasto_tarefa = sum(r["cost_usd"] for r in repo.runs_da_tarefa(task["id"])
-                       if r["id"] != run["id"])
-    saldo_tarefa = float(task["budget_usd"]) - gasto_tarefa
-    saldo_unit = teto_unit - repo.custo_acumulado(task["unit_id"])
-    return round(min(saldo_tarefa, saldo_unit), 6)
+def _limitado_por_outros(conta: dict[str, float]) -> bool:
+    """O que falta é dinheiro RESERVADO por runs abertos de outros workers
+    (volta quando eles fecharem), não saldo gasto."""
+    return (conta["reservado_por_outros"] > 0 and conta["saldo_tarefa"] > 0
+            and conta["saldo_unit"] > 0
+            and conta["saldo_unit"] - conta["reservado_por_outros"]
+            < conta["saldo_tarefa"])
 
 
 def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
@@ -308,7 +308,24 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
         raise ValueError(f"modelo_sem_tarifa: {modelo!r} — custo invisível "
                          f"não roda")
 
-    limite = teto_do_run(repo, task, run, teto)
+    # reserva NO BANCO antes de qualquer chamada: dois workers nunca contam o
+    # mesmo saldo da unit (a reserva é liberada quando o run fecha)
+    conta = repo.reservar_orcamento(run["id"], worker, teto)
+    limite = conta["limite"]
+
+    def _devolver(motivo: str, nota: str, **meta: Any) -> dict[str, Any]:
+        # saldo preso em reservas de OUTROS runs abertos: a tarefa volta à
+        # fila sem contar tentativa nem abrir escalonamento
+        t = repo.fechar_run(run["id"], worker, output_json=None,
+                            output_valid=None, validation_errors=[],
+                            stop_reason=motivo, para="pronta", nota=nota,
+                            **meta)
+        return {"tarefa": t, "run_id": run["id"], "erros": [nota],
+                "teto_atingido": False, "modelo": modelo,
+                "custo_usd": meta.get("cost_usd", 0.0), "parada": motivo,
+                "entregas": 0, "gravados": [], "proposta_id": None,
+                "limite_usd": limite, "licoes": ctx["licoes"],
+                "indisponiveis": ctx["indisponiveis"]}
 
     def _bloquear(motivo: str, nota: str, **meta: Any) -> dict[str, Any]:
         # sem saldo para (mais) uma chamada: nenhuma chamada paga começa; a
@@ -331,6 +348,11 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
                 "indisponiveis": ctx["indisponiveis"]}
 
     if limite <= 0:
+        if _limitado_por_outros(conta):
+            return _devolver(
+                "saldo_reservado_por_outros",
+                f"saldo da unit reservado por outros runs abertos: livre "
+                f"${conta['saldo_unit'] - conta['reservado_por_outros']:.4f}")
         return _bloquear("sem_saldo",
                          f"orcamento_da_tarefa_esgotado: saldo ${limite:.4f} "
                          f"(budget ${task['budget_usd']:.2f})")
@@ -388,6 +410,8 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
             "tokens_in": uso.input + uso.cache_write + uso.cache_read,
             "tokens_out": uso.output, "cost_usd": custo}
     if falha == "teto_da_tarefa" and entrega["entregas"] == 0:
+        if contado.turnos == 0 and _limitado_por_outros(conta):
+            return _devolver("saldo_reservado_por_outros", parada, **meta)
         return _bloquear("teto_da_tarefa", parada, **meta)
     if falha == "erro_do_modelo":
         motivo = falha
@@ -462,6 +486,9 @@ def executar_ate_parar(repo: Any, unit_id: int, worker: str, *, teto: float,
         execucoes.append(got)
         if got["teto_atingido"]:
             parada = "teto atingido na última execução"
+            break
+        if got["parada"] == "saldo_reservado_por_outros":
+            parada = "saldo da unit reservado por outros workers"
             break
     else:
         parada = f"limite de {max_tarefas} tarefas nesta chamada"

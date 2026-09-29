@@ -412,3 +412,65 @@ def test_estimativa_e_conservadora_e_cresce_com_a_carga():
     assert base >= 8000 * 15.0 / 1e6
     kw["messages"] = [{"role": "user", "content": "b" * 30000}]
     assert wk.estimar_chamada(kw, "claude-sonnet-5") > base
+
+
+# --- reserva de orçamento no banco (dois workers, um saldo) ----------------------
+
+def _saldo_da_unit(repo, unit, saldo):
+    repo.registrar_custo(unit["id"], "vs3", TETO - saldo, {})
+
+
+def test_reserva_de_run_aberto_nao_e_gasta_por_outro_worker(repo, unit):
+    # plano aprovado quando havia saldo; depois o saldo encolheu
+    _planejar(repo, unit, _t("a", "redator", budget=0.8),
+              _t("b", "redator", budget=0.8, prio=2))
+    _saldo_da_unit(repo, unit, 0.8)
+    _, run_a = orq.pegar(repo, unit["id"], "w1", teto=TETO)
+    conta = repo.reservar_orcamento(run_a["id"], "w1", TETO)
+    assert conta["reserva"] == 0.8
+    cliente = Cliente([])                       # nenhuma chamada pode ocorrer
+    r = wk.executar_uma(repo, unit["id"], "w2", teto=TETO, client=cliente)
+    assert cliente.chamadas == [] and r["tarefa"]["ref"] == "b"
+    assert r["parada"] == "saldo_reservado_por_outros"
+    assert r["tarefa"]["status"] == "pronta"            # volta à fila
+    run_b = repo.run(r["run_id"])
+    assert run_b["output_valid"] is None and run_b["reserved_usd"] == 0.0
+    assert repo.escalonamentos(unit["id"], abertos=True) == []
+    # o run de w1 fecha com custo: a reserva é liberada, só o gasto fica
+    repo.fechar_run(run_a["id"], "w1", output_json=None, output_valid=None,
+                    validation_errors=[], stop_reason="teste", para="pronta",
+                    cost_usd=0.1)
+    _, run_b2 = orq.pegar(repo, unit["id"], "w2", teto=TETO)
+    assert repo.reservar_orcamento(run_b2["id"], "w2", TETO)["reserva"] == 0.7
+
+
+def test_soma_das_reservas_nunca_passa_do_saldo(repo, unit):
+    _planejar(repo, unit, *[_t(f"t{i}", "redator", budget=0.4, prio=i)
+                            for i in range(4)])
+    _saldo_da_unit(repo, unit, 1.0)
+    reservas = []
+    for i in range(4):
+        _, run = orq.pegar(repo, unit["id"], f"w{i}", teto=TETO)
+        reservas.append(repo.reservar_orcamento(run["id"], f"w{i}",
+                                                TETO)["reserva"])
+    assert reservas == [0.4, 0.4, 0.2, 0.0]
+    assert sum(reservas) <= 1.0
+
+
+def test_executar_ate_parar_para_quando_o_saldo_esta_reservado(repo, unit):
+    _planejar(repo, unit, _t("a", "redator", budget=0.5),
+              _t("b", "redator", budget=0.5, prio=2))
+    _saldo_da_unit(repo, unit, 0.5)
+    _, run_a = orq.pegar(repo, unit["id"], "w1", teto=TETO)
+    repo.reservar_orcamento(run_a["id"], "w1", TETO)
+    got = wk.executar_ate_parar(repo, unit["id"], "w2", teto=TETO,
+                                client=Cliente([]))
+    assert got["parada"] == "saldo da unit reservado por outros workers"
+    assert len(got["execucoes"]) == 1
+
+
+def test_reserva_so_para_o_dono_do_run_aberto(repo, unit):
+    _planejar(repo, unit, _t("a", "redator"))
+    _, run = orq.pegar(repo, unit["id"], "w1", teto=TETO)
+    with pytest.raises(TransicaoInvalida):
+        repo.reservar_orcamento(run["id"], "w2", TETO)

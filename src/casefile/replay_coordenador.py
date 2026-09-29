@@ -200,10 +200,56 @@ def _conectar(dsn: str, *, somente_leitura: bool) -> Any:
     return conn
 
 
+class DestinoIgualOrigem(SystemExit):
+    """O DSN de destino aponta para o MESMO banco da origem."""
+
+
+def identidade_do_banco(conn: Any) -> tuple[str, str, str]:
+    """(banco, porta, início do postmaster): igual só no mesmo banco do
+    mesmo servidor — independe de como o host foi escrito no DSN
+    (localhost × 127.0.0.1 × ::1)."""
+    r = conn.execute(
+        "SELECT current_database() AS db, current_setting('port') AS port, "
+        "pg_postmaster_start_time()::text AS inicio").fetchone()
+    return (r["db"], r["port"], r["inicio"])
+
+
+def exigir_bancos_distintos(origem: Any, destino: Any) -> None:
+    a, b = identidade_do_banco(origem), identidade_do_banco(destino)
+    if a == b:
+        raise DestinoIgualOrigem(
+            f"destino_igual_a_origem: o DSN de destino aponta para o mesmo "
+            f"banco da origem ({a[0]}, porta {a[1]}); o replay só escreve "
+            f"num banco diferente (o de teste)")
+
+
 def executar_replay(origem: Any, destino_dsn: str, unit_nome: str,
                     saida: Path, *, teto: float | None = None,
                     orcamento: float = 1.5,
                     pacote: str = PACOTE_PADRAO) -> dict[str, Any]:
+    """Entrada pública: recusa destino no mesmo banco da origem ANTES de
+    criar qualquer schema, e saída dentro do repositório."""
+    saida = Path(saida).resolve()
+    if saida == REPO_ROOT or saida.is_relative_to(REPO_ROOT):
+        raise SystemExit(f"saída dentro do repositório recusada ({saida}): o "
+                         f"relatório contém dados do cliente (invariante 8)")
+    origem.execute("SET default_transaction_read_only = on")
+    destino = _conectar(destino_dsn, somente_leitura=False)
+    try:
+        exigir_bancos_distintos(origem, destino)
+    except BaseException:
+        destino.close()
+        raise
+    return _replay(origem, destino, unit_nome, saida, teto=teto,
+                   orcamento=orcamento, pacote=pacote)
+
+
+def _replay(origem: Any, destino: Any, unit_nome: str, saida: Path, *,
+            teto: float | None, orcamento: float,
+            pacote: str) -> dict[str, Any]:
+    """Núcleo, SEM a guarda de bancos distintos (use `executar_replay`).
+    Os testes o chamam direto porque o ambiente de teste tem um único banco
+    disponível; o isolamento ali é o schema temporário."""
     from src.casefile.db import migrar
     from src.casefile.repo import Repo
     saida = Path(saida).resolve()
@@ -212,7 +258,6 @@ def executar_replay(origem: Any, destino_dsn: str, unit_nome: str,
                          f"relatório contém dados do cliente (invariante 8)")
     teto = custo.teto_unit() if teto is None else teto
     origem.execute("SET default_transaction_read_only = on")
-    destino = _conectar(destino_dsn, somente_leitura=False)
     schema = f"replay_d_{uuid.uuid4().hex[:8]}"
     destino.execute(f'CREATE SCHEMA "{schema}"')
     destino.execute(f'SET search_path TO "{schema}"')

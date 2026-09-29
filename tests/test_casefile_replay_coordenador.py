@@ -43,6 +43,19 @@ def origem(tmp_path):
     conn.close()
 
 
+def _destino():
+    """Mesmo banco de teste, outra conexão: só o núcleo `_replay` aceita
+    (a entrada pública recusa — ver os testes da guarda abaixo)."""
+    return rp._conectar(os.environ["CASEFILE_TEST_DSN"],
+                        somente_leitura=False)
+
+
+def _schemas_replay(conn):
+    return {r["nspname"] for r in conn.execute(
+        "SELECT nspname FROM pg_namespace WHERE nspname LIKE 'replay_d_%'"
+    ).fetchall()}
+
+
 def _contar(conn, tabela):
     return conn.execute(f"SELECT count(*) AS n FROM {tabela}").fetchone()["n"]
 
@@ -52,9 +65,9 @@ def test_replay_demonstra_entrada_alvos_proposta_e_decisoes(origem, tmp_path):
     antes = {t: _contar(conn, t) for t in ("research_items", "claims",
                                            "tasks", "plan_proposals",
                                            "cost_entries")}
-    rel = rp.executar_replay(conn, os.environ["CASEFILE_TEST_DSN"],
-                             unit["canonical_name"], tmp_path / "saida",
-                             teto=25.0, orcamento=1.5)
+    rel = rp._replay(conn, _destino(), unit["canonical_name"],
+                     tmp_path / "saida", teto=25.0, orcamento=1.5,
+                     pacote=rp.PACOTE_PADRAO)
     abertas = [f"pesquisa:{i}" for i in ids if i != ids[1]]
     assert rel["alvos"]["alvos"] == abertas
     assert rel["alvos"]["canceladas"] == [f"pesquisa:{ids[1]}"]
@@ -98,8 +111,8 @@ def test_replay_demonstra_entrada_alvos_proposta_e_decisoes(origem, tmp_path):
 
 def test_origem_fica_somente_leitura(origem, tmp_path):
     conn, unit, _, _ = origem
-    rp.executar_replay(conn, os.environ["CASEFILE_TEST_DSN"],
-                       unit["canonical_name"], tmp_path / "s", teto=25.0)
+    rp._replay(conn, _destino(), unit["canonical_name"], tmp_path / "s",
+               teto=25.0, orcamento=1.5, pacote=rp.PACOTE_PADRAO)
     import psycopg
     with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
         conn.execute("INSERT INTO cost_entries (unit_id, category, "
@@ -124,3 +137,49 @@ def test_proposta_roteirizada_e_marcada_como_roteiro():
     assert t["pendencias"] == ["pesquisa:1"]
     assert t["title"].startswith("[ROTEIRO DO REPLAY]")
     assert "não é saída de modelo" in t["justificativa"]
+
+
+# --- guarda: destino no mesmo banco da origem é recusado ----------------------
+
+def test_destino_no_mesmo_banco_da_origem_e_recusado(origem, tmp_path):
+    conn, unit, _, _ = origem
+    antes = _schemas_replay(conn)
+    with pytest.raises(rp.DestinoIgualOrigem, match="destino_igual_a_origem"):
+        rp.executar_replay(conn, os.environ["CASEFILE_TEST_DSN"],
+                           unit["canonical_name"], tmp_path / "s", teto=25.0)
+    assert _schemas_replay(conn) == antes          # nenhum schema criado
+    assert not (tmp_path / "s").exists()           # nenhum relatório
+
+
+def test_mesmo_banco_com_host_escrito_diferente_e_recusado(origem, tmp_path):
+    """localhost × 127.0.0.1: a identidade é do servidor, não do texto."""
+    from psycopg.conninfo import conninfo_to_dict, make_conninfo
+    conn, unit, _, _ = origem
+    d = conninfo_to_dict(os.environ["CASEFILE_TEST_DSN"])
+    outro = "127.0.0.1" if d.get("host") in ("localhost", None, "")         else "localhost"
+    dsn = make_conninfo(**{**d, "host": outro})
+    with pytest.raises(rp.DestinoIgualOrigem):
+        rp.executar_replay(conn, dsn, unit["canonical_name"], tmp_path / "s",
+                           teto=25.0)
+
+
+def test_bancos_distintos_passam_a_guarda(origem, tmp_path, monkeypatch):
+    conn, unit, _, _ = origem
+    ids = iter([("plm_casefile", "5432", "t0"),
+                ("plm_casefile_test", "5432", "t0")])
+    monkeypatch.setattr(rp, "identidade_do_banco", lambda c: next(ids))
+    chamado = {}
+    monkeypatch.setattr(rp, "_replay", lambda *a, **k: chamado.setdefault(
+        "ok", True))
+    assert rp.executar_replay(conn, os.environ["CASEFILE_TEST_DSN"],
+                              unit["canonical_name"], tmp_path / "s",
+                              teto=25.0)
+    assert chamado == {"ok": True}
+
+
+def test_identidade_distingue_bancos_do_mesmo_servidor(origem):
+    conn, _, _, _ = origem
+    a = rp.identidade_do_banco(conn)
+    assert a[0] == conn.execute("SELECT current_database() AS d"
+                                ).fetchone()["d"]
+    assert len(a) == 3 and all(a)
