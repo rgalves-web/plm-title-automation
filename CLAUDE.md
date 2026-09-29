@@ -68,3 +68,5 @@ own scope; the still-applicable operator checkpoints are preserved.
 - Template sample data has leaked into deliverables before; the artefact is born template-minus-sample and every cell needs provenance.
 - A filename is a weak prior, never a rule (folder T0141070 held T0141066's bytes).
 - The blue-formula-cell rule is the most repeated client rule on Slack; the pen enforces it (invariant 3).
+
+Surface-title preparation (2026-09-12): see `docs/CIBOLA_PREPARACAO.md`. Explicit per-case planning profile; downstream surface collection/examination/export remains pending. Do not apply Emirates defaults to a configured surface case.

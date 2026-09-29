@@ -48,7 +48,7 @@ from typing import Any
 
 from src.casefile import caneta, censo, custo, estados, ferramentas
 from src.casefile import plano as plano_mod
-from src.casefile import referencia, sessao, triagem
+from src.casefile import referencia, sessao, triagem, project_profile
 from src.casefile.acervo import montar_acervo
 
 ULTIMA = Path.home() / ".casefile_ultima"
@@ -279,6 +279,7 @@ def cmd_planejar(nome: str, repo: Any = None, client: Any = None) -> None:
 
     repo = repo or _repo()
     unit = _unit_de(repo, nome)
+    profile = project_profile.selected(repo, unit)
     pasta = Path(unit["folder_path"])
     if not pasta.is_dir():
         raise SystemExit(f"a pasta da unit sumiu do disco: {pasta}")
@@ -302,7 +303,7 @@ def cmd_planejar(nome: str, repo: Any = None, client: Any = None) -> None:
     print("1/4 referencias da raiz do projeto + censo (deterministico)…",
           flush=True)
     proj_root = pasta.parent
-    referencias = {k: referencia.find_reference(k, proj_root)
+    referencias = {} if profile else {k: referencia.find_reference(k, proj_root)
                    for k in referencia.REFERENCE_PATTERNS}
     resumo_censo = censo.executar(repo, unit, pasta, referencias)
     print(f"    censo: {resumo_censo['conteudos']} conteudo(s) em "
@@ -335,7 +336,7 @@ def cmd_planejar(nome: str, repo: Any = None, client: Any = None) -> None:
     orc = custo.orcamento(repo, unit, teto_comando)
     sessao.rodar(
         repo=repo, unit=unit, pasta=pasta, comando="planejar.examinador",
-        sistema=SISTEMA_PLANEJADOR, task=task,
+        sistema=profile["planning_system"] if profile else SISTEMA_PLANEJADOR, task=task,
         ferramentas=ferramentas.FERRAMENTAS_LEITURA
         + ferramentas.FERRAMENTAS_ESCRITA,
         dispatch=dispatch, modelo_sessao=sessao.modelo(),
@@ -359,6 +360,9 @@ def cmd_planejar(nome: str, repo: Any = None, client: Any = None) -> None:
 def _task_planejar(repo: Any, unit: dict[str, Any],
                    referencias: dict[str, Path | None],
                    resumo_censo: dict[str, Any]) -> str:
+    profile = project_profile.selected(repo, unit)
+    if profile:
+        return project_profile.planning_task(repo, unit, resumo_censo, profile)
     sha_por_nome = repo.sha_por_nome(unit["id"])
     linhas_ref = []
     for kind in sorted(referencias):
@@ -451,6 +455,7 @@ def cmd_avancar(nome: str, repo: Any = None) -> None:
     from src.casefile import gates as g
     repo = repo or _repo()
     unit = _unit_de(repo, nome)
+    project_profile.require_supported(repo, unit, "avancar")
     pend = g.pendentes(repo, unit)
     if pend:
         linhas = "\n".join(f"  - {p['condicao']} [{p['status']}]: "
@@ -477,6 +482,7 @@ def cmd_coletar(nome: str, repo: Any = None, client: Any = None,
 
     repo = repo or _repo()
     unit = _unit_de(repo, nome)
+    project_profile.require_supported(repo, unit, "coletar")
     pasta = Path(unit["folder_path"])
     atual = repo.estado_da_unit(unit["id"])
     if atual != "COLETANDO":
@@ -628,6 +634,7 @@ def cmd_reconciliar(nome: str, repo: Any = None) -> None:
     from src.casefile import reconciliacao as rc
     repo = repo or _repo()
     unit = _unit_de(repo, nome)
+    project_profile.require_supported(repo, unit, "reconciliar")
     if repo.estado_da_unit(unit["id"]) != "COLETANDO":
         raise SystemExit("reconciliar exige COLETANDO.")
     pasta = Path(unit["folder_path"])
@@ -659,6 +666,7 @@ def cmd_examinar(nome: str, repo: Any = None, client: Any = None,
 
     repo = repo or _repo()
     unit = _unit_de(repo, nome)
+    project_profile.require_supported(repo, unit, "examinar")
     if repo.estado_da_unit(unit["id"]) != "EXAMINANDO":
         raise SystemExit(f"examinar exige EXAMINANDO; "
                          f"{unit['canonical_name']} esta em "
