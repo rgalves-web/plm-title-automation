@@ -26,6 +26,8 @@ from typing import Any, Callable
 
 from src.casefile import agentes, orquestracao as orq, validacao
 from src.casefile.orquestracao_repo import TransicaoInvalida
+
+ATOR = "process:worker"
 from src.examinador.loop import RATES, Usage, run_loop
 
 MODELO_POR_NIVEL = {
@@ -135,7 +137,8 @@ def montar_contexto(task: dict[str, Any], *, raiz: str | Path | None = None,
 
 # --- validação e gravação por esquema ---------------------------------------------
 
-def _checar_claims(repo: Any, task: dict[str, Any], saida: Any) -> list[str]:
+def _checar_claims(repo: Any, task: dict[str, Any], saida: Any,
+                   **_: Any) -> list[str]:
     """Mesma validação estrutural de `registrar_claims` (validacao.py)."""
     from src.casefile.acervo import _norm
     tipos = repo.tipos_de_claim()
@@ -152,7 +155,7 @@ def _checar_claims(repo: Any, task: dict[str, Any], saida: Any) -> list[str]:
 
 
 def _gravar_claims(repo: Any, task: dict[str, Any], saida: Any,
-                   session_id: int) -> list[int]:
+                   session_id: int, **_: Any) -> list[int]:
     from src.casefile.acervo import _norm
     tipos = repo.tipos_de_claim()
     sha_por_nome = repo.sha_por_nome(task["unit_id"])
@@ -180,8 +183,24 @@ def _gravar_claims(repo: Any, task: dict[str, Any], saida: Any,
     return ids
 
 
-VALIDADORES: dict[str, Callable[..., list[str]]] = {"claims": _checar_claims}
-GRAVADORES: dict[str, Callable[..., list[int]]] = {"claims": _gravar_claims}
+def _checar_plano(repo: Any, task: dict[str, Any], saida: Any, *,
+                  teto: float, raiz: Any) -> list[str]:
+    return orq.checar_plano(repo, task["unit_id"], saida, teto=teto,
+                            pacote=task.get("pack", ""), raiz=raiz)
+
+
+def _gravar_plano(repo: Any, task: dict[str, Any], saida: Any,
+                  session_id: int, *, teto: float, raiz: Any) -> list[int]:
+    criadas = orq.planejar(repo, task["unit_id"], saida,
+                           criado_por=f"coordenador/tarefa:{task['id']}",
+                           teto=teto, pacote=task.get("pack", ""), raiz=raiz)
+    return [t["id"] for t in criadas]
+
+
+VALIDADORES: dict[str, Callable[..., list[str]]] = {
+    "claims": _checar_claims, "plano_tarefas": _checar_plano}
+GRAVADORES: dict[str, Callable[..., list[int]]] = {
+    "claims": _gravar_claims, "plano_tarefas": _gravar_plano}
 
 
 # --- executar ---------------------------------------------------------------------
@@ -229,7 +248,8 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
                          f"não roda")
 
     checar = VALIDADORES.get(task["output_schema"])
-    validar_extra = (lambda t, s: checar(repo, t, s)) if checar else None
+    validar_extra = (lambda t, s: checar(repo, t, s, teto=teto, raiz=raiz)
+                     ) if checar else None
     entrega: dict[str, Any] = {"saida": None, "entregas": 0}
 
     def _entregar_saida(saida: Any) -> dict[str, Any]:
@@ -290,7 +310,21 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
     gravados: list[int] = []
     gravar = GRAVADORES.get(task["output_schema"])
     if not res["erros"] and gravar is not None:
-        gravados = gravar(repo, task, entrega["saida"], session_id)
+        try:
+            gravados = gravar(repo, task, entrega["saida"], session_id,
+                              teto=teto, raiz=raiz)
+        except (orq.PlanoInvalido, validacao.ClaimInvalido, ValueError) as exc:
+            # validou na entrega e falhou ao gravar (o estado mudou no meio):
+            # nada fica aceito por omissão — volta ao operador, com motivo.
+            atual = repo.tarefa(task["id"])
+            res["tarefa"] = repo.transicionar_tarefa(
+                task["id"], (atual["status"],), "aguardando_operador", ATOR,
+                f"saida_valida_nao_gravada: {exc}")
+            repo.abrir_escalonamento(
+                unit_id, task["id"], "gravacao",
+                f"A saída da tarefa {task['ref']!r} passou na validação mas "
+                f"não pôde ser gravada: {exc}", ["reexecutar", "recusar"])
+            res["erros"] = [f"saida_valida_nao_gravada: {exc}"]
     return {"tarefa": res["tarefa"], "run_id": run["id"],
             "erros": res["erros"], "teto_atingido": res["teto_atingido"],
             "modelo": modelo, "custo_usd": custo, "parada": parada,

@@ -37,6 +37,7 @@ CREATE TABLE tasks (
                   ('nenhuma','obrigatoria','operador',
                    'obrigatoria_e_operador')),
   justificativa text   NOT NULL DEFAULT '',
+  pendencias    text[] NOT NULL DEFAULT '{}',
   status        text   NOT NULL DEFAULT 'planejada' CHECK (status IN
                   ('planejada','pronta','em_execucao',
                    'aguardando_verificacao','aguardando_operador','aceita',

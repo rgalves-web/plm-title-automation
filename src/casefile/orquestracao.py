@@ -147,10 +147,11 @@ def _ordem_topologica(tarefas: list[dict[str, Any]],
     return ordem
 
 
-def planejar(repo: Any, unit_id: int, plano: dict[str, Any], *,
-             criado_por: str, teto: float, pacote: str = "",
-             raiz: str | Path | None = None) -> list[dict[str, Any]]:
-    """Grava o grafo de tarefas de um `plano_tarefas`. Tudo ou nada."""
+def _checar(repo: Any, unit_id: int, plano: dict[str, Any], *, teto: float,
+            pacote: str, raiz: str | Path | None
+            ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Toda a checagem de forma de um plano, sem gravar. Devolve a ordem
+    topológica e as fichas de função; erro vira PlanoInvalido."""
     erros = agentes.validar_saida("plano_tarefas", plano, raiz)
     if erros:
         raise PlanoInvalido("plano fora do esquema: " + "; ".join(erros[:5]))
@@ -180,7 +181,27 @@ def planejar(repo: Any, unit_id: int, plano: dict[str, Any], *,
         raise PlanoInvalido(
             f"orcamento_do_plano_excede_saldo: novo ${novo:.2f} + em aberto "
             f"${comprometido:.2f} > saldo ${saldo:.2f} (teto ${teto:.2f})")
+    return ordem, funcoes
 
+
+def checar_plano(repo: Any, unit_id: int, plano: dict[str, Any], *,
+                 teto: float, pacote: str = "",
+                 raiz: str | Path | None = None) -> list[str]:
+    """Os erros de forma que `planejar` recusaria — lista vazia = grava.
+    É o que o Coordenador recebe de volta ao entregar."""
+    try:
+        _checar(repo, unit_id, plano, teto=teto, pacote=pacote, raiz=raiz)
+    except PlanoInvalido as exc:
+        return [str(exc)]
+    return []
+
+
+def planejar(repo: Any, unit_id: int, plano: dict[str, Any], *,
+             criado_por: str, teto: float, pacote: str = "",
+             raiz: str | Path | None = None) -> list[dict[str, Any]]:
+    """Grava o grafo de tarefas de um `plano_tarefas`. Tudo ou nada."""
+    ordem, funcoes = _checar(repo, unit_id, plano, teto=teto, pacote=pacote,
+                             raiz=raiz)
     linhas = []
     for t in ordem:
         ficha = funcoes[t["role"]]
@@ -192,6 +213,7 @@ def planejar(repo: Any, unit_id: int, plano: dict[str, Any], *,
             "depends_on_refs": list(t["depends_on"]),
             "budget_usd": t["budget_usd"], "priority": t["priority"],
             "verificacao": modo_verificacao(ficha.front.get("verifica")),
+            "pendencias": list(t.get("pendencias", [])),
             "justificativa": (f"[{t['gate']}] " if t.get("gate") else "")
             + t["justificativa"]})
     criadas = repo.criar_tarefas(unit_id, linhas, criado_por)

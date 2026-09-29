@@ -34,6 +34,15 @@
                                               gate pendente
     python -m src.casefile tarefas ["<unit>"]  grafo de tarefas, runs, custo
                                               e escalonamentos (sem modelo)
+    python -m src.casefile coordenar ["<unit>"] --pacote=P [--orcamento=2]
+                                              semeia a tarefa do Coordenador
+                                              (sem modelo)
+    python -m src.casefile trabalhar ["<unit>"] [--max=N]
+                                              worker generico: executa
+                                              tarefas prontas COM MODELO
+    python -m src.casefile cobertura ["<unit>"] [--versao=N]
+                                              pendencias do plano x tarefas
+                                              (sem modelo)
     python -m src.casefile agentes validar|listar [--raiz=DIR]
                                               fichas OKF de agentes/: valida
                                               forma (sai != 0 com erro) ou
@@ -232,6 +241,69 @@ def cmd_tarefas(nome: str, repo: Any = None) -> None:
     for e in repo.escalonamentos(unit["id"], abertos=True):
         print(f"  ESCALONAMENTO #{e['id']} [{e['motivo']}] {e['pergunta']}")
     _fecho(repo, unit)
+
+
+def cmd_coordenar(nome: str, pacote: str, orcamento: float,
+                  repo: Any = None) -> None:
+    """Semeia a tarefa do Coordenador (sem modelo)."""
+    from src.casefile import coordenacao
+    repo = repo or _repo()
+    unit = _unit_de(repo, nome)
+    n = 1 + sum(1 for t in repo.tarefas(unit["id"])
+                if t["role"] == "coordenador")
+    t = coordenacao.semear_coordenador(
+        repo, unit, pacote=pacote, teto=custo.teto_unit(),
+        orcamento_usd=orcamento, criado_por="human:operador",
+        ref=f"coordenador-{n}")
+    print(f"tarefa {t['ref']} ({t['status']}) — pacote {pacote}, "
+          f"orcamento ${orcamento:.2f}; rode `trabalhar` para executar "
+          f"(chama modelo, custa).")
+    _fecho(repo, unit)
+
+
+def cmd_trabalhar(nome: str, maximo: int, repo: Any = None,
+                  client: Any = None) -> None:
+    """Worker genérico: executa tarefas prontas COM MODELO (custa)."""
+    from src.casefile import worker
+    repo = repo or _repo()
+    unit = _unit_de(repo, nome)
+    got = worker.executar_ate_parar(repo, unit["id"], "human:operador/cli",
+                                    teto=custo.teto_unit(),
+                                    max_tarefas=maximo, client=client)
+    for e in got["execucoes"]:
+        t = e["tarefa"]
+        print(f"  {t['ref']:<24} {t['role']:<14} -> {t['status']:<23} "
+              f"{e['modelo']} ${e['custo_usd']:.4f}"
+              + (f" · {len(e['gravados'])} gravado(s)" if e["gravados"]
+                 else "")
+              + (f" · ERROS: {e['erros'][0]}" if e["erros"] else ""))
+    print(f"parada: {got['parada']} · custo desta chamada "
+          f"${got['custo_usd']:.4f}")
+    _fecho(repo, unit)
+
+
+def cmd_cobertura(nome: str, versao: int | None, repo: Any = None) -> None:
+    """Pendências do plano de investigação × tarefas (conta referências)."""
+    from src.casefile import coordenacao
+    repo = repo or _repo()
+    unit = _unit_de(repo, nome)
+    alvos = coordenacao.alvos_do_plano(repo, unit["id"], versao)
+    tarefas = [t for t in repo.tarefas(unit["id"])
+               if t["role"] != "coordenador"]
+    c = coordenacao.cobertura(tarefas, alvos,
+                              coordenacao.pendencias_validas(repo, unit["id"]))
+    print(f"cobertura: {len(c['cobertos'])}/{c['alvos']} pendências abertas "
+          f"do plano citadas por tarefas "
+          f"({'COMPLETA' if c['completa'] else 'INCOMPLETA'})")
+    for a, refs in c["cobertos"].items():
+        print(f"  {a:<14} <- {', '.join(refs)}")
+    for rotulo in ("faltando", "inexistentes", "citam_cancelada",
+                   "tarefas_sem_pendencia"):
+        if c[rotulo]:
+            print(f"  {rotulo}: {', '.join(c[rotulo])}")
+    if alvos["canceladas"]:
+        print(f"  (canceladas pelo operador, fora do alvo: "
+              f"{', '.join(alvos['canceladas'])})")
 
 
 def cmd_unidades(repo: Any = None) -> None:
@@ -860,6 +932,18 @@ def main(argv: list[str] | None = None) -> None:
         cmd_avancar(_nome_de(resto))
     elif comando == "tarefas":
         cmd_tarefas(_nome_de(resto))
+    elif comando == "coordenar":
+        pacote = _flag(resto, "pacote")
+        if not pacote:
+            raise SystemExit("uso: coordenar [\"<unit>\"] --pacote=<Domain "
+                             "Pack> [--orcamento=USD]")
+        cmd_coordenar(_nome_de(resto), pacote,
+                      float(_flag(resto, "orcamento") or "2"))
+    elif comando == "trabalhar":
+        cmd_trabalhar(_nome_de(resto), int(_flag(resto, "max") or "50"))
+    elif comando == "cobertura":
+        versao = _flag(resto, "versao")
+        cmd_cobertura(_nome_de(resto), int(versao) if versao else None)
     elif comando == "agentes":
         from src.casefile import agentes
         codigo = agentes.cmd_agentes(resto)
@@ -869,4 +953,5 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(f"comando desconhecido: {comando!r}. Comandos: db, "
                          f"indicar, planejar, plano, aprovar, rejeitar, "
                          f"estado, unidades, coletar, gates, reconciliar, "
-                         f"examinar, dashboard, avancar, tarefas, agentes.")
+                         f"examinar, dashboard, avancar, tarefas, coordenar, "
+                         f"trabalhar, cobertura, agentes.")

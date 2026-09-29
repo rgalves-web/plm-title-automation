@@ -63,14 +63,16 @@ class OrquestracaoRepo:
                     "INSERT INTO tasks (unit_id, parent_id, ref, role, pack, "
                     "title, input_json, output_schema, acceptance, "
                     "depends_on, budget_usd, priority, verificacao, "
-                    "justificativa, created_by) VALUES (%s, %s, %s, %s, %s, "
-                    "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
+                    "justificativa, pendencias, created_by) VALUES (%s, %s, "
+                    "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                    "RETURNING *",
                     (unit_id, t.get("parent_id"), t["ref"], t["role"],
                      t.get("pack", ""), t["title"],
                      _json(t.get("input_json", {})), t["output_schema"],
                      t["acceptance"], deps, t.get("budget_usd", 0),
                      t.get("priority", 0), t["verificacao"],
-                     t.get("justificativa", ""), created_by)).fetchone()
+                     t.get("justificativa", ""),
+                     list(t.get("pendencias", [])), created_by)).fetchone()
                 self._log_tarefa(row["id"], "", "planejada", created_by, "")
                 criadas.append(_num(row))
         return criadas

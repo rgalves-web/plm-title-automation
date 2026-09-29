@@ -59,6 +59,7 @@ class OrquestracaoFake:
                        "priority": t.get("priority", 0),
                        "verificacao": t["verificacao"],
                        "justificativa": t.get("justificativa", ""),
+                       "pendencias": list(t.get("pendencias", [])),
                        "status": "planejada", "created_by": created_by,
                        "created_at": _agora(), "updated_at": _agora()}
                 estado["tasks"].append(row)
