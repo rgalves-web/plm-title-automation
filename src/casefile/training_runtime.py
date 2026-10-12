@@ -30,7 +30,7 @@ TOOLS = [
             ['rule_id', 'version', 'estado', 'claim_ids', 'razao', 'responsavel'])]
 
 
-def prepare(repo, unit, sid, command, store=None):
+def prepare(repo, unit, sid, command, store=None, provenance=None):
     uid = unit['id']
     # Only an answered, explicit operator decision enables a publication.
     decisions = [d for d in repo.decisoes_da_unit(uid)
@@ -46,7 +46,12 @@ def prepare(repo, unit, sid, command, store=None):
         store = store or Store(config.get('store_root', ROOT))
         release, scope = config['release_id'], dict(config['scope'])
         # Stage is the actual session stage, not inherited from a prior command.
-        scope['stage'] = {'planejar.examinador': 'planning', 'exame.vs3': 'examination'}[command]
+        stage = {'planejar.examinador': 'planning', 'exame.vs3': 'examination'}.get(command)
+        if command.startswith('tarefa:'):
+            stage = 'planning' if command == 'tarefa:coordenador' else 'examination'
+        if stage is None:
+            raise ValueError('unknown_training_session_stage')
+        scope['stage'] = stage
         approval, all_cards = store.release(release)
         cards = [c for c in all_cards if applicable(c, scope)]
     criteria = [c['rule_id'] for c in cards if c['nature'] == 'review_criterion']
@@ -54,7 +59,8 @@ def prepare(repo, unit, sid, command, store=None):
                 'decision_id': decision['id'] if decision else None, 'cards': cards,
                 'expected_criteria': criteria, 'previous_release': previous.get('release_id') if previous else None,
                 'release_changed': bool(previous and previous.get('release_id') != release),
-                'status': 'configured' if decision else 'pending_operator_scope_and_release'}
+                'status': 'configured' if decision else 'pending_operator_scope_and_release',
+                'agent_knowledge':provenance or {}}
     repo.knowledge_context(uid, sid, manifest)
     offered = set()
 

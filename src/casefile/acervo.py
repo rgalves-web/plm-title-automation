@@ -17,8 +17,8 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.examinador.cache import PageCache
-from src.examinador.corpus import Corpus
+from src.infra.cache import PageCache
+from src.infra.corpus import Corpus
 
 # Pastas de estado de automação: nunca são corpus.
 ESTADO_DIRS = {"_minorh", "_casefile", "_work", "_page_cache"}

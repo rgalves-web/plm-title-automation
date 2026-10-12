@@ -329,8 +329,10 @@ def test_agentes_do_repo_passam_na_validacao():
 def test_todo_saida_esquema_do_repo_tem_arquivo_e_vice_versa():
     r = agentes.validar()
     usados = {f.front["saida_esquema"] for f in r.por_tipo("Role")}
+    usados |= {s for f in r.por_tipo('Role') for s in f.front.get('saida_esquemas_adicionais',[])}
     assert usados == set(agentes.esquemas_disponiveis(agentes.RAIZ_PADRAO))
-    assert len(usados) == 10
+    assert len({f.front['saida_esquema'] for f in r.por_tipo('Role')}) == 10
+    assert len(usados) == 14
 
 
 def test_esquema_claims_segue_validar_claim():

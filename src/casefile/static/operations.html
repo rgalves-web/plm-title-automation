@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PLM · Control Tower</title>
+  <link rel="stylesheet" href="/static/operations.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="PLM início"><span class="brandmark">P<span>•</span></span><span>PLM<span class="brand-sub">TITLE OPERATIONS</span></span></a>
+    <div class="top-middle"><span class="live-dot" id="connection-dot"></span><span id="connection">Conectando ao sistema</span><span class="divider"></span><span id="worker-health">Verificando executores</span></div>
+    <div class="operator"><span class="operator-avatar">R</span><span>Renato<span class="muted block">Operador</span></span></div>
+  </header>
+  <div class="app-layout">
+    <aside class="sidebar">
+      <div class="sidebar-heading"><span class="eyebrow">ÁREA DE TRABALHO</span><strong>Project Cibola <span class="count" id="case-count">0</span></strong></div>
+      <div class="search"><svg viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg><input id="filter" placeholder="Buscar tract ou PID" aria-label="Buscar tract ou PID"></div>
+      <div id="pid-filters" class="pills"></div>
+      <nav id="cases" aria-label="Tracts"></nav>
+      <div class="sidebar-bottom"><span class="eyebrow">UM LUGAR PARA CADA RESULTADO</span><p>Fontes, trabalho, decisões<br>e conhecimento versionado.</p><span class="local-label"><span class="live-dot"></span>Operação local</span></div>
+    </aside>
+    <main>
+      <select id="case-picker" class="mobile-picker" aria-label="Selecionar tract"></select>
+      <section class="page-heading"><div><div class="breadcrumb">Cibola <span>/</span> <span id="case-breadcrumb">Operação</span></div><h1 id="case-title">Sua esteira de title</h1><p id="case-subtitle">Acompanhe o trabalho e abra a evidência de cada resultado.</p></div><div class="actions"><button class="button quiet" id="configure">Configurar</button><button class="button quiet" id="pause">Pausar</button><button class="button primary" id="start"><span>▶</span> Iniciar agentes</button></div></section>
+      <div id="notice" class="notice" hidden></div>
+      <section class="metrics" id="metrics"></section>
+      <section class="workflow-panel">
+        <div class="panel-heading"><div><span class="eyebrow">ESTEIRA DE AGENTES</span><h2>Do documento à entrega</h2></div><div class="workflow-key"><span><i class="key-dot working"></i>Trabalhando</span><span><i class="key-dot awaiting"></i>Aguardando</span><span><i class="key-dot done"></i>Concluído</span></div></div>
+        <div class="workflow" id="workflow"><svg class="connections" id="connections" aria-hidden="true"></svg><div class="stations" id="stations"></div></div>
+        <div class="workflow-footer"><span id="workflow-summary">Carregando estado registrado</span><span>Conhecimento aplicado em cada execução <span class="mini-arrow">↗</span></span></div>
+      </section>
+      <section class="work-panel">
+        <nav class="tabs" id="tabs" aria-label="Informações do caso"></nav>
+        <div id="tab-content" class="tab-content"></div>
+      </section>
+      <footer><span id="updated">Dados do Case File</span><span>PLM · Evidência em cada etapa</span></footer>
+    </main>
+  </div>
+  <aside id="drawer" class="drawer" hidden aria-label="Detalhes"><button class="close" id="close-drawer" aria-label="Fechar">×</button><div id="drawer-content"></div></aside>
+  <dialog id="start-dialog"><form id="start-form"><div class="dialog-heading"><span class="eyebrow">INICIAR OPERAÇÃO</span><h2>Aprovar escopo e orçamento</h2></div><p id="start-case"></p><label>Through date<input name="through_date" type="date" required></label><label>Teto de APIs por tract · US$<input name="budget" type="number" min="0.01" max="50" step="0.01" value="50" required></label><fieldset><legend>Fontes autorizadas para pesquisa</legend><label class="check"><input type="checkbox" name="source" value="local" checked>Acervo local</label><label class="check"><input type="checkbox" name="source" value="drive" checked>Google Drive</label><label class="check"><input type="checkbox" name="source" value="countyrecords" checked>CountyRecords · índice e preview</label><label class="check"><input type="checkbox" name="source" value="texasfile" checked>TexasFile · índice</label><label class="check"><input type="checkbox" name="source" value="cad" checked>CAD</label><label class="check"><input type="checkbox" name="source" value="rrc" checked>RRC</label></fieldset><label class="check"><input name="all_cases" type="checkbox">Aplicar aos quatro tracts do piloto</label><p class="muted">Pesquisa desde janeiro de 1966, com antecedentes pertinentes. Produção Claude e revisão OpenAI usam os trechos e páginas necessários. Os agentes ajustam tarefas dentro do escopo e teto aprovados. Acessos pendentes ficam na fila de decisões.</p><div class="dialog-actions"><button type="button" class="button quiet" id="cancel-start">Voltar</button><button type="submit" class="button primary">Aprovar e iniciar</button></div></form></dialog>
+  <script type="module" src="/static/operations.js"></script>
+</body>
+</html>

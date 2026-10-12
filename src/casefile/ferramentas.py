@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 from src.casefile import plano as plano_mod
 from src.casefile import validacao
-from src.minorh.ferramentas import FERRAMENTAS as _FERRAMENTAS_MINORH
+from src.infra.tool_schemas import FERRAMENTAS as _FERRAMENTAS_MINORH
 
 _LEITURA = ("list_documents", "read_page", "search_corpus",
             "read_knowledge", "write_knowledge")
@@ -124,7 +124,7 @@ def montar_dispatch(*, acervo: Any, repo: Any, unit: dict[str, Any],
         local = kb_unidade.read(conceito)
         alheio = kb_global.read(conceito)
         from src.casefile.training import file_hash, legacy_candidates
-        from src.examinador.okf import slug
+        from src.infra.okf import slug
         versions = []
         for origin, card, kb in [('unidade', local, kb_unidade), ('global', alheio, kb_global)]:
             if card.get('encontrado'):

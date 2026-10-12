@@ -237,8 +237,8 @@ def _task(repo: Any, unit: dict[str, Any]) -> str:
 
 def executar_sessao(*, repo: Any, unit: dict[str, Any], pasta: Path,
                     client: Any = None, max_cost_usd: float) -> Any:
-    from src.examinador.cache import PageCache
-    from src.examinador.okf import KnowledgeBase
+    from src.infra.cache import PageCache
+    from src.infra.okf import KnowledgeBase
 
     acervo = montar_acervo(pasta, {}, incluir_entrega=True,
                            cache=PageCache())

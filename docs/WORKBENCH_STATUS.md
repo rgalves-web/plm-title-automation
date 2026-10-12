@@ -1,3 +1,19 @@
+# Esteira visual — estado vigente em 12/10/2026
+
+A entrada operacional agora é [Operação visual](OPERACAO_VISUAL.md), com painel local em http://127.0.0.1:8788. Quatro casos Cibola incorporados e quatro executores disponíveis. O piloto foi aprovado e iniciou chamadas reais. Renato confirmou o exemplar de Derek para Cibola e impôs posteriormente US$ 20 adicionais no total das APIs do restante da implementação; o limite está instalado e persistido no banco.
+
+Validação: baseline de 1.291 testes; suíte completa final de **1.343 testes aprovada**. Os contratos de decisão por versão, custo incerto, retomada após suspensão e aprendizado com escopo canônico foram testados. Restauração final real do banco verificada em instância isolada; sete pastas de controles transferidas após conferir 11.962 arquivos, com 10.008 referências preservadas no mapa. Os quatro pacotes de decisão conferem 8.184 referências de arquivos; contagem de referências não mede conclusão de title.
+
+E tem 11 afirmações e E-2 tem três, sujeitas à revisão e decisão humana; leituras e comparações reais de OpenAI foram persistidas. Os quatro casos têm pacote local de decisão com referências conferidas e dependências. As duas reservas antigas foram recuperadas do registro original, sem cobrança inventada e sem repetir as chamadas incertas.
+
+Aprendizado real: Renato recusou as propostas 2 e 3, aprovou a orientação 4 para Cibola e a correção do identificador interno preservou seu conteúdo como versão canônica. A publicação está selecionada nos quatro casos. Claude declarou aplicação da nova versão na sessão 185; não foi uma declaração feita pelo código. O registro unificado conserva 2.978 versões de conhecimento, sem ativação automática na importação.
+
+O teto adicional total continua US$ 20: US$ 11,3597 confirmados, US$ 1,420223 retidos por custo incerto e US$ 7,220077 livres. Modelo/configuração econômicos, consultas paginadas, resultados parciais duráveis e recuperação sem outra inferência estão implementados. Os motores congelados conservam regressões e aprendizado fora da operação até comprovar o descarte final. O aceite de title ainda depende das fontes operacionais, pesquisa/reconciliação, decisões materiais, escrita e Q1–Q6 reais. PREP, Spell Check e SME não foram declarados cumpridos.
+
+---
+
+## Histórico anterior — não é a entrada operacional atual
+
 # Workbench — status de implementação
 _Dono: o Code (ordem de 23/08). Baseline vigente abaixo; tudo sob "HISTÓRICO" descreve o estado PRÉ-CONSERTO e vale como registro, não como mapa do sistema._
 

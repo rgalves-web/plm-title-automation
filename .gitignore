@@ -70,3 +70,6 @@ data/training_suite/
 .pytest-training-*/
 scratch_baseline_training*.txt
 scratch_training_*.txt
+.pytest-esteira-*/
+scratch_esteira_*.txt
+data/legacy_recovery/

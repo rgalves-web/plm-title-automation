@@ -1,12 +1,7 @@
-"""VS-D0 — API read-only do Control Tower, servida do Case File.
+"""Local PLM workbench: persisted Case File queries and explicit operator commands.
 
-Arquitetura obrigatória (ordem de 02/09): Agentes → Case File → API →
-Dashboard. A API NUNCA infere estado de logs nem lê relatórios Markdown para
-calcular progresso: toda resposta nasce das tabelas do Case File via
-`repo.py`. Read-only por construção: nenhum endpoint escreve, nenhuma
-credencial aparece, nenhum botão de ação existe no D0.
-
-Execução local:  uvicorn --app-dir <repo> src.casefile.api:app --port 8788
+Start with python -m src.casefile.workbench serve for the four workers.
+The older consultation endpoints remain read-only; commands use revision and ID.
 """
 from __future__ import annotations
 
@@ -18,14 +13,16 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 from src.casefile import custo as custo_mod
 from src.casefile import gates as gates_mod
 from src.casefile import portal, simulacao
 
-app = FastAPI(title="Case File — Control Tower (VS-D0, read-only)")
+app = FastAPI(title="PLM — Esteira de agentes e Case File")
+app.mount('/static', StaticFiles(directory=Path(__file__).parent/'static'), name='static')
 
-_STATIC = Path(__file__).parent / "static" / "index.html"
+_STATIC = Path(__file__).parent / "static" / "operations.html"
 
 
 def get_repo() -> Any:
@@ -179,6 +176,11 @@ def _progresso(repo: Any, unit_id: int) -> dict[str, Any]:
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
     return _STATIC.read_text(encoding="utf-8")
+
+
+@app.get('/legacy', response_class=HTMLResponse)
+def legacy_index():
+    return (Path(__file__).parent/'static'/'index.html').read_text(encoding='utf-8')
 
 
 @app.get("/api/units")
@@ -447,3 +449,7 @@ def unit_grafo(unit_id: int, repo: Any = Depends(get_repo)
         return {"disponivel": False}
     return {"disponivel": True,
             **json.loads(path.read_text(encoding="utf-8"))}
+
+
+from src.casefile.operations_api import attach as _attach_operations
+_attach_operations(app,get_repo)

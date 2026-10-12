@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+import math
 from pathlib import Path
 from typing import Any
 
@@ -151,7 +152,7 @@ def _ordem_topologica(tarefas: list[dict[str, Any]],
 
 
 def _checar(repo: Any, unit_id: int, plano: dict[str, Any], *, teto: float,
-            pacote: str, raiz: str | Path | None
+            pacote: str, raiz: str | Path | None, excluir_tarefa: int | None = None
             ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Toda a checagem de forma de um plano, sem gravar. Devolve a ordem
     topológica e as fichas de função; erro vira PlanoInvalido."""
@@ -165,6 +166,8 @@ def _checar(repo: Any, unit_id: int, plano: dict[str, Any], *, teto: float,
         raise PlanoInvalido(f"pacote_inexistente: {pacote!r}")
     tarefas = plano["tarefas"]
     for t in tarefas:
+        if not math.isfinite(float(t['budget_usd'])) or t['budget_usd']<0:
+            raise PlanoInvalido('orcamento_da_tarefa_nao_finito')
         if t["role"] not in funcoes:
             raise PlanoInvalido(f"funcao_inexistente: {t['role']!r}")
         if t["role"] == "verificador":
@@ -178,7 +181,7 @@ def _checar(repo: Any, unit_id: int, plano: dict[str, Any], *, teto: float,
 
     saldo = round(teto - repo.custo_acumulado(unit_id), 4)
     comprometido = sum(t["budget_usd"] for t in existentes
-                       if t["status"] in EM_ABERTO)
+                       if t["status"] in EM_ABERTO and t['id'] != excluir_tarefa)
     novo = sum(t["budget_usd"] for t in tarefas)
     if comprometido + novo > saldo + 1e-9:
         raise PlanoInvalido(
@@ -189,11 +192,11 @@ def _checar(repo: Any, unit_id: int, plano: dict[str, Any], *, teto: float,
 
 def checar_plano(repo: Any, unit_id: int, plano: dict[str, Any], *,
                  teto: float, pacote: str = "",
-                 raiz: str | Path | None = None) -> list[str]:
+                 raiz: str | Path | None = None, excluir_tarefa: int | None = None) -> list[str]:
     """Os erros de forma que `planejar` recusaria — lista vazia = grava.
     É o que o Coordenador recebe de volta ao entregar."""
     try:
-        _checar(repo, unit_id, plano, teto=teto, pacote=pacote, raiz=raiz)
+        _checar(repo, unit_id, plano, teto=teto, pacote=pacote, raiz=raiz,excluir_tarefa=excluir_tarefa)
     except PlanoInvalido as exc:
         return [str(exc)]
     return []
@@ -201,11 +204,11 @@ def checar_plano(repo: Any, unit_id: int, plano: dict[str, Any], *,
 
 def linhas_do_plano(repo: Any, unit_id: int, plano: dict[str, Any], *,
                     teto: float, pacote: str = "",
-                    raiz: str | Path | None = None) -> list[dict[str, Any]]:
+                    raiz: str | Path | None = None, excluir_tarefa: int | None = None) -> list[dict[str, Any]]:
     """Checa o plano e devolve as linhas prontas para `criar_tarefas`, em
     ordem topológica. Não grava."""
     ordem, funcoes = _checar(repo, unit_id, plano, teto=teto, pacote=pacote,
-                             raiz=raiz)
+                             raiz=raiz,excluir_tarefa=excluir_tarefa)
     linhas = []
     for t in ordem:
         ficha = funcoes[t["role"]]
@@ -257,7 +260,7 @@ def checar_teto(repo: Any, unit_id: int, teto: float) -> None:
 def pegar(repo: Any, unit_id: int, worker: str, *, teto: float,
           raiz: str | Path | None = None,
           lease_segundos: int = LEASE_PADRAO_S,
-          excluir_roles: tuple[str, ...] = ()
+          excluir_roles: tuple[str, ...] = (), max_active_per_unit: int | None = None
           ) -> tuple[dict[str, Any], dict[str, Any]] | None:
     """Libera travas vencidas, confere o teto, promove prontas e entrega a
     próxima (menor priority, depois id) com a versão das fichas no run.
@@ -266,8 +269,9 @@ def pegar(repo: Any, unit_id: int, worker: str, *, teto: float,
     checar_teto(repo, unit_id, teto)
     repo.promover_prontas(unit_id, ATOR)
     funcoes, pacotes = registrar_versoes(repo, raiz)
-    return repo.pegar_tarefa(unit_id, worker, funcoes, pacotes,
-                             lease_segundos, tuple(excluir_roles))
+    if max_active_per_unit is None:
+        return repo.pegar_tarefa(unit_id, worker, funcoes, pacotes,lease_segundos,tuple(excluir_roles))
+    return repo.pegar_tarefa(unit_id,worker,funcoes,pacotes,lease_segundos,tuple(excluir_roles),max_active_per_unit)
 
 
 def entregar(repo: Any, run_id: int, worker: str, saida: Any, *,

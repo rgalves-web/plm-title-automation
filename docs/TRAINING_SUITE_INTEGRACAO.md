@@ -1,5 +1,15 @@
 # Training Suite no Case File
 
+## Atualização local Cibola — 01/10/2026
+
+**Seleção corrente 1.2:** publicação `ecf0bcfa759c42efea0c5304b505511d1fd7e140d76df8591ee2afb14e22ba99`, decisões **89/90/91**, units **2/3/4**. Q2 explicita pesquisa grantor/grantee de todas as partes da cadeia, variantes/períodos/fontes, resultados completos e reconciliação, sem substituir busca nominal por remissões. Sete fichas com fontes versionadas, seleção e estado conferidos. Trilha: `../Land Cibola Surface Titles/00_Governanca/atualizacao_v1.2_2026-10-01/`. A implantação 1.1 abaixo é histórica. Nenhum código de runtime ou estado da unit foi alterado; três achados de cobertura nominal por unit foram registrados separadamente como pesquisas abertas.
+
+**Atualização vigente 1.1:** comunicado completo de Marc Reyes incorporado por continuidade da instrução de Renato para persistir o protocolo. Publicação `391d4b7845918365fb7ed948fcf2cea27016c4b45e844824a0c49865c9ba11b5`, decisões **86/87/88** para units **2/3/4**, sete fichas com fonte versionada e seleção conferida no banco. Exemplar Lead/PM por tipo, detalhes visuais explícitos, Spell Check de notas, consulta antecipada a SMEs e PREP localizado (ainda sem execução nos relatórios). Evidências em `../Land Cibola Surface Titles/00_Governanca/atualizacao_v1.1_2026-10-01/`. O parágrafo seguinte registra a implantação 1.0 anterior; sua publicação não é mais a seleção corrente dessas três units. Nenhum código do runtime foi alterado por esta atualização.
+
+Por instrução explícita de Renato, foi publicada e selecionada nas units 2, 3 e 4 uma publicação específica do protocolo de submissão Cibola, com uma instrução e seis critérios. A fonte normativa e a trilha estão em `../Land Cibola Surface Titles/00_Governanca/README.md` (caminho relativo à raiz do repositório). A publicação é `24531b2ed0612f7b4786c00ead0d6ee0b5bde6e9c51bbf5f879151f642087a36`; decisões 83, 84 e 85. Não altera o estado das units, não aprova title e não aceita em lote as 61 candidatas anteriores. A seleção vale para próximas sessões integradas; não comprova consumo nem revisão já executada. Uploads de trabalho em andamento estão autorizados por Renato; nenhuma submissão parcial/final pode contrariar o protocolo. Project Log continua somente leitura.
+
+O restante deste documento descreve a implementação e o inventário de 11/09/2026. Menções abaixo a ausência de aprovação referem-se àquele inventário histórico, não à publicação específica acima.
+
 Implementação de 11/09/2026 na branch `training-suite-integration`, a partir de
 `6374eb9c06c3340502471a24a408933e2ab083ab`. A branch `casefile-vs1` conserva o
 ponto anterior. A integração oferece importação local, versões imutáveis,

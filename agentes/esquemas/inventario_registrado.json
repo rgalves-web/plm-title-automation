@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","required":["files","manifest_sha256","title_approved"],"properties":{"files":{"type":"integer","minimum":0},"manifest_sha256":{"type":"string"},"title_approved":{"const":false}}}

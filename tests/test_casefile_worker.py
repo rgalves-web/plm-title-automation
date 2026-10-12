@@ -154,7 +154,8 @@ def test_contexto_vem_das_fichas_e_do_esquema(repo, unit):
     assert "ler_pagina" in tarefa and "indisponiveis" in tarefa
     assert set(r["indisponiveis"]) == {
         "ler_pagina", "buscar_no_acervo", "consultar_conhecimento_publicado",
-        "registrar_claims", "abrir_escalonamento"}
+        "registrar_claims", "abrir_escalonamento", "ler_case_file",
+        "list_documents", "read_page", "search_corpus", "ler_controle", "ler_resultados_busca"}
     nomes = [t["name"] for t in cliente.chamadas[0]["tools"]]
     assert nomes == ["entregar_saida"]
 
@@ -371,15 +372,14 @@ def test_saldo_menor_que_o_pior_caso_da_primeira_chamada_nao_chama(repo,
 
 
 def test_teto_para_antes_da_chamada_que_passaria_do_saldo(repo, unit):
-    # 1ª resposta custa $0,75 (250k tokens de entrada no Sonnet); o pior
-    # caso da 2ª (~$0,13) passaria de $0,80 → a 2ª chamada não é feita
-    _planejar(repo, unit, _t("r2", "redator", budget=0.80))
+    # Usage nearly consumes the task allocation; refuse the next request.
+    _planejar(repo, unit, _t("r2", "redator", budget=0.55))
     cliente = ClienteCaro([_entrega(PROJECAO), [Texto("ok")]], 250_000)
     r = wk.executar_uma(repo, unit["id"], "w1", teto=TETO, client=cliente)
     assert len(cliente.chamadas) == 1
     assert r["parada"].startswith("teto_da_tarefa")
-    assert r["custo_usd"] == round((250_000 * 3.0 + 10 * 15.0) / 1e6, 4)
-    assert r["custo_usd"] <= 0.80
+    assert r["custo_usd"] == round((250_000 * 2.0 + 10 * 10.0) / 1e6, 4)
+    assert r["custo_usd"] <= 0.55
     assert r["tarefa"]["status"] == "aguardando_operador"   # entregou antes
 
 
@@ -393,14 +393,14 @@ def test_saldo_da_unit_limita_mais_que_o_da_tarefa(repo, unit):
 
 
 def test_saldo_da_tarefa_desconta_runs_anteriores(repo, unit):
-    _planejar(repo, unit, _t("r4", "redator", budget=0.80))
+    _planejar(repo, unit, _t("r4", "redator", budget=0.55))
     r1 = wk.executar_uma(repo, unit["id"], "w1", teto=TETO,
                          client=ClienteCaro([[Texto("sem entrega")]],
                                             250_000))
     assert r1["tarefa"]["status"] == "pronta"            # sem_entrega
     cliente = Cliente([])
     r2 = wk.executar_uma(repo, unit["id"], "w1", teto=TETO, client=cliente)
-    assert r2["limite_usd"] == round(0.80 - r1["custo_usd"], 6)
+    assert r2["limite_usd"] == round(0.55 - r1["custo_usd"], 6)
     assert cliente.chamadas == []                        # 0,05 < pior caso
     assert r2["tarefa"]["status"] == "bloqueada"
 
@@ -409,7 +409,7 @@ def test_estimativa_e_conservadora_e_cresce_com_a_carga():
     kw = {"system": [{"type": "text", "text": "a" * 3000}], "messages": [],
           "tools": [], "max_tokens": 8000}
     base = wk.estimar_chamada(kw, "claude-sonnet-5")
-    assert base >= 8000 * 15.0 / 1e6
+    assert base >= 8000 * 10.0 / 1e6
     kw["messages"] = [{"role": "user", "content": "b" * 30000}]
     assert wk.estimar_chamada(kw, "claude-sonnet-5") > base
 

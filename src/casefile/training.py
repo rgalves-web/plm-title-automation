@@ -27,6 +27,8 @@ def digest(value):
 
 
 def file_hash(path):
+    from src.casefile.storage import preserved_path
+    path=preserved_path(path)
     h = hashlib.sha256()
     with Path(path).open('rb') as f:
         for chunk in iter(lambda: f.read(1024 * 1024), b''):
@@ -165,6 +167,8 @@ class Store:
 
 
 def text_parts(path):
+    from src.casefile.storage import preserved_path
+    path=preserved_path(path)
     """Preserve paragraph/line locators; do not claim visual coverage."""
     if path.suffix.lower() == '.docx':
         with ZipFile(path) as z:
@@ -172,7 +176,7 @@ def text_parts(path):
             ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
             return [(f'paragraph:{i}', ''.join(p.itertext())) for i, p in
                     enumerate(root.findall('.//w:p', ns), 1)]
-    if path.suffix.lower() in ('.md', '.txt'):
+    if path.suffix.lower() in ('.md', '.txt', '.json'):
         return [(f'line:{i}', line) for i, line in
                 enumerate(path.read_text('utf-8-sig').splitlines(), 1)]
     return []

@@ -206,6 +206,9 @@ def _role(ficha: Ficha, esquemas: set[str]) -> None:
         ficha.erro("esquema_inexistente",
                    f"saida_esquema {esquema!r} sem arquivo "
                    f"{PASTA_ESQUEMAS}/{esquema}.json")
+    for extra in ficha.front.get('saida_esquemas_adicionais',[]):
+        if extra not in esquemas:
+            ficha.erro('esquema_inexistente',f'saída operacional {extra!r} sem contrato')
 
 
 def _pack(ficha: Ficha) -> None:

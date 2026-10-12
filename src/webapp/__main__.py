@@ -1,5 +1,4 @@
-"""Enable `python -m src.webapp serve ...`."""
-from src.webapp.cli import main
+"""The historical webapp has been superseded by the Case File workbench."""
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit('Painel histórico retirado da operação. Use: python -m src.casefile.workbench serve')

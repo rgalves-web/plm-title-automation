@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"revisao_licao","type":"object","required":["source_quotes_confirmed","methodology_only","reason"],"additionalProperties":false,"properties":{"source_quotes_confirmed":{"type":"boolean"},"methodology_only":{"type":"boolean"},"reason":{"type":"string","minLength":1}}}

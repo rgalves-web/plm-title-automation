@@ -21,7 +21,7 @@ import os
 import re
 from typing import Any, Callable
 
-from src.examinador.loop import RATES
+from src.infra.loop import RATES
 
 MODELO_B_DEFAULT = "gpt-5.6-terra"
 

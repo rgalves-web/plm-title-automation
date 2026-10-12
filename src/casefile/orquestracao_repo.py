@@ -193,9 +193,17 @@ class OrquestracaoRepo:
                      versoes_funcao: dict[str, str],
                      versoes_pacote: dict[str, str],
                      lease_segundos: int,
-                     excluir_roles: tuple[str, ...] = ()
+                     excluir_roles: tuple[str, ...] = (), max_active_per_unit: int | None = None
                      ) -> tuple[dict[str, Any], dict[str, Any]] | None:
         with self.conn.transaction():
+            if max_active_per_unit is not None:
+                self.conn.execute('SELECT id FROM units WHERE id=%s FOR UPDATE',(unit_id,))
+                pending=self.conn.execute("SELECT t.id FROM tasks t WHERE t.unit_id=%s AND t.status='pronta' AND EXISTS (SELECT 1 FROM task_runs r JOIN operation_requests q ON q.run_id=r.id WHERE r.task_id=t.id AND r.finished_at IS NOT NULL AND q.status IN ('unknown','inflight'))",(unit_id,)).fetchall()
+                for affected in pending:
+                    self.transicionar_tarefa(affected['id'],('pronta',),'bloqueada','process:recovery','reconcile_usage_before_retry')
+                    self.operation_event('task.recovery_required','process:recovery',{'reason':'Retomada mantém a tarefa com custo incerto suspensa; trabalhos independentes conservam suas reservas.'},unit_id=unit_id,task_id=affected['id'])
+                active=self.conn.execute('SELECT count(*) AS n FROM task_runs r JOIN tasks t ON t.id=r.task_id WHERE t.unit_id=%s AND r.finished_at IS NULL',(unit_id,)).fetchone()['n']
+                if active>=max_active_per_unit:return None
             t = self.conn.execute(
                 "SELECT * FROM tasks WHERE unit_id = %s AND status = 'pronta' "
                 "AND NOT (role = ANY(%s)) "
@@ -263,8 +271,13 @@ class OrquestracaoRepo:
             t = self.transicionar_tarefa(run["task_id"], ("em_execucao",),
                                          para, worker, nota)
             if cost_usd:
+                confirmed = float(self.conn.execute(
+                    "SELECT coalesce(sum(amount_usd),0) AS s FROM cost_entries "
+                    "WHERE unit_id=%s AND detail->>'run_id'=%s "
+                    "AND detail->>'confirmed_response'='true'",
+                    (t["unit_id"], str(run_id))).fetchone()["s"])
                 self.registrar_custo(
-                    t["unit_id"], "tarefa", cost_usd,
+                    t["unit_id"], "tarefa", max(0, cost_usd-confirmed),
                     {"task_id": t["id"], "run_id": run_id, "role": t["role"]})
         return t
 
@@ -320,6 +333,8 @@ class OrquestracaoRepo:
                 "JOIN tasks t ON t.id = x.task_id WHERE t.unit_id = %s "
                 "AND x.finished_at IS NULL AND x.id <> %s",
                 (r["unit_id"], run_id)).fetchone()["s"])
+            if self.operations_installed():
+                outros+=float(self.conn.execute("SELECT coalesce(sum(q.reserved_usd),0) AS s FROM operation_requests q JOIN task_runs x ON x.id=q.run_id JOIN tasks t ON t.id=x.task_id WHERE t.unit_id=%s AND x.finished_at IS NOT NULL AND q.status IN ('unknown','inflight')",(r['unit_id'],)).fetchone()['s'])
             gasto_tarefa = float(self.conn.execute(
                 "SELECT coalesce(sum(cost_usd), 0) AS s FROM task_runs "
                 "WHERE task_id = %s AND id <> %s",

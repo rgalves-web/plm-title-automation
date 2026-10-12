@@ -36,7 +36,7 @@ from src.casefile import agentes, orquestracao as orq, validacao
 from src.casefile.orquestracao_repo import TransicaoInvalida
 
 ATOR = "process:worker"
-from src.examinador.loop import RATES, Usage, run_loop
+from src.infra.loop import RATES, Usage, run_loop
 
 MODELO_POR_NIVEL = {
     "forte": "claude-opus-5",
@@ -47,6 +47,10 @@ MODELO_POR_NIVEL = {
 FAMILIA = "A"
 FUNCOES_FORA_DO_WORKER = ("verificador",)
 MAX_TURNOS_PADRAO = 40
+
+
+class ExecutionNeedsReview(RuntimeError):
+    pass
 
 FERRAMENTA_ENTREGA = {
     "name": "entregar_saida",
@@ -93,7 +97,8 @@ def _esquema_com_refs(nome: str, raiz: Path) -> str:
 
 
 def montar_contexto(task: dict[str, Any], *, raiz: str | Path | None = None,
-                    ferramentas_disponiveis: set[str] | frozenset[str] = frozenset()
+                    ferramentas_disponiveis: set[str] | frozenset[str] = frozenset(),
+                    blind: bool = False
                     ) -> dict[str, Any]:
     """Sistema + mensagem da tarefa, e o inventário do que entrou."""
     raiz = Path(raiz) if raiz is not None else agentes.RAIZ_PADRAO
@@ -104,7 +109,7 @@ def montar_contexto(task: dict[str, Any], *, raiz: str | Path | None = None,
               f"{agentes.versao(funcao.caminho)[:12]})\n\n"
               + funcao.caminho.read_bytes().decode("utf-8").strip()]
     pacote = None
-    if task.get("pack"):
+    if task.get("pack") and not blind:
         pacote = next(f for f in r.por_tipo("Domain Pack")
                       if f.nome == task["pack"])
         partes.append(f"## Pacote de dominio `{pacote.nome}` (versao "
@@ -113,6 +118,8 @@ def montar_contexto(task: dict[str, Any], *, raiz: str | Path | None = None,
     licoes = [f for f in r.por_tipo("Lesson")
               if f.status == "stable" and f.front.get("funcao") == funcao.nome
               and (f.front.get("escopo") or {}).get("pacote") == task.get("pack")]
+    if blind:
+        licoes = []
     for f in licoes:
         partes.append(f"## Licao publicada `{f.nome}` (versao "
                       f"{agentes.versao(f.caminho)[:12]})\n\n"
@@ -230,15 +237,30 @@ class TetoDaTarefa(RuntimeError):
 
 
 def estimar_chamada(kw: dict[str, Any], modelo: str) -> float:
-    """Pior caso de UMA resposta antes de pedi-la: entrada ~ caracteres/3
-    (conservador: sem desconto de cache, imagem em base64 conta como texto)
-    + max_tokens inteiro de saída. É estimativa — a tokenização real e o
-    cache da API fazem o custo real divergir (em geral para menos)."""
+    """Text characters plus the documented visual-token ceiling, never base64.
+
+    Vision bounds verified 2026-10-12: platform.claude.com/docs/en/build-with-claude/vision;
+    developers.openai.com/api/docs/guides/images-vision. Cache discounts are ignored.
+    """
     rate = RATES[modelo]
-    carga = json.dumps({k: kw.get(k) for k in ("system", "messages", "tools")},
+    visual_tokens=0
+    def budget_content(value):
+        nonlocal visual_tokens
+        if isinstance(value,list):return [budget_content(x) for x in value]
+        if not isinstance(value,dict):return value
+        if value.get('type')=='image' and value.get('source',{}).get('type')=='base64':
+            ceiling=4784 if modelo.startswith('claude-') else 36001 if modelo.startswith('gpt-5.6-') else None
+            if ceiling is not None:
+                visual_tokens+=ceiling
+                return {'type':'image','source':{'type':'base64','media_type':value['source'].get('media_type')}}
+        return {k:budget_content(v) for k,v in value.items()}
+    carga = json.dumps(budget_content({k: kw.get(k) for k in ("system", "messages", "tools")}),
                        ensure_ascii=False, default=str)
-    return (len(carga) / 3 * rate["input"]
-            + int(kw.get("max_tokens") or 0) * rate["output"]) / 1_000_000
+    estimated_input=len(carga)/3+visual_tokens
+    # Reserve the larger long-context price before a GPT request; an extra
+    # output margin is deliberate. Never apply cache discounts to a ceiling.
+    multiplier=2 if modelo.startswith('gpt-5.6-') and estimated_input>272000 else 1
+    return multiplier*(estimated_input*rate['input']+int(kw.get('max_tokens') or 0)*rate['output'])/1_000_000
 
 
 class _ClienteContado:
@@ -247,10 +269,12 @@ class _ClienteContado:
     gasto + o pior caso estimado dela passaria do teto da tarefa."""
 
     def __init__(self, inner: Any, uso: Usage, modelo: str,
-                 teto: float) -> None:
+                 teto: float, accounting: Any = None) -> None:
         self.inner, self.uso, self.turnos = inner, uso, 0
         self.modelo, self.teto = modelo, teto
         self.messages = self
+        self.accounting = accounting
+        self.manages_retries = accounting is not None
 
     def create(self, **kw: Any) -> Any:
         gasto = self.uso.cost(self.modelo) or 0.0
@@ -259,9 +283,39 @@ class _ClienteContado:
             raise TetoDaTarefa(
                 f"teto_da_tarefa: gasto ${gasto:.4f} + pior caso da próxima "
                 f"chamada ${previsto:.4f} > teto ${self.teto:.4f}")
-        msg = self.inner.messages.create(**kw)
+        if self.accounting:
+            if self.modelo.startswith('claude-'):
+                kw['service_tier']='standard_only'
+            self.accounting.before(previsto)
+        for attempt in range(3):
+            if attempt and self.accounting:
+                self.accounting.before(previsto)
+            try:
+                msg = self.inner.messages.create(**kw)
+                break
+            except Exception as exc:
+                if not self.accounting:
+                    raise
+                rejection=self.accounting.failure(exc)
+                if rejection.status_code not in (429,529) or attempt==2:
+                    raise rejection from exc
+                # Only the application retries confirmed nonbillable throttle
+                # responses. An uncertain request never reaches this branch.
+                import time
+                header=getattr(getattr(exc,'response',None),'headers',{}).get('retry-after','')
+                try: delay=min(60,max(1,float(header)))
+                except (ValueError,TypeError): delay=2**attempt
+                if not __import__('math').isfinite(delay): delay=60
+                time.sleep(delay)
+        if self.accounting and msg.usage is None:
+            self.accounting.response(msg, {}, 0)
         self.uso.add(msg.usage)
         self.turnos += 1
+        if self.accounting:
+            request_usage=Usage()
+            request_usage.add(msg.usage)
+            self.accounting.response(msg, request_usage.to_dict(self.modelo),
+                                     round(request_usage.cost(self.modelo) or 0.0, 6))
         return msg
 
 
@@ -283,23 +337,43 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
                  ferramentas: dict[str, tuple[dict[str, Any], Callable]] | None = None,
                  modelos: dict[str, str] | None = None,
                  lease_segundos: int = orq.LEASE_PADRAO_S,
-                 max_turnos: int = MAX_TURNOS_PADRAO) -> dict[str, Any] | None:
+                 max_turnos: int = MAX_TURNOS_PADRAO,
+                 operation: bool = False) -> dict[str, Any] | None:
     """Uma tarefa, do `pegar` ao `entregar`. None quando não há tarefa pronta
     para este worker. TetoAtingido sobe (pendentes já bloqueadas). Unit com
     perfil surface é recusada antes de qualquer efeito."""
     from src.casefile import coordenacao
-    coordenacao.exigir_etapa_suportada(repo, unit_id, "trabalhar")
+    if operation:
+        from src.casefile import runtime, project_profile
+        from src.casefile.operations import require_running
+        case = require_running(repo, unit_id)
+        teto = float(case['approved_budget_usd'])
+        unit = next(u for u in repo.listar_units() if u['id'] == unit_id)
+        if not project_profile.selected(repo, unit):
+            raise ValueError('surface_explicit_profile_required')
+    else:
+        coordenacao.exigir_etapa_suportada(repo, unit_id, "trabalhar")
     got = orq.pegar(repo, unit_id, worker, teto=teto, raiz=raiz,
                     lease_segundos=lease_segundos,
-                    excluir_roles=FUNCOES_FORA_DO_WORKER)
+                    excluir_roles=() if operation else FUNCOES_FORA_DO_WORKER,
+                    max_active_per_unit=1 if operation else None)
     if got is None:
         return None
     task, run = got
-    ferramentas = {**ferramentas_padrao(repo, task), **(ferramentas or {})}
+    if operation:
+        task['_operation_run_id'] = run['id']
+    ferramentas = {**(runtime.tools(repo, task) if operation else ferramentas_padrao(repo, task)), **(ferramentas or {})}
     ctx = montar_contexto(task, raiz=raiz,
-                          ferramentas_disponiveis=set(ferramentas))
+                          ferramentas_disponiveis=set(ferramentas),
+                          blind=operation and (task['role'] == 'verificador' or task['input_json'].get('independent_comparison')))
     nivel = ctx["funcao"].front["nivel_modelo"]
+    if operation and case['profile'].get('model_policy')=='economic' and task['role'] in ('coordenador','examinador'):
+        nivel='medio'
     modelo = (modelos or MODELO_POR_NIVEL)[nivel]
+    familia = FAMILIA
+    if operation and (task['role'] == 'verificador' or task['input_json'].get('independent_comparison')):
+        from src.casefile.verificador import modelo_b
+        modelo, familia = modelo_b(), 'B'
     if modelo not in RATES:
         repo.fechar_run(run["id"], worker, output_json=None,
                         output_valid=None, validation_errors=[],
@@ -340,12 +414,14 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
             f"Tarefa {task['ref']!r} sem saldo para chamar modelo ({nota}). "
             f"Aumentar o orçamento da tarefa ou cancelar?",
             ["aumentar orçamento", "cancelar a tarefa"])
-        return {"tarefa": t, "run_id": run["id"], "erros": [nota],
+        result={"tarefa": t, "run_id": run["id"], "erros": [nota],
                 "teto_atingido": False, "modelo": modelo,
                 "custo_usd": meta.get("cost_usd", 0.0), "parada": motivo,
                 "entregas": 0, "gravados": [], "proposta_id": None,
                 "limite_usd": limite, "licoes": ctx["licoes"],
                 "indisponiveis": ctx["indisponiveis"]}
+        if operation:runtime.finalize(repo,task,result)
+        return result
 
     if limite <= 0:
         if _limitado_por_outros(conta):
@@ -357,8 +433,13 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
                          f"orcamento_da_tarefa_esgotado: saldo ${limite:.4f} "
                          f"(budget ${task['budget_usd']:.2f})")
 
-    checar = VALIDADORES.get(task["output_schema"])
-    validar_extra = (lambda t, s: checar(repo, t, s, teto=teto, raiz=raiz)
+    handler = runtime.handlers().get(task['output_schema']) if operation else None
+    if operation and handler is None:
+        repo.fechar_run(run['id'],worker,output_json=None,output_valid=False,
+                        validation_errors=['result_handler_not_implemented'],stop_reason='unsupported_output',para='bloqueada')
+        raise ValueError('result_handler_not_implemented')
+    checar = handler[0] if handler else VALIDADORES.get(task["output_schema"])
+    validar_extra = (lambda t, s: checar(repo, {**t,'_operation_run_id':run['id']} if operation else t, s, teto=teto, raiz=raiz)
                      ) if checar else None
     entrega: dict[str, Any] = {"saida": None, "entregas": 0}
 
@@ -367,6 +448,16 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
         if not erros and validar_extra is not None:
             erros = validar_extra(task, saida)
         entrega["saida"], entrega["entregas"] = saida, entrega["entregas"] + 1
+        if operation:
+            from src.casefile.storage import write_bytes
+            from src.casefile.training import digest
+            attempt={'run_id':run['id'],'output':saida,'valid':not erros,'errors':erros,
+                     'applied':False,'attempt':entrega['entregas']}
+            raw=json.dumps(attempt,ensure_ascii=False,indent=2).encode()
+            path,sha=write_bytes(unit_id,f"execucoes/saida_run_{run['id']}_{entrega['entregas']}_{digest(attempt)[:12]}.json",raw)
+            repo.operation_add_artifact(unit_id,'output_attempt',path,sha,len(raw),
+                {'display_name':'Saída proposta · tarefa '+str(task['id'])+' · tentativa '+str(entrega['entregas']),
+                 'valid_schema':not erros,'applied':False,'run_id':run['id']},task['id'])
         return {"recebida": True, "valida": not erros, "erros": erros[:20]}
 
     tools = [FERRAMENTA_ENTREGA] + [ferramentas[n][0]
@@ -374,66 +465,174 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
     dispatch = {"entregar_saida": _entregar_saida,
                 **{n: ferramentas[n][1] for n in ctx["ferramentas"]}}
     session_id = repo.abrir_sessao(unit_id, f"tarefa:{task['id']}", modelo)
+    if operation:
+        from src.casefile.accounting import RunAccounting
+        from src.casefile.repo import _json
+        ctx['tarefa'] += runtime.context(repo,task)
+        repo.conn.execute('UPDATE task_runs SET operation_session_id=%s WHERE id=%s',(session_id,run['id']))
+        if familia == 'B':
+            repo.knowledge_context(unit_id,session_id,{'status':'independent_comparison' if task['input_json'].get('independent_comparison') else 'independent_blind','command':'tarefa:'+task['role'],
+                                  'release_id':None,'cards':[],'expected_criteria':[],'methodology_supplied':False})
+        else:
+            from src.casefile.training_runtime import prepare
+            provenance={'role':task['role'],'role_version':run['role_version'],'pack':task['pack'],
+                'pack_version':run['pack_version'],'lessons':[{'path':p,'sha256':agentes.versao((Path(raiz) if raiz else agentes.RAIZ_PADRAO)/p)} for p in ctx['licoes']]}
+            training_context, training_tools, training_dispatch = prepare(repo,unit,session_id,'tarefa:'+task['role'],provenance=provenance)
+            ctx['sistema'] += training_context
+            tools += training_tools
+            dispatch.update(training_dispatch)
+            manifest=repo.knowledge_audit(unit_id)['contexts'][-1]['manifest']
+            repo.conn.execute('UPDATE task_runs SET knowledge_release_id=%s WHERE id=%s',(manifest.get('release_id'),run['id']))
+        repo.operation_event('task.started',ATOR,{'run_id':run['id'],'model':modelo,'family':familia},unit_id=unit_id,task_id=task['id'])
+        repo.conn.execute('UPDATE task_runs SET model=%s,model_family=%s,prompt_sha256=%s WHERE id=%s',
+                          (modelo,familia,_sha(ctx['sistema']+'\n\n'+ctx['tarefa']),run['id']))
+
+    fingerprints = []
+    class OutputDelivered(Exception):
+        pass
 
     def _renovar(_registro: Any) -> None:
         repo.renovar_lease(run["id"], worker, lease_segundos)
+        if operation:
+            from src.casefile.training import digest
+            fingerprint=digest(_registro.calls)
+            fingerprints.append(fingerprint)
+            repo.operation_event('task.turn',ATOR,{'run_id':run['id'],'turn':_registro.turn,
+                                                  'calls':_registro.calls},unit_id=unit_id,task_id=task['id'])
+            if len(fingerprints)>=3 and len(set(fingerprints[-3:]))==1:
+                raise ExecutionNeedsReview('no_progress_after_two_retries')
+            if entrega['entregas']>=3 and (agentes.validar_saida(task['output_schema'],entrega['saida'],raiz) or validar_extra(task,entrega['saida'])):
+                raise ExecutionNeedsReview('two_output_corrections_exhausted')
+            if entrega['saida'] is not None and not agentes.validar_saida(task['output_schema'],entrega['saida'],raiz) and not validar_extra(task,entrega['saida']):
+                raise OutputDelivered()
 
     if client is None:
-        from src.examinador.loop import _client
-        client = _client()
+        if operation:
+            from src.infra.providers import client as provider_client
+            try:
+                client = provider_client(familia)
+            except Exception as exc:
+                reason='provider_not_called:'+type(exc).__name__
+                repo.fechar_sessao(session_id,reason,0,{},0,'')
+                repo.conn.execute("UPDATE task_runs SET usage_state='not_called' WHERE id=%s",(run['id'],))
+                t=repo.fechar_run(run['id'],worker,output_json=None,output_valid=False,
+                                  validation_errors=[reason],stop_reason=reason,para='bloqueada')
+                repo.operation_update(unit_id,execution_state='waiting')
+                repo.operation_event('provider.unavailable',ATOR,{'reason':reason},unit_id=unit_id,task_id=task['id'])
+                return {'tarefa':t,'run_id':run['id'],'erros':[reason],'teto_atingido':False,
+                        'modelo':modelo,'custo_usd':0,'parada':reason,'entregas':0,'gravados':[],'proposta_id':None,
+                        'limite_usd':limite,'licoes':ctx['licoes'],'indisponiveis':ctx['indisponiveis']}
+        else:
+            from src.infra.loop import _client
+            client = _client()
     uso = Usage()
-    contado = _ClienteContado(client, uso, modelo, limite)
+    contado = _ClienteContado(client, uso, modelo, limite,
+                             RunAccounting(repo,task,run) if operation else None)
     falha = ""
+    provider_rejection = None
+    execution_block = None
     perdido: TransicaoInvalida | None = None
     try:
         log, _ = run_loop(system=ctx["sistema"], task=ctx["tarefa"],
                           tools=tools, dispatch=dispatch, model=modelo,
                           max_turns=max_turnos, max_cost_usd=limite,
+                          max_output_tokens=16000 if operation and task['role']=='coordenador' else 8000,
                           on_turn=_renovar, client=contado)
         parada = log.stop_reason
+    except OutputDelivered:
+        parada = 'saida_entregue'
     except TransicaoInvalida as exc:              # trava perdida no meio
         perdido, parada = exc, f"trava_perdida: {exc}"
     except TetoDaTarefa as exc:                   # parou ANTES de pedir
         parada, falha = str(exc), "teto_da_tarefa"
     except Exception as exc:                      # o run não fica órfão
-        parada = f"erro_do_modelo: {exc.__class__.__name__}: {exc}"
+        if operation:
+            from src.casefile.accounting import ProviderUnavailable,UnknownProviderUsage
+            from src.casefile.spending import SharedSpendingCap
+            if isinstance(exc,ProviderUnavailable): provider_rejection=exc
+            if isinstance(exc,(ExecutionNeedsReview,UnknownProviderUsage,SharedSpendingCap)):execution_block=str(exc)
+        parada = provider_rejection.reason if provider_rejection else f"erro_do_modelo: {exc.__class__.__name__}: {exc}"
         falha = "erro_do_modelo"
     custo = uso.cost(modelo) or 0.0
+    if operation:
+        custo=float(repo.conn.execute("SELECT coalesce(sum(cost_usd),0) AS amount FROM operation_requests WHERE run_id=%s AND status='confirmed'",(run['id'],)).fetchone()['amount'])
+    usage_unknown = operation and repo.run(run['id']).get('usage_state') in ('unknown','inflight')
     repo.fechar_sessao(session_id, parada, contado.turnos,
-                       uso.to_dict(modelo), custo, "")
+                       uso.to_dict(modelo), None if usage_unknown else custo, "")
     if perdido is not None:
         _custo_perdido(repo, unit_id, task, run, custo)
         raise perdido
 
-    meta = {"model": modelo, "model_family": FAMILIA,
+    meta = {"model": modelo, "model_family": familia,
             "prompt_sha256": _sha(ctx["sistema"] + "\n\n" + ctx["tarefa"]),
             "tokens_in": uso.input + uso.cache_write + uso.cache_read,
             "tokens_out": uso.output, "cost_usd": custo}
+    if execution_block:
+        with repo.transacao():
+            t=repo.fechar_run(run['id'],worker,output_json=entrega['saida'],output_valid=False,
+                             validation_errors=[execution_block],stop_reason=execution_block,para='bloqueada',**meta)
+            from src.casefile.operations import has_unbounded_usage
+            if execution_block!='provider_usage_requires_reconciliation' or has_unbounded_usage(repo,unit_id):
+                repo.operation_update(unit_id,execution_state='waiting')
+            repo.abrir_escalonamento(unit_id,task['id'],'execution_block',
+                'A tarefa parou sem nova chamada: '+execution_block+'. Responsável: operação local / Renato. Corrigir a entrada ou reconciliar o uso antes de retomar.',
+                ['corrigir entrada ou contrato','conferir custo e recibo'])
+            result={'tarefa':t,'run_id':run['id'],'erros':[execution_block],'teto_atingido':False,
+                    'modelo':modelo,'custo_usd':custo,'parada':execution_block,'entregas':entrega['entregas'],
+                    'gravados':[],'proposta_id':None,'limite_usd':limite,'licoes':ctx['licoes'],'indisponiveis':ctx['indisponiveis']}
+            runtime.finalize(repo,task,result)
+        return result
     if falha == "teto_da_tarefa" and entrega["entregas"] == 0:
         if contado.turnos == 0 and _limitado_por_outros(conta):
             return _devolver("saldo_reservado_por_outros", parada, **meta)
         return _bloquear("teto_da_tarefa", parada, **meta)
+    if provider_rejection:
+        with repo.transacao():
+            t=repo.fechar_run(run['id'],worker,output_json=None,output_valid=False,
+                             validation_errors=[provider_rejection.reason],stop_reason=provider_rejection.reason,
+                             para='bloqueada',**meta)
+            repo.operation_update(unit_id,execution_state='waiting')
+            instructions={
+                'provider_credit_balance_insufficient':'A conta Anthropic está sem saldo. Renato deve regularizar o saldo ou configurar uma chave com saldo; compras exigem autorização própria.',
+                'provider_credentials_invalid':'Renato deve conferir a credencial configurada antes de retomar.',
+                'provider_access_denied':'Renato deve regularizar o acesso à API antes de retomar.',
+                'provider_rate_limited':'O provedor recusou três chamadas sem cobrança por limite de acesso. Retomar após regularizar o limite.',
+                'provider_overloaded':'O provedor recusou três chamadas sem cobrança por sobrecarga. Retomar quando o serviço estiver disponível.'}
+            note=instructions.get(provider_rejection.reason,'Conferir a configuração da chamada e do modelo antes de retomar. Nenhum resultado foi produzido por esta chamada.')
+            if not any(e['motivo']=='provider_access' for e in repo.escalonamentos(unit_id,abertos=True)):
+                repo.abrir_escalonamento(unit_id,task['id'],'provider_access',note,['regularizar acesso','retomar dentro da autorização vigente'])
+            result={'tarefa':t,'run_id':run['id'],'erros':[provider_rejection.reason],'teto_atingido':False,
+                    'modelo':modelo,'custo_usd':custo,'parada':parada,'entregas':entrega['entregas'],'gravados':[],
+                    'proposta_id':None,'limite_usd':limite,'licoes':ctx['licoes'],'indisponiveis':ctx['indisponiveis']}
+            runtime.finalize(repo,task,result)
+        return result
     if falha == "erro_do_modelo":
         motivo = falha
     elif entrega["entregas"] == 0:
         motivo = falha or "sem_entrega"
     else:
         motivo = ""
+    gravados: list[int] = []
+    gravar = handler[1] if handler else GRAVADORES.get(task["output_schema"])
     try:
-        res = orq.entregar(repo, run["id"], worker, entrega["saida"],
-                           teto=teto, raiz=raiz, validar_extra=validar_extra,
-                           motivo_invalida=motivo, **meta)
+        with repo.transacao():
+            res = orq.entregar(repo, run["id"], worker, entrega["saida"],
+                               teto=teto, raiz=raiz, validar_extra=validar_extra,
+                               motivo_invalida=motivo, **meta)
+            if not res['erros'] and gravar is not None:
+                gravados = gravar(repo,task,entrega['saida'],session_id,
+                                   teto=teto,raiz=raiz,run_id=run['id'])
+            if operation and not res['erros']:
+                runtime.finalize(repo,task,{'run_id':run['id'],'erros':[],
+                    'tarefa':res['tarefa'],'gravados':gravados,'custo_usd':custo,'modelo':modelo,'parada':parada})
     except TransicaoInvalida:
         _custo_perdido(repo, unit_id, task, run, custo)
         raise
 
-    gravados: list[int] = []
-    gravar = GRAVADORES.get(task["output_schema"])
-    if not res["erros"] and gravar is not None:
-        try:
-            gravados = gravar(repo, task, entrega["saida"], session_id,
-                              teto=teto, raiz=raiz, run_id=run["id"])
-        except (orq.PlanoInvalido, validacao.ClaimInvalido, ValueError) as exc:
+    except Exception as exc:
+            res = {'tarefa':repo.fechar_run(run['id'],worker,output_json=entrega['saida'],output_valid=False,
+                      validation_errors=[str(exc)],stop_reason='result_not_persisted',para='aguardando_operador',**meta),
+                   'erros':[str(exc)],'teto_atingido':False}
             # validou na entrega e falhou ao gravar (o estado mudou no meio):
             # nada fica aceito por omissão — volta ao operador, com motivo.
             atual = repo.tarefa(task["id"])
@@ -449,13 +648,18 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
             gravados = []
     proposta = gravados[0] if gravados and \
         task["output_schema"] == "plano_tarefas" else None
-    return {"tarefa": res["tarefa"], "run_id": run["id"],
+    result = {"tarefa": res["tarefa"], "run_id": run["id"],
             "erros": res["erros"], "teto_atingido": res["teto_atingido"],
             "modelo": modelo, "custo_usd": custo, "parada": parada,
             "entregas": entrega["entregas"],
             "gravados": [] if proposta else gravados,
             "proposta_id": proposta, "limite_usd": limite,
             "licoes": ctx["licoes"], "indisponiveis": ctx["indisponiveis"]}
+    if operation:
+        if result['erros']:
+            runtime.finalize(repo,task,result)
+        result['tarefa']=repo.tarefa(task['id'])
+    return result
 
 
 def _custo_perdido(repo: Any, unit_id: int, task: dict[str, Any],
@@ -463,6 +667,11 @@ def _custo_perdido(repo: Any, unit_id: int, task: dict[str, Any],
     """Trava vencida e retomada por outro worker: a saída não vale, mas o
     gasto aconteceu e entra no livro da unit."""
     if custo:
+        if hasattr(repo,'operations_installed') and repo.operations_installed():
+            recorded=repo.conn.execute("SELECT coalesce(sum(cost_usd),0) AS amount FROM operation_requests WHERE run_id=%s AND status='confirmed'",(run['id'],)).fetchone()['amount']
+            custo=max(0,custo-float(recorded))
+        if not custo:
+            return
         repo.registrar_custo(unit_id, "tarefa", custo,
                              {"task_id": task["id"], "run_id": run["id"],
                               "role": task["role"], "run_perdido": True})

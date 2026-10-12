@@ -69,7 +69,7 @@ def ler_release(*, repo: Any, unit: dict[str, Any], pasta: Path,
     release of suspense' da entrega, com liberação PONTUAL no acervo e
     marca de benchmark_contamination injetada pelo encanamento."""
     from src.casefile.acervo import montar_acervo
-    from src.examinador.okf import KnowledgeBase
+    from src.infra.okf import KnowledgeBase
 
     acervo = montar_acervo(pasta, {},
                            entrega_permitida=("release of suspense",))

@@ -418,8 +418,8 @@ def cmd_rejeitar(nome: str, motivo: str, repo: Any = None) -> None:
 # --------------------------------------------------------------------------
 
 def cmd_planejar(nome: str, repo: Any = None, client: Any = None) -> None:
-    from src.examinador.cache import PageCache
-    from src.examinador.okf import KnowledgeBase
+    from src.infra.cache import PageCache
+    from src.infra.okf import KnowledgeBase
 
     repo = repo or _repo()
     unit = _unit_de(repo, nome)
@@ -621,8 +621,8 @@ def cmd_coletar(nome: str, repo: Any = None, client: Any = None,
     from src.casefile import gates as g
     from src.casefile import relatorio as rel
     from src.casefile import xref_local as xl
-    from src.examinador.cache import PageCache
-    from src.examinador.okf import KnowledgeBase
+    from src.infra.cache import PageCache
+    from src.infra.okf import KnowledgeBase
 
     repo = repo or _repo()
     unit = _unit_de(repo, nome)

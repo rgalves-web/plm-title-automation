@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from src.casefile import staging
-from src.minorh.coleta import (CUSTO_ABERTURA_USD, _capturar_cdp,
+from src.infra.portal_capture import (CUSTO_ABERTURA_USD, _capturar_cdp,
                                png_para_pdf, validar_carimbo)
 
 

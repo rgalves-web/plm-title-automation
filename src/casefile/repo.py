@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 from src.casefile.orquestracao_repo import OrquestracaoRepo
 from src.casefile.training_repo import TrainingRepo
+from src.casefile.operations_repo import OperationsRepo
 
 
 def _json(valor: Any) -> Any:
@@ -16,7 +17,7 @@ def _json(valor: Any) -> Any:
     return Json(valor)
 
 
-class Repo(TrainingRepo, OrquestracaoRepo):
+class Repo(TrainingRepo, OrquestracaoRepo, OperationsRepo):
     def __init__(self, conn: Any) -> None:
         self.conn = conn
 

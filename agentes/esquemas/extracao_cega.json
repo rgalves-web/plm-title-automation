@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","title":"extracao_cega","type":"object","required":["valor","trecho","evidencia_suficiente"],"additionalProperties":false,"properties":{"valor":{},"trecho":{"type":"string"},"evidencia_suficiente":{"type":"boolean"}}}

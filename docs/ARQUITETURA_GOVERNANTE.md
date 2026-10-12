@@ -1,6 +1,8 @@
 # ARQUITETURA GOVERNANTE — decisão de 2026-08-23
 _Decidido pelo operador (Renato) em 23/08/2026, em sessão Cowork, após revisão completa do repo, das 4 units entregues e das retrospectivas. Este documento encerra o conflito entre as três arquiteturas registradas e **prevalece sobre qualquer documento anterior em caso de contradição**._
 
+Atualização operacional autorizada em 11–12/10/2026: `OPERACAO_VISUAL.md` descreve a esteira de dez funções, PostgreSQL, quatro executores, conhecimento versionado e migração do Cibola. Mantém integralmente a separação entre julgamento por IA e proteção de arquivos/custos pelo código. Renato autorizou o piloto Cibola de quatro tracts, acervo local, through date 11/10/2026, Claude na produção e OpenAI na revisão, com teto de US$ 50 por tract. Posteriormente impôs **US$ 20 adicionais no total para o restante desta implementação**. O novo limite compartilhado prevalece sobre a disponibilidade individual; custos anteriores e incertos são preservados. Essas autorizações não incluem compra, comunicação externa, PREP ou submissão.
+
 ## 1. A lei
 
 **LLM-first puro, conforme a ordem de 12/08 (`docs/ARQUITETURA_LLM_FIRST.md`).** Nenhuma decisão de title em Python: nem limiar, nem tabela de autoridade, nem fórmula, nem portão que aprove ou repita julgamento. Quem confere um julgamento de IA é outra IA (Auditor de família independente), nunca um `if`.

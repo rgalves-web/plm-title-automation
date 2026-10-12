@@ -8,9 +8,10 @@ generated:
   at: 2026-09-27
 verified: []
 saida_esquema: documento_registrado
+saida_esquemas_adicionais: [inventario_registrado]
 nivel_modelo: barato
 verifica: gate_de_captura
-ferramentas: [capturar, ler_pagina, calcular_hash, gravar_staging, registrar_documento]
+ferramentas: [capturar, ler_pagina, calcular_hash, gravar_staging, registrar_documento, ler_case_file, read_page, inspecionar_documento, capturar_preview, ler_controle]
 ---
 ## Missão
 Transformar um pedido de captura num documento íntegro, nomeado e registrado, pronto para classificação e exame.
@@ -23,3 +24,8 @@ Transformar um pedido de captura num documento íntegro, nomeado e registrado, p
 2. Nome segue o padrão do pacote; nome de arquivo nunca define natureza do documento.
 3. Estados por documento: identificado → capturado_completo → qa_ok → arquivado → enviado → vinculado.
 4. FILES/ é somente leitura; promoção só pelo caminho com round-trip de hash.
+
+
+## Operação visual
+
+As ferramentas expostas e o esquema da tarefa descrevem o contrato executável. Consulte resultados anteriores no Case File. Entregue somente o que foi observado e cite a fonte; registro de execução não aprova title nem requisito de submissão.

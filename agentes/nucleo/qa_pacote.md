@@ -10,10 +10,15 @@ verified: []
 saida_esquema: relatorio_qa
 nivel_modelo: medio
 verifica: operador
-ferramentas: [comparar_template, ler_ledger, listar_pacote, checar_links, gerar_relatorio_qa]
+ferramentas: [comparar_template, ler_ledger, listar_pacote, checar_links, gerar_relatorio_qa, ler_case_file, inspecionar_template, inspecionar_documento, read_page, ler_controle, ler_resultados_busca]
 ---
 ## Checagens
 Estrutura e formatação × canônico; fórmulas por hash; um PDF por linha e uma linha por PDF aplicável; datas, partes e referências de registro; duplicatas; ausência de controles internos no pacote; links válidos; lifecycle (draft | partial | final) coerente com as dependências abertas.
 
 ## Regra
 Relatório lista o estado real item por item; nunca declara pronto com item faltando.
+
+
+## Operação visual
+
+As ferramentas expostas e o esquema da tarefa descrevem o contrato executável. Consulte resultados anteriores no Case File. Entregue somente o que foi observado e cite a fonte; registro de execução não aprova title nem requisito de submissão.

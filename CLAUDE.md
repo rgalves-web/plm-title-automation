@@ -10,7 +10,7 @@ A local-first title-automation system for Purple Land Management (PLM) land work
 
 **The governing architecture is LLM-first — decided by the operator on 2026-08-23. Read `docs/ARQUITETURA_GOVERNANTE.md` first; it prevails over every other document, including this one's history.** In one line: no title decision in Python; AI judges, a second AI head verifies, Python only opens files, renders pages, calls models, saves bytes — and protects bytes (see "the pen" below).
 
-Current direction (2026-09-11): **Case File per Unit in PostgreSQL** (`src/casefile/`).
+Current operation (2026-10-12): **visual workbench + four API workers + Case File per Unit in PostgreSQL** (`src/casefile/`). Read `docs/OPERACAO_VISUAL.md` for the current entry point, migration and actual acceptance state. Renato authorized the four-case Cibola pilot, local snippets/pages, through date 2026-10-11, Claude production and OpenAI verification, up to USD 50 per tract. His later instruction caps **all remaining development API use at USD 20 additional in total**, enforced through shared reservations. Unknown charges from earlier requests remain unresolved; never infer zero usage or resume those cases without receipts. Derek's local exemplar was explicitly confirmed for Cibola. Purchases, external communication, PREP transmission and submission still require their specific authorization. The previous Streamlit UI is removed and the historical Minorh/webapp launchers are retired. Frozen modules remain regression fixtures, outside the current runtime dependencies.
 Training Suite implementation, coverage, activation and limitations:
 `docs/TRAINING_SUITE_INTEGRACAO.md`. No VS3 acceptance or VS4 authorization is implied.
 
@@ -69,4 +69,8 @@ own scope; the still-applicable operator checkpoints are preserved.
 - A filename is a weak prior, never a rule (folder T0141070 held T0141066's bytes).
 - The blue-formula-cell rule is the most repeated client rule on Slack; the pen enforces it (invariant 3).
 
-Surface-title preparation (2026-09-12): see `docs/CIBOLA_PREPARACAO.md`. Explicit per-case planning profile; downstream surface collection/examination/export remains pending. Do not apply Emirates defaults to a configured surface case.
+Surface-title preparation history (2026-09-12): see `docs/CIBOLA_PREPARACAO.md`. The current visual runtime enables collection, examination, independent review and writing under the explicit Cibola profile. The historical CLI restriction remains outside that runtime. Do not apply Emirates defaults to a configured surface case.
+
+## Cibola — mandatory submission protocol adopted 2026-10-01
+
+Before any Cibola work, read `../Land Cibola Surface Titles/AGENTS.md` and `../Land Cibola Surface Titles/00_Governanca/PROTOCOLO_SUBMISSAO_PLM.md`. This is Renato's explicit instruction to persist and apply the supplied Marc Reyes protocol: Derek's exact entry examples, a real PREP review of each submitted report, final Spell Check, and SME treatment of technical questions, with evidence tied to the reviewed version. Never mark these done from a training card or a self-generated checklist. Read `../Land Cibola Surface Titles/00_Governanca/README.md` for the implementation record and limitations. Renato authorized uploads of work in progress on 2026-10-01, identified as WORKING DRAFT with version and gaps. Every partial or final submission must comply with the protocol. Project Log remains read-only. Training configuration does not remove surface execution restrictions or approve title.

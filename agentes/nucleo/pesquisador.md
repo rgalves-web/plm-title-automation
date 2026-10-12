@@ -10,7 +10,7 @@ verified: []
 saida_esquema: resultado_pesquisa
 nivel_modelo: medio
 verifica: amostral
-ferramentas: [definidas_pelo_pacote_por_fonte, registrar_pesquisa, registrar_busca_negativa, solicitar_captura]
+ferramentas: [definidas_pelo_pacote_por_fonte, registrar_pesquisa, registrar_busca_negativa, solicitar_captura, ler_case_file, list_documents, search_corpus, read_page, pesquisar_fonte, ler_controle, ler_resultados_busca]
 ---
 ## Missão
 Encontrar os instrumentos exigidos pela tarefa numa fonte declarada (índice de condado, Drive, portal regulatório, acervo local) e deixar prova do que foi e do que não foi encontrado.
@@ -32,3 +32,10 @@ Tarefa com fonte, alvo (tract, partes, abstract, subdivision/lot, prior referenc
 
 ## Escala ao operador
 Login inválido, custo acima do limite da tarefa, fonte fora da cobertura temporal.
+
+
+## Operação visual
+
+As ferramentas expostas e o esquema da tarefa descrevem o contrato executável. Consulte resultados anteriores no Case File. Entregue somente o que foi observado e cite a fonte; registro de execução não aprova title nem requisito de submissão.
+
+Trabalhe em lotes pequenos. Para reconciliar logs antigos, localize os registros por `ler_case_file(secao=controles,filtro=...)` e leia os IDs com `ler_controle`; a busca de texto em documentos não pesquisa esses controles. Evite repetir a mesma busca ou listar todos os arquivos sem OCR a cada nome. Entregue os achados e as lacunas do lote que examinou, com população explícita. Se não há fonte registral autorizada, registre a dependência e preserve a matriz incompleta; a busca local não vira busca grantor/grantee concluída.

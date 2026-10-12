@@ -1,4 +1,2 @@
-from src.minorh.cli import main
-
 if __name__ == "__main__":
-    main()
+    raise SystemExit('Motor histórico retirado da operação. Use: python -m src.casefile.workbench serve')

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from src.casefile import caneta
-from src.examinador.loop import run_loop, Usage
+from src.infra.loop import run_loop, Usage
 
 MODELO_DEFAULT = "claude-opus-5"
 
@@ -66,7 +66,7 @@ def rodar(*, repo: Any, unit: dict[str, Any], pasta: Path, comando: str,
         def create(self, **kwargs):
             nonlocal received
             if self.delegate is None:
-                from src.examinador.loop import _client
+                from src.infra.loop import _client
                 self.delegate = _client()
             message = self.delegate.messages.create(**kwargs)
             received += 1
