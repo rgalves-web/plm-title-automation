@@ -76,7 +76,7 @@ def tools(repo,task):
                   'qa':lambda:repo.operation_requirements(uid),'licoes':lambda:repo.operation_lessons(uid)}
         sections['eventos']=lambda:repo.operation_events(unit_id=uid,limit=1000,latest=True)
         sections['controles']=lambda:[a for a in repo.operation_artifacts(uid) if a['kind']=='control_record']
-        sections['registros_execucao']=lambda:[a for a in repo.operation_artifacts(uid) if a['kind'] in ('run_record','output_attempt','provider_rejection','qa_observation','research_observation','retrospective_observation','claim_checkpoint')]
+        sections['registros_execucao']=lambda:[a for a in repo.operation_artifacts(uid) if a['kind'] in ('run_record','output_attempt','function_output','provider_rejection','qa_observation','research_observation','retrospective_observation','claim_checkpoint')]
         sections['resultados']=lambda:[{'id':t['id'],'task_id':t['id'],'role':t['role'],'runs':repo.runs_da_tarefa(t['id'])}
                                         for t in repo.tarefas(uid) if t['id']!=task['id'] and t['status']!='em_execucao']
         if secao not in sections:
@@ -170,7 +170,7 @@ def tools(repo,task):
         return result
     def read_control(artifact_id,offset=0,limite=6000):
         from src.casefile.training import text_parts
-        artifact=next((a for a in repo.operation_artifacts(task['unit_id']) if a['id']==artifact_id and a['kind'] in ('control_record','run_record','qa_observation','operator_evidence','knowledge_source','output_attempt','provider_rejection','research_observation','retrospective_observation','claim_checkpoint')),None)
+        artifact=next((a for a in repo.operation_artifacts(task['unit_id']) if a['id']==artifact_id and a['kind'] in ('control_record','run_record','qa_observation','operator_evidence','knowledge_source','output_attempt','function_output','provider_rejection','research_observation','retrospective_observation','claim_checkpoint')),None)
         if not artifact: raise ValueError('case_control_required')
         path=checked_artifact(artifact)
         if path.suffix.lower() not in ('.md','.txt','.json','.csv','.html','.docx','.xlsx'):
@@ -694,7 +694,13 @@ def reapply_learning(repo,uid,run_id,actor,note):
     check,persist=handlers()[task['output_schema']]
     errors+=check(repo,current,run['output_json'])
     if errors:raise ValueError(';'.join(errors))
+    from src.casefile import function_files
+    outputs=repo.function_files(run_id=run_id,direction='output')
     with repo.transacao():
+        # Issue 03: a run with output files applies only its accepted one,
+        # and the rows it creates cite that file. Runs from before output
+        # files existed (no files at all) are applied as before.
+        arquivo=function_files.begin_apply(repo,function_files.accepted_output(repo,run_id)) if outputs else None
         ids=persist(repo,current,run['output_json'],run['operation_session_id'],run_id=run_id)
         next_state=orquestracao.DESTINO_SAIDA_VALIDA[task['verificacao']]
         if next_state!=task['status']:
@@ -702,4 +708,6 @@ def reapply_learning(repo,uid,run_id,actor,note):
         finalize(repo,current,{'run_id':run_id,'erros':[],'gravados':ids,'custo_usd':run['cost_usd'],
             'modelo':run['model'],'parada':'preserved_result_applied_without_new_inference','tarefa':repo.tarefa(task['id'])})
         repo.operation_event('result.reapplied',actor,{'run_id':run_id,'saved_ids':ids,'additional_cost_usd':0,'original_failed_run_preserved':True,'note':note},unit_id=uid,task_id=task['id'])
+        if arquivo:
+            function_files.finish_apply(repo,arquivo)
     return ids

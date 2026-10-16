@@ -145,7 +145,10 @@ def task_detail(repo,task_id):
         raise ValueError('task_not_found')
     revision=repo.operation_case(task['unit_id'])['revision']
     runs=repo.runs_da_tarefa(task_id)
+    from src.casefile import function_files
     return serializable({'task':task,'case_revision':revision,'runs':runs,'artifacts':[a for a in repo.operation_artifacts(task['unit_id']) if a['task_id']==task_id],
+                         'function_files':repo.function_files(task_id=task_id),
+                         'lifecycle':[function_files.lifecycle(repo,r['id']) for r in runs],
                          'terminal_calls':repo.conn.execute('SELECT c.* FROM operation_terminal_calls c JOIN task_runs r ON r.id=c.run_id WHERE r.task_id=%s ORDER BY c.id',(task_id,)).fetchall(),
                          'claims':[repo.claim(cid) for cid in repo.claims_da_tarefa(task_id)],
                          'events':repo.operation_events(unit_id=task['unit_id'],limit=1000,task_id=task_id),

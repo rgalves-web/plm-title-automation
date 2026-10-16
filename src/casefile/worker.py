@@ -454,23 +454,20 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
     checar = handler[0] if handler else VALIDADORES.get(task["output_schema"])
     validar_extra = (lambda t, s: checar(repo, {**t,'_operation_run_id':run['id']} if operation else t, s, teto=teto, raiz=raiz)
                      ) if checar else None
-    entrega: dict[str, Any] = {"saida": None, "entregas": 0}
+    entrega: dict[str, Any] = {"saida": None, "entregas": 0, "arquivo": None}
 
     def _entregar_saida(saida: Any) -> dict[str, Any]:
         erros = agentes.validar_saida(task["output_schema"], saida, raiz)
         if not erros and validar_extra is not None:
             erros = validar_extra(task, saida)
-        entrega["saida"], entrega["entregas"] = saida, entrega["entregas"] + 1
         if operation:
-            from src.casefile.storage import write_bytes
-            from src.casefile.training import digest
-            attempt={'run_id':run['id'],'output':saida,'valid':not erros,'errors':erros,
-                     'applied':False,'attempt':entrega['entregas']}
-            raw=json.dumps(attempt,ensure_ascii=False,indent=2).encode()
-            path,sha=write_bytes(unit_id,f"execucoes/saida_run_{run['id']}_{entrega['entregas']}_{digest(attempt)[:12]}.json",raw)
-            repo.operation_add_artifact(unit_id,'output_attempt',path,sha,len(raw),
-                {'display_name':'Saída proposta · tarefa '+str(task['id'])+' · tentativa '+str(entrega['entregas']),
-                 'valid_schema':not erros,'applied':False,'run_id':run['id']},task['id'])
+            # Issue 03: the output file is written BEFORE the delivery counts
+            # and before anything is applied — accepted or rejected with the
+            # reason. A delivery whose file cannot be written is not received.
+            from src.casefile import function_files
+            entrega["arquivo"] = function_files.write_output(
+                repo, task, run["id"], entrega["entregas"] + 1, saida, erros)
+        entrega["saida"], entrega["entregas"] = saida, entrega["entregas"] + 1
         return {"recebida": True, "valida": not erros, "erros": erros[:20]}
 
     tools = [FERRAMENTA_ENTREGA] + [ferramentas[n][0]
@@ -640,12 +637,19 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
             res = orq.entregar(repo, run["id"], worker, entrega["saida"],
                                teto=teto, raiz=raiz, validar_extra=validar_extra,
                                motivo_invalida=motivo, **meta)
+            arquivo = None
+            if operation and not res['erros']:
+                # Only an accepted output file is applied; every row created
+                # from here to commit cites its sha256 (issue 03).
+                from src.casefile import function_files
+                arquivo = function_files.begin_apply(repo, entrega.get('arquivo'))
             if not res['erros'] and gravar is not None:
                 gravados = gravar(repo,task,entrega['saida'],session_id,
                                    teto=teto,raiz=raiz,run_id=run['id'])
             if operation and not res['erros']:
                 runtime.finalize(repo,task,{'run_id':run['id'],'erros':[],
                     'tarefa':res['tarefa'],'gravados':gravados,'custo_usd':custo,'modelo':modelo,'parada':parada})
+                function_files.finish_apply(repo, arquivo)
     except TransicaoInvalida:
         _custo_perdido(repo, unit_id, task, run, custo)
         raise

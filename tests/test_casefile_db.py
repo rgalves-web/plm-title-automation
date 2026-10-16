@@ -32,9 +32,10 @@ def test_migrar_aplica_reaplicar_e_noop_e_seeds_presentes(pg):
                      "0003_vs2_coleta", "0004_semantica_vs2",
                      "0005_simulacao", "0006_vs3_exame",
                      "0007_auditoria_verificacao", "0008_training_suite",
-                     "0009_orquestracao", "0010_operacao_visual", "0011_limite_compartilhado", "0012_registro_conhecimento", "0013_terminal_execucao"]
+                     "0009_orquestracao", "0010_operacao_visual", "0011_limite_compartilhado", "0012_registro_conhecimento", "0013_terminal_execucao",
+                     "0014_function_output_files"]
     assert migrar(pg) == []                      # reaplicar é no-op
-    assert [m["version"] for m in estado_migracoes(pg)] == list(range(1,14))
+    assert [m["version"] for m in estado_migracoes(pg)] == list(range(1,15))
     # 11 do VS1 + `fact` ativado pela 0003 (leituras dirigidas do VS2)
     ativos = pg.execute(
         "SELECT count(*) AS n FROM claim_types WHERE active").fetchone()["n"]

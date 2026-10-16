@@ -85,6 +85,35 @@ class OperationsRepo:
             "SET metadata=operation_artifacts.metadata RETURNING *",
             (unit_id,task_id,kind,str(path),sha256,size_bytes,_json(metadata or {}))).fetchone()
 
+    # --- Function files (issues 02/03): index of write-once Case files ------
+    def function_file_add(self, unit_id, task_id, run_id, direction, ordinal,
+                          relative, sha256, size_bytes, status, reason=None,
+                          artifact_id=None):
+        return self.conn.execute(
+            "INSERT INTO function_files(unit_id,task_id,run_id,direction,ordinal,"
+            "relative,sha256,size_bytes,status,reason,artifact_id) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *",
+            (unit_id,task_id,run_id,direction,ordinal,relative,sha256,
+             size_bytes,status,_json(list(reason or [])),artifact_id)).fetchone()
+
+    def function_file(self, file_id):
+        return self.conn.execute("SELECT * FROM function_files WHERE id=%s",
+                                 (file_id,)).fetchone()
+
+    def function_files(self, *, task_id=None, run_id=None, direction=None):
+        return self.conn.execute(
+            "SELECT * FROM function_files WHERE (%s::bigint IS NULL OR task_id=%s) "
+            "AND (%s::bigint IS NULL OR run_id=%s) AND (%s::text IS NULL OR direction=%s) "
+            "ORDER BY id",(task_id,task_id,run_id,run_id,direction,direction)).fetchall()
+
+    def function_file_applied(self, file_id):
+        got = self.conn.execute(
+            "UPDATE function_files SET applied_at=now() WHERE id=%s AND direction='output' "
+            "AND status='accepted' AND applied_at IS NULL RETURNING *",(file_id,)).fetchone()
+        if got is None:
+            raise ValueError('function_output_not_applicable')
+        return got
+
     def operation_link_artifact(self, artifact_id, unit_id, allocation, actor):
         self.conn.execute(
             "INSERT INTO operation_artifact_links(artifact_id,unit_id,allocation,linked_by) "
