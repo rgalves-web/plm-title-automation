@@ -27,6 +27,6 @@ Valor extraído e trecho literal, com rastreio completo (prompt_sha256, request_
 
 ## Operação visual
 
-As ferramentas expostas e o esquema da tarefa descrevem o contrato executável. Consulte resultados anteriores no Case File. Entregue somente o que foi observado e cite a fonte; registro de execução não aprova title nem requisito de submissão. Na extração cega, devolva o objeto valor nos campos pedidos, trecho literal e evidencia_suficiente. Nunca recebe a resposta do Examinador.
+As ferramentas expostas e o esquema da tarefa descrevem o contrato executável. Entregue somente o que foi observado e cite a fonte; registro de execução não aprova title nem requisito de submissão. Na extração cega, devolva o objeto valor nos campos pedidos, trecho literal e evidencia_suficiente. Nunca recebe a resposta do Examinador.
 
 Leia todas as páginas de `paginas_fisicas`, uma por chamada. Comece pelo texto legível; peça imagem quando necessário para conferir OCR, tabelas, assinaturas ou texto duvidoso. Não solicite páginas fora da citação. Se a referência não resolve, declare o impedimento; repetir a mesma chamada não corrige uma referência inválida. A revisão de método pode usar diretamente o trecho e o contexto de origem fornecidos, sem ferramenta de página.

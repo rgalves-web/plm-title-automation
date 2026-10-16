@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.casefile import operations, rounds, worker
+from src.casefile import case_file_store, function_files, operations, rounds, worker
 from tests.helpers_casefile import Use
 from tests.test_casefile_function_files import BAD_RESEARCH, _terminal
 from tests.test_casefile_operations import (RESEARCH, operation_case,  # noqa: F401
@@ -80,6 +80,45 @@ def test_reaching_the_cap_stops_further_calls_and_records_the_reason(
     assert [e["detail"]["reason"] for e in events] == [rounds.CAP_REACHED]
     assert _ledger(repo) == ledger                          # no dollars
     assert repo.custo_acumulado(unit["id"]) == 0
+
+
+def test_a_cap_stop_keeps_the_call_files_and_applies_nothing(operation_case):
+    repo, unit, scope = operation_case
+    _approve(repo, unit, scope, turn_cap=2)
+    _terminal(repo, unit)
+    task(repo, unit)
+    stopped = worker.executar_uma(
+        repo, unit["id"], "terminal-fixture", teto=50, operation=True,
+        client=ScriptedTerminal([[Use("entregar_saida", {"saida": BAD_RESEARCH})],
+                                 [Use("entregar_saida", {"saida": BAD_RESEARCH})],
+                                 [Use("entregar_saida", {"saida": RESEARCH})]]))
+    assert stopped["parada"] == rounds.CAP_REACHED
+    files = repo.function_files(run_id=stopped["run_id"])
+    assert [(f["direction"], f["ordinal"]) for f in files] == [
+        ("input", 1), ("output", 1), ("input", 2), ("output", 2)]
+    kept = {f["relative"]: case_file_store.read_bytes(unit["id"], f["relative"])
+            for f in files}                        # read() checks each sha256
+    assert all(f["applied_at"] is None for f in files)
+    state = function_files.lifecycle(repo, stopped["run_id"])
+    assert (state["response_received"], state["valid_output"],
+            state["result_applied"]) == (True, False, False)
+    derived = "SELECT count(*) AS n FROM negative_searches WHERE unit_id=%s"
+    assert repo.conn.execute(derived, (unit["id"],)).fetchone()["n"] == 0
+    # the next Round reruns the task; the stopped run's files stay as written
+    _approve(repo, unit, scope, turn_cap=5)
+    rerun = worker.executar_uma(
+        repo, unit["id"], "terminal-fixture", teto=50, operation=True,
+        client=ScriptedTerminal([[Use("entregar_saida", {"saida": RESEARCH})]]))
+    assert rerun["erros"] == [] and rerun["run_id"] != stopped["run_id"]
+    for relative, data in kept.items():
+        assert case_file_store.read_bytes(unit["id"], relative) == data
+    [applied] = [f for f in repo.function_files(run_id=rerun["run_id"],
+                                                direction="output")]
+    assert applied["applied_at"] is not None
+    cited = {r["output_sha256"] for r in repo.conn.execute(
+        "SELECT output_sha256 FROM negative_searches WHERE unit_id=%s",
+        (unit["id"],))}
+    assert cited == {applied["sha256"]}
 
 
 def test_a_spent_round_resumes_only_through_a_new_round(operation_case):
