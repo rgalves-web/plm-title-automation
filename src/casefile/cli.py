@@ -53,6 +53,11 @@
                                               forma (sai != 0 com erro) ou
                                               lista funcoes/pacotes/licoes
                                               com versao (sem modelo)
+    python -m src.casefile indice <case-id> [--manter]
+                                              reconstroi o indice so dos
+                                              arquivos do Case em outro banco
+                                              e compara com o banco vivo
+                                              (somente leitura)
 
 Teto duro por unit: US$ 25 (`CASEFILE_TETO_UNIT_USD`). Ao bater, qualquer
 comando com modelo recusa, reporta e espera ordem — nunca estoura em silêncio.
@@ -1007,6 +1012,18 @@ def main(argv: list[str] | None = None) -> None:
         codigo = agentes.cmd_agentes(resto)
         if codigo:
             raise SystemExit(codigo)
+    elif comando == "indice":
+        posicionais = [a for a in resto if not a.startswith("--")]
+        if not posicionais or not posicionais[0].isdigit():
+            raise SystemExit("uso: python -m src.casefile indice <case-id> "
+                             "[--manter]")
+        import json
+        from src.casefile import index_rebuild
+        relatorio = index_rebuild.run(int(posicionais[0]),
+                                      keep="--manter" in resto)
+        print(json.dumps(relatorio, ensure_ascii=False, indent=1, default=str))
+        if not relatorio["ok"]:
+            raise SystemExit(1)
     else:
         raise SystemExit(f"comando desconhecido: {comando!r}. Comandos: db, "
                          f"indicar, planejar, plano, aprovar, rejeitar, "
