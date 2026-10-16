@@ -28,6 +28,29 @@ def run(repo,unit,steps):
     return result
 
 
+@pytest.mark.parametrize('name',['read_page','ler_pagina'])
+def test_arbitration_requires_own_page_receipt_and_exposes_role_reading_name(operation_case,tmp_path,name):
+    repo,unit,scope=operation_case
+    approve(repo,unit,scope)
+    artifact=source(repo,unit,tmp_path/'arbitration.pdf')
+    created=task(repo,unit,'arbitro','adjudicacao',mode='operador',
+                 data={'claim':{'id':7},'verification':{'id':8}})
+    active={**created,'_operation_run_id':12345}
+    output={'claim_id':7,'verificacao_id':8,'desfecho':'mantido','material_conclusao_titulo':False,
+            'justificativa':'Synthetic plumbing only.','documento':'sha256:'+artifact['sha256'],
+            'pagina':'1','trecho':'Synthetic fixture only.'}
+    assert runtime.check_arbitration(repo,active,output)==['arbitration_source_page_not_read_in_this_run']
+    funcs=runtime.tools(repo,active)
+    ctx=worker.montar_contexto(active,ferramentas_disponiveis=set(funcs))
+    assert 'ler_pagina' in ctx['ferramentas'] and 'ler_pagina' not in ctx['indisponiveis']
+    assert 'Ferramentas expostas' in ctx['tarefa'] and 'caminho de gravacao' in ctx['tarefa']
+    funcs[name][1](output['documento'],1,'texto')
+    assert runtime.check_arbitration(repo,active,output)==[]
+    assert runtime.check_arbitration(repo,{**active,'_operation_run_id':54321},output)
+    assert runtime.check_arbitration(repo,active,{**output,'claim_id':9})==['arbitration_requested_identity_mismatch']
+    assert runtime.check_arbitration(repo,active,{**output,'verificacao_id':9})==['arbitration_requested_identity_mismatch']
+
+
 def test_blind_range_requires_every_cited_page_in_current_run(operation_case,tmp_path):
     import fitz
     repo,unit,scope=operation_case

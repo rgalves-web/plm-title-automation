@@ -283,6 +283,9 @@ def tools(repo,task):
         'abrir_escalonamento':(tool('abrir_escalonamento','Prepare decisão ou consulta ao SME, com evidência e responsável; nenhum envio externo.',{'motivo':{'type':'string'},'pergunta':{'type':'string'},'opcoes':{'type':'array','items':{'type':'string'}},'artifact_id':{'type':'integer'},'pagina':{'type':'string'},'trecho':{'type':'string'}},['motivo','pergunta','opcoes']),escalate),
         'ler_trilha_da_unit':(tool('ler_trilha_da_unit','Leia registros reais de execução, correções e artefatos de origem, com paginação.',{'offset':{'type':'integer'},'limite':{'type':'integer'}}),read_trace),
         'ler_escalonamentos':(tool('ler_escalonamentos','Leia questões abertas deste caso.'),lambda:case_file('escalonamentos'))}
+    # Preserve the reading name used by the role cards. Both names share the
+    # same evidence boundary and page receipt; no second execution path.
+    items['ler_pagina'] = (dict(read_spec, name='ler_pagina'), read_page)
     return items
 
 
@@ -560,6 +563,26 @@ def persist_comparison(repo,task,output,session_id,*,run_id=None,**_):
     return [vid]
 
 
+def check_arbitration(repo,task,output,**kw):
+    data=task['input_json']
+    if output['claim_id']!=data['claim']['id'] or output['verificacao_id']!=data['verification']['id']:
+        return ['arbitration_requested_identity_mismatch']
+    if output['desfecho']=='escalado':
+        return []  # An access failure may be escalated without pretending to read.
+    sha=output['documento'].removeprefix('sha256:')
+    pages=set(cited_pages(output['pagina']))
+    receipts=repo.operation_events(unit_id=task['unit_id'],task_id=task['id'],
+                                   kind='source.page_read',limit=1000)
+    observed={e['detail']['page'] for e in receipts
+              if e['detail'].get('run_id')==task.get('_operation_run_id')
+              and e['detail'].get('source_sha256')==sha}
+    if not pages or not pages<=observed:
+        return ['arbitration_source_page_not_read_in_this_run']
+    if output['desfecho']=='corrigido':
+        return check_source_claims(repo,task,{'claims':[output['novo_claim']]},**kw)
+    return []
+
+
 def persist_arbitration(repo,task,output,session_id,**_):
     claim=repo.claim(output['claim_id'])
     if not claim or claim['unit_id']!=task['unit_id']:
@@ -592,7 +615,7 @@ def handlers():
     return {'plano_tarefas':(check_plan,persist_plan),'claims':(check_source_claims,persist_claims),
             'resultado_pesquisa':(lambda *a,**k:[],persist_research),'documento_registrado':(check_document,persist_document),
             'rotulo':(lambda *a,**k:[],persist_label),'extracao_cega':(check_verification,persist_verification),
-            'revisao_licao':(lambda *a,**k:[],persist_verification),'adjudicacao':(lambda *a,**k:[],persist_arbitration),
+            'revisao_licao':(lambda *a,**k:[],persist_verification),'adjudicacao':(check_arbitration,persist_arbitration),
             'comparacao_independente':(check_comparison,persist_comparison),
             'projecao_celulas':(lambda repo,task,output,**kw:report_writer.validate(repo,task,output),report_writer.persist),
             'relatorio_qa':(lambda *a,**k:[],persist_qa),'fichas_candidatas':(learning.validate,learning.persist)}

@@ -27,3 +27,7 @@ O painel, PostgreSQL, ferramentas protegidas, fila única, publicações de conh
 Os dois clientes foram autenticados com suas contas. Codex devolveu `terminal_ready` numa execução real sem dados de cliente; Claude Code devolveu a solicitação JSON `confirmar_transporte` com o argumento esperado. A instrução da aplicação é fornecida ao campo oficial de sistema do Claude. Usa-se `--safe-mode`, porque `--bare` exclui o login da assinatura. Os testes verificam chamadas, contratos, recibos, remoção de chaves, ausência de reserva de dinheiro API e interrupção sem repetição automática. Nenhum desses ensaios aprova conclusões de title ou substitui Q1–Q6.
 
 Referências oficiais: [Codex não interativo](https://developers.openai.com/codex/noninteractive), [autenticação Codex](https://developers.openai.com/codex/auth), [Claude Code programático](https://code.claude.com/docs/en/headless).
+
+### Rodada operacional real — 16/10/2026
+
+Após o diagnóstico de autenticação, uma pendência existente percorreu produção Claude Code, fonte em imagem, correção aplicada e revisão independente Codex com concordância. Foram preservados fonte/página, saídas, recibos e vínculo entre a afirmação substituída e a atual. O resultado continua aguardando decisão humana. A fila geral permaneceu pausada fora das etapas selecionadas; não houve nova chamada de API. [Comportamento demonstrado e limites](VALIDACAO_TERMINAL_REAL.md).

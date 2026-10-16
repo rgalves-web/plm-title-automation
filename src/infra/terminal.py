@@ -121,6 +121,14 @@ def _codex_isolation():
 def _payload(system, messages, tools):
     images = []
     def walk(value):
+        # SDK blocks, CLI blocks and replay dataclasses must remain structured
+        # across turns. str(namespace(...)) loses tool IDs and image nesting.
+        if hasattr(value, 'model_dump'):
+            value = value.model_dump(mode='json')
+        elif isinstance(value, SimpleNamespace):
+            value = vars(value)
+        elif __import__('dataclasses').is_dataclass(value) and not isinstance(value,type):
+            value = __import__('dataclasses').asdict(value)
         if isinstance(value, dict):
             if value.get('type') == 'image':
                 images.append(value)

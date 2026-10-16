@@ -1,5 +1,7 @@
 # Esteira visual — transporte vigente em 16/10/2026
 
+**Validação operacional posterior ao login:** uma pendência real do Cibola percorreu leitura da fonte por Claude Code, correção persistida, extração cega pelo Codex e comparação independente com concordância. O resultado atual aguarda decisão humana; não houve nova chamada de API. Pausa entre etapas e reinício do serviço preservaram o resultado sem repetição. A primeira tentativa expôs ambiguidade nos nomes das ferramentas, corrigida com o nome de leitura da ficha, inventário explícito e validação de página lida na própria execução. Consulte [Validação real](VALIDACAO_TERMINAL_REAL.md). Os limites de title e Q1–Q6 continuam aplicáveis.
+
 Renato solicitou apagar as chaves de API do PLM e usar Claude Code e Codex pelos terminais oficiais. As duas chaves foram removidas da configuração local; a operação desativa o SDK e não faz fallback automático à API. Os dois clientes estão autenticados e passaram no diagnóstico real de solicitação de ferramenta, sem documentos de cliente. Modelos utilizados no diagnóstico: Claude Sonnet e Codex gpt-6.1-sol. A prova local está em `PLM_OPERACAO/servico/TERMINAIS_VERIFICADOS.json`, fora do Git.
 
 Os quatro casos conservam dados, aprovações, conhecimento, saídas e custos históricos, com `execution_backend=terminal`, pausados. Chamadas de assinatura possuem recibos próprios e não são convertidas em cobranças de API. A troca de transporte não aceita resultados pendentes, resolve title nem apaga cobranças antigas incertas. Limites das assinaturas e as decisões materiais continuam aplicáveis.
@@ -8,7 +10,7 @@ Foi corrigida a inicialização automática: o Windows passa a chamar Python dir
 
 Implementação, instalação e limites: [Execução terminal](EXECUCAO_TERMINAL.md).
 
-Validação desta versão: **1.359 testes passaram** na suíte completa; os dois terminais passaram no diagnóstico real do contrato de solicitação de ferramenta. O painel respondeu HTTP 200 com quatro executores e quatro casos no transporte terminal. O início direto por Python foi conferido e a recuperação do banco foi verificada em instância isolada.
+Baseline inicial do transporte: **1.359 testes passaram** na suíte completa; os dois terminais passaram no diagnóstico real do contrato de solicitação de ferramenta. Após as correções encontradas na validação operacional, **1.362 testes passaram** na suíte completa. O painel respondeu HTTP 200 após reinício com quatro executores e quatro casos no transporte terminal. O início direto por Python foi conferido e a recuperação do banco atualizado, incluindo recibos de terminal e revisões, foi verificada em instância isolada.
 
 ---
 

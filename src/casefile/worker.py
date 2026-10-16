@@ -138,6 +138,14 @@ def montar_contexto(task: dict[str, Any], *, raiz: str | Path | None = None,
         f"## Esquema de saida (`{task['output_schema']}`)\n\n"
         + _esquema_com_refs(task["output_schema"], raiz),
     ]
+    tarefa.append("## Ferramentas expostas nesta execucao\n"
+                  + ", ".join(["entregar_saida", *expostas])
+                  + ". Use os nomes e argumentos dos contratos fornecidos. "
+                  "Nao declare uma ferramenta exposta como indisponivel. "
+                  "Uma funcao equivalente exposta pode substituir um nome historico indisponivel. "
+                  "Entregar_saida e o caminho de gravacao: a aplicacao valida, "
+                  "persiste o resultado e registra a conclusao da tarefa juntas; "
+                  "nao depende de uma segunda ferramenta registrar_*.")
     if indisponiveis:
         tarefa.append(
             "## Ferramentas da ficha indisponiveis nesta execucao\n"

@@ -35,6 +35,21 @@ def test_cli_parser_preserves_calls_usage_and_subscription_receipt():
     assert reply.terminal_receipt['subscription_charge_usd'] is None
 
 
+def test_multiturn_payload_preserves_cli_sdk_and_replay_tool_blocks():
+    from anthropic.types import ToolUseBlock
+    blocks=[SimpleNamespace(type='tool_use',id='cli_1',name='read_page',input={'pagina':1}),
+            ToolUseBlock(type='tool_use',id='sdk_2',name='read_page',input={'pagina':2}),
+            Use('read_page',{'pagina':3},id='replay_3')]
+    prompt,images=terminal._payload('system',[{'role':'assistant','content':blocks},
+        {'role':'user','content':[{'type':'tool_result','tool_use_id':'cli_1','content':[
+            {'type':'image','source':{'type':'base64','media_type':'image/png','data':'eA=='}}]}]}],[])
+    parsed=json.loads(prompt)
+    assert [b['id'] for b in parsed['messages'][0]['content']]==['cli_1','sdk_2','replay_3']
+    assert parsed['messages'][0]['content'][2]['input']=={'pagina':3}
+    assert parsed['messages'][1]['content'][0]['content']==[{'type':'attached_image','number':1}]
+    assert len(images)==1
+
+
 @pytest.mark.parametrize('bad',[
     [{'type':'turn.failed'}],
     [{'type':'item.completed','item':{'type':'file_change'}}],
