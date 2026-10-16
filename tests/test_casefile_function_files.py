@@ -130,6 +130,153 @@ def test_lifecycle_distinguishes_received_valid_applied(operation_case):
     assert detail["function_files"][-1]["direction"] == "output"
 
 
+# --- issue 02: input files before every terminal call ------------------------
+
+def _terminal(repo, unit):
+    case = repo.operation_case(unit["id"])
+    repo.operation_update(unit["id"], profile={**case["profile"],
+                                               "execution_backend": "terminal"})
+
+
+class _CheckedTerminal(ClientRoteirizado):
+    """Scripted terminal that proves, at the moment the process would start,
+    that this call's input file is already written."""
+
+    def __init__(self, repo, steps):
+        super().__init__(steps)
+        self.repo = repo
+        self.seen = []
+
+    def create(self, **kwargs):
+        calls = self.repo.conn.execute(
+            "SELECT * FROM operation_terminal_calls ORDER BY id").fetchall()
+        current = calls[-1]
+        assert current["input_sha256"] and current["input_file_id"]
+        self.seen.append(current["ordinal"])
+        result = super().create(**kwargs)
+        result.terminal_receipt = {"billing_mode": "subscription",
+                                   "api_charge_usd": 0,
+                                   "subscription_charge_usd": None}
+        return result
+
+
+def test_every_terminal_call_has_one_input_file_written_first(operation_case):
+    repo, unit, scope = operation_case
+    approve(repo, unit, scope)
+    _terminal(repo, unit)
+    item = task(repo, unit)
+    client = _CheckedTerminal(repo, [
+        [Use("entregar_saida", {"saida": BAD_RESEARCH})],
+        [Use("entregar_saida", {"saida": RESEARCH})]])
+    result = worker.executar_uma(repo, unit["id"], "terminal-fixture",
+                                 teto=50, operation=True, client=client)
+    assert result["erros"] == [] and client.seen == [1, 2]
+    inputs = repo.function_files(run_id=result["run_id"], direction="input")
+    assert [f["ordinal"] for f in inputs] == [1, 2]
+    calls = repo.conn.execute(
+        "SELECT * FROM operation_terminal_calls ORDER BY ordinal").fetchall()
+    assert [c["input_sha256"] for c in calls] == [f["sha256"] for f in inputs]
+    run = repo.run(result["run_id"])
+    assert run["input_sha256"] == inputs[-1]["sha256"]       # on the task run
+    stage = repo.estado_da_unit(unit["id"]).lower()
+    assert inputs[0]["relative"] == (f"{stage}/pesquisador/{item['id']}/"
+                                     f"input_run{run['id']}_call01.json")
+    body = json.loads(case_file_store.read(unit["id"], inputs[0]["relative"])
+                      .path.read_text("utf-8"))
+    assert body["kind"] == "function_input"
+    assert body["output_schema"] == "resultado_pesquisa"
+    assert body["sent"]["stdin"] and body["sent"]["output_schema"]
+    assert "publication" in body
+    artifact = repo.operation_artifact(inputs[0]["artifact_id"])
+    assert artifact["kind"] == "function_input"                # artifact index
+    assert artifact["sha256"] == inputs[0]["sha256"]
+
+
+def test_task_view_shows_the_input_file_and_hash(operation_case):
+    from src.casefile import operations
+    repo, unit, scope = operation_case
+    approve(repo, unit, scope)
+    _terminal(repo, unit)
+    task(repo, unit)
+    result = worker.executar_uma(
+        repo, unit["id"], "terminal-fixture", teto=50, operation=True,
+        client=_CheckedTerminal(repo, [[Use("entregar_saida",
+                                            {"saida": RESEARCH})]]))
+    detail = operations.task_detail(repo, result["tarefa"]["id"])
+    [call] = detail["terminal_calls"]
+    [entry] = [f for f in detail["function_files"]
+               if f["id"] == call["input_file_id"]]
+    assert entry["direction"] == "input"
+    assert call["input_sha256"] == entry["sha256"]
+    assert any(a["id"] == entry["artifact_id"] for a in detail["artifacts"])
+
+
+def test_call_whose_input_file_cannot_be_written_never_starts(operation_case,
+                                                              monkeypatch):
+    repo, unit, scope = operation_case
+    approve(repo, unit, scope)
+    _terminal(repo, unit)
+    task(repo, unit)
+
+    def refuse(*a, **k):
+        raise case_file_store.CaseFileOutsideCase("synthetic refusal")
+
+    monkeypatch.setattr(function_files, "write_input", refuse)
+
+    class NeverCalled:
+        def __init__(self):
+            self.messages = self
+
+        def create(self, **kwargs):
+            pytest.fail("the process must not start without its input file")
+
+    result = worker.executar_uma(repo, unit["id"], "terminal-fixture",
+                                 teto=50, operation=True, client=NeverCalled())
+    assert result["tarefa"]["status"] == "bloqueada"
+    assert "terminal_input_file_not_written" in result["parada"]
+    call = repo.conn.execute(
+        "SELECT * FROM operation_terminal_calls").fetchone()
+    assert call["status"] == "interrupted" and call["input_sha256"] is None
+    assert "case_file_outside_case" in call["failure"]
+    assert repo.run(result["run_id"])["usage_state"] == "not_called"
+    escalation = [e for e in repo.escalonamentos(unit["id"], abertos=True)
+                  if "terminal_input_file_not_written" in e["pergunta"]]
+    assert escalation
+
+
+@pytest.mark.parametrize("family", ["A", "B"])
+def test_input_file_holds_exactly_what_the_process_receives(monkeypatch,
+                                                            tmp_path, family):
+    from src.infra import terminal
+    from tests.test_casefile_terminal import events
+    monkeypatch.setenv("PLM_OPERATION_ROOT", str(tmp_path))
+    monkeypatch.setattr(terminal, "auth_status", lambda _: {"ok": True})
+    monkeypatch.setattr(terminal, "executable", lambda _: "official-cli")
+    seen = {}
+
+    def process(args, *, stdin="", cwd=None, timeout=600):
+        seen["stdin"] = stdin
+        if family == "A":
+            data = {"type": "result", "subtype": "success", "is_error": False,
+                    "structured_output": {"text": "ok", "calls": []},
+                    "usage": {"input_tokens": 3, "output_tokens": 2}}
+            return 0, json.dumps(data), ""
+        return 0, "\n".join(map(json.dumps, events("ok"))), ""
+
+    monkeypatch.setattr(terminal, "run_process", process)
+    kwargs = {"model": "terminal/claude/sonnet" if family == "A"
+              else "terminal/codex/default",
+              "system": "synthetic-system",
+              "messages": [{"role": "user", "content": "synthetic data"}],
+              "tools": []}
+    sent = terminal.build_input(family, **kwargs)
+    message = terminal.TerminalAdapter(family).create(max_tokens=50, **kwargs)
+    assert seen["stdin"] == sent["stdin"]
+    import hashlib
+    assert message.terminal_receipt["input_sha256"] == \
+        hashlib.sha256(sent["stdin"].encode("utf-8")).hexdigest()
+
+
 def test_begin_apply_refuses_rejected_missing_or_changed_file(operation_case):
     repo, unit, scope = operation_case
     approve(repo, unit, scope)

@@ -54,10 +54,45 @@ def write_output(repo: Any, task: dict[str, Any], run_id: int, attempt: int,
         {"display_name": f"Saída da função · tarefa {task['id']} · run "
                          f"{run_id} · tentativa {attempt}",
          "relative": record.relative, "run_id": run_id, "attempt": attempt,
-         "status": status, "rejection_reason": list(errors)}, task["id"])
+         "status": ("Saída aceita" if status == "accepted" else
+                    "Saída recusada: " + "; ".join(errors)),
+         "rejection_reason": list(errors)}, task["id"])
     return repo.function_file_add(
         unit_id, task["id"], run_id, "output", attempt, record.relative,
         record.sha256, record.size, status, errors, artifact["id"])
+
+
+def write_input(repo: Any, task: dict[str, Any], run: dict[str, Any],
+                ordinal: int, sent: dict[str, Any]) -> dict[str, Any]:
+    """Write the exact context of one terminal call as its input file and
+    index it (issue 02). `sent` is `terminal.build_input(...)`: stdin bytes,
+    images, system prompt, protocol and output schema. Must succeed before
+    the process starts; any failure propagates to the caller."""
+    unit_id = task["unit_id"]
+    # The run row is re-read: the pinned Publication is set on it after the
+    # worker picked the task, so a cached dict could miss it.
+    run = repo.run(run["id"]) or run
+    document = {"schema": SCHEMA, "kind": "function_input",
+                "unit_id": unit_id, "task_id": task["id"],
+                "run_id": run["id"], "function": task["role"],
+                "output_schema": task["output_schema"],
+                "call_ordinal": ordinal,
+                "publication": run.get("knowledge_release_id"),
+                "sent": sent}
+    record = case_file_store.write(
+        unit_id, stage=repo.estado_da_unit(unit_id), function=task["role"],
+        task=task["id"], name=f"input_run{run['id']}_call{ordinal:02d}.json",
+        data=_dumps(document))
+    artifact = repo.operation_add_artifact(
+        unit_id, "function_input", record.path, record.sha256, record.size,
+        {"display_name": f"Entrada da função · tarefa {task['id']} · run "
+                         f"{run['id']} · chamada {ordinal}",
+         "relative": record.relative, "run_id": run["id"],
+         "call_ordinal": ordinal,
+         "status": "Entrada registrada antes da chamada"}, task["id"])
+    return repo.function_file_add(
+        unit_id, task["id"], run["id"], "input", ordinal, record.relative,
+        record.sha256, record.size, "recorded", [], artifact["id"])
 
 
 def begin_apply(repo: Any, file_row: dict[str, Any] | None) -> dict[str, Any]:

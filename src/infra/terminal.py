@@ -142,6 +142,26 @@ def _payload(system, messages, tools):
     return prompt, images
 
 
+def build_input(family, *, model, system, messages, tools):
+    """Exactly what a terminal call sends to the official CLI process: the
+    stdin bytes, the attached images, the trusted system prompt (family A),
+    the protocol and the output schema. The adapter launches the process from
+    this, and the Function input file records this, so the two cannot drift
+    (issue 02)."""
+    prompt, images = _payload(system, messages, tools)
+    trusted = system if isinstance(system, str) else '\n'.join(p.get('text', '') for p in system)
+    if family == 'A':
+        content = [{'type': 'text', 'text': prompt}] + images
+        stdin = json.dumps({'type': 'user', 'message': {'role': 'user', 'content': content}}, ensure_ascii=False) + '\n'
+        system_prompt = PROTOCOL + '\n\n' + trusted
+    else:
+        stdin = prompt
+        system_prompt = None  # family B receives PROTOCOL as developer_instructions
+    return {'family': family, 'model': model.rsplit('/', 1)[-1], 'protocol': PROTOCOL,
+            'system_prompt': system_prompt, 'stdin': stdin, 'images': images,
+            'output_schema': SCHEMA}
+
+
 class TerminalAdapter:
     subscription = True
     manages_retries = True
@@ -156,7 +176,8 @@ class TerminalAdapter:
         from src.casefile.storage import operation_root
         root = operation_root() / 'terminal_tmp'
         root.mkdir(parents=True, exist_ok=True)
-        prompt, images = _payload(system, messages, tools)
+        sent = build_input(self.family, model=model, system=system, messages=messages, tools=tools)
+        images, stdin = sent['images'], sent['stdin']
         cli = executable(self.family)
         with tempfile.TemporaryDirectory(prefix='turn-', dir=root) as folder:
             cwd = Path(folder).resolve()
@@ -165,22 +186,19 @@ class TerminalAdapter:
             schema = cwd / 'output.schema.json'
             schema.write_text(json.dumps(SCHEMA), encoding='utf-8')
             if self.family == 'A':
-                trusted = system if isinstance(system, str) else '\n'.join(p.get('text','') for p in system)
                 system_file = cwd / 'system.txt'
-                system_file.write_text(PROTOCOL + '\n\n' + trusted, encoding='utf-8')
+                system_file.write_text(sent['system_prompt'], encoding='utf-8')
                 args = [cli, '--safe-mode', '-p', '--output-format', 'stream-json', '--verbose',
                     '--system-prompt-file', str(system_file),
                     '--input-format', 'stream-json', '--tools', '', '--strict-mcp-config',
                     '--mcp-config', '{"mcpServers":{}}', '--setting-sources', '',
                     '--no-session-persistence', '--max-turns', '3',
-                    '--model', model.rsplit('/', 1)[-1], '--json-schema', json.dumps(SCHEMA)]
-                content = [{'type': 'text', 'text': prompt}] + images
-                stdin = json.dumps({'type': 'user', 'message': {'role': 'user', 'content': content}}, ensure_ascii=False) + '\n'
+                    '--model', sent['model'], '--json-schema', json.dumps(SCHEMA)]
             else:
                 args = [cli, '-a', 'never', *_codex_isolation(), 'exec', '--sandbox', 'read-only',
                     '--ephemeral', '--skip-git-repo-check', '--json', '--output-schema', str(schema)]
-                if model.rsplit('/', 1)[-1] != 'default':
-                    args += ['--model', model.rsplit('/', 1)[-1]]
+                if sent['model'] != 'default':
+                    args += ['--model', sent['model']]
                 for index, image in enumerate(images):
                     source = image['source']
                     if source.get('type') != 'base64' or source.get('media_type') not in ('image/png', 'image/jpeg'):
@@ -189,7 +207,6 @@ class TerminalAdapter:
                     file.write_bytes(base64.b64decode(source['data'], validate=True))
                     args += ['--image', str(file)]
                 args += ['-']
-                stdin = prompt
             code, stdout, stderr = run_process(args, stdin=stdin, cwd=str(cwd))
             events = []
             for line in stdout.splitlines():
