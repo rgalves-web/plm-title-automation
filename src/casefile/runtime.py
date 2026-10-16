@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from src.casefile import agentes,orquestracao,worker
+from src.casefile import agentes,case_records,function_files,orquestracao,worker
 from src.casefile.operations import PACK,require_running,serializable
 from src.casefile.storage import checked_artifact,digest_file,write_bytes
 from src.casefile.training import digest
@@ -471,6 +471,8 @@ def persist_claims(repo,task,output,session_id,**kwargs):
         path,sha=write_bytes(task['unit_id'],f"exame/claims_tarefa_{task['id']}_{digest({'claim_ids':ids,'output':output})[:12]}.json",raw)
         repo.operation_add_artifact(task['unit_id'],'claim_checkpoint',path,sha,len(raw),
             {'claim_fingerprints':{digest(c):cid for c,cid in zip(output['claims'],ids)},'independent_acceptance':'pending'},task['id'])
+        # Issue 05: each Claim of the applied output gets its own Case file.
+        case_records.write_claim_files(repo,task,ids,function_files.current_output(repo,task['unit_id']))
     if any(c.get('materialidade')=='alta' for c in output['claims']):
         repo.conn.execute("UPDATE tasks SET verificacao='obrigatoria_e_operador' WHERE id=%s",(task['id'],))
     return ids
@@ -509,7 +511,10 @@ def persist_verification(repo,task,output,session_id,*,run_id=None,**_):
                   'prompt_sha256':run['prompt_sha256'],'raw_response':json.dumps(output,ensure_ascii=False),
                   'request_id':request['provider_request_id'] if request else '',
                   'model_params':{'model':run['model'],'blind':True}})
-    repo.invalidar_verificacao(vid,'blind_extraction_awaiting_ai_comparison')
+    # Issue 05: the review is a Case file; its invalidation is a new file.
+    applied=function_files.current_output(repo,task['unit_id'])
+    case_records.write_review_file(repo,task,vid,applied)
+    case_records.invalidate_review(repo,task,vid,'blind_extraction_awaiting_ai_comparison',applied)
     return [vid]
 
 
@@ -558,6 +563,7 @@ def persist_comparison(repo,task,output,session_id,*,run_id=None,**_):
         rastreio={'source_sha256':claim['source_sha256'],'page':claim['page'],'prompt_sha256':run['prompt_sha256'],
                  'raw_response':json.dumps(output,ensure_ascii=False),'request_id':request['provider_request_id'] if request else '',
                  'model_params':{'model':run['model'],'stage':'independent_ai_comparison'}})
+    case_records.write_review_file(repo,task,vid,function_files.current_output(repo,task['unit_id']))
     if output['material_divergence']:
         repo.abrir_escalonamento(task['unit_id'],task['id'],'material_title',output['reason'],['consultar SME','fornecer evidência complementar'])
     return [vid]
@@ -593,7 +599,9 @@ def persist_arbitration(repo,task,output,session_id,**_):
                                  escalation.get('pergunta',output['justificativa']),escalation.get('opcoes',['consultar SME','fornecer evidência']))
     elif output['desfecho']=='corrigido':
         ids=worker._gravar_claims(repo,task,{'claims':[output['novo_claim']]},session_id)
-        repo.atualizar_claim_status(task['unit_id'],claim['id'],'substituido',ids[0])
+        # Issue 05: the new Claim's file supersedes the old one's, with the reason.
+        case_records.replace_claim(repo,task,claim['id'],ids[0],output['justificativa'],
+                                   function_files.current_output(repo,task['unit_id']))
         repo.conn.execute("UPDATE tasks SET verificacao='obrigatoria_e_operador' WHERE id=%s",(task['id'],))
         current=repo.tarefa(task['id'])
         if current['status']!='aguardando_verificacao':
