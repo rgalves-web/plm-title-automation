@@ -12,7 +12,7 @@ saida_esquemas_adicionais: [extracao_cega, revisao_licao]
 nivel_modelo: forte
 familia: B
 verifica: nao_aplicavel
-ferramentas: [ler_pagina_confirmada, registrar_verificacao]
+ferramentas: [ler_pagina_confirmada]
 ---
 ## Entrada
 Documento (sha256), páginas físicas e pergunta neutra. A ferramenta confere identidade e registra a leitura de cada página. Nunca recebe o valor afirmado pelo Examinador na extração cega.

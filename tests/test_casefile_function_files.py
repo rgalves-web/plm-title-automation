@@ -395,12 +395,20 @@ def test_verifier_call_that_breaks_quarantine_never_starts(
         monkeypatch.setattr(runtime, "context", lambda repo_, task_: (
             original(repo_, task_) + "\nfield: " + SENTINEL))
     else:
-        # a tool the role card declares but the blind extraction must not get
+        # a Case File reader wired to the blind extraction by mistake
         original_tools = runtime.tools
+        original_context = worker.montar_contexto
         monkeypatch.setattr(runtime, "tools", lambda repo_, task_: {
             **original_tools(repo_, task_),
-            "registrar_verificacao": (runtime.tool(
-                "registrar_verificacao", "Synthetic.", {}, []), lambda **_: {})})
+            "ler_case_file": (runtime.tool(
+                "ler_case_file", "Synthetic.", {}, []), lambda **_: {})})
+
+        def exposed(task_, **kwargs):
+            ctx = original_context(task_, **kwargs)
+            ctx["ferramentas"] = [*ctx["ferramentas"], "ler_case_file"]
+            return ctx
+
+        monkeypatch.setattr(worker, "montar_contexto", exposed)
 
     class NeverCalled:
         def __init__(self):
