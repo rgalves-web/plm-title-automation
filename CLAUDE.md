@@ -76,3 +76,18 @@ Surface-title preparation history (2026-09-12): see `docs/CIBOLA_PREPARACAO.md`.
 ## Cibola — mandatory submission protocol adopted 2026-10-01
 
 Before any Cibola work, read `../Land Cibola Surface Titles/AGENTS.md` and `../Land Cibola Surface Titles/00_Governanca/PROTOCOLO_SUBMISSAO_PLM.md`. This is Renato's explicit instruction to persist and apply the supplied Marc Reyes protocol: Derek's exact entry examples, a real PREP review of each submitted report, final Spell Check, and SME treatment of technical questions, with evidence tied to the reviewed version. Never mark these done from a training card or a self-generated checklist. Read `../Land Cibola Surface Titles/00_Governanca/README.md` for the implementation record and limitations. Renato authorized uploads of work in progress on 2026-10-01, identified as WORKING DRAFT with version and gaps. Every partial or final submission must comply with the protocol. Project Log remains read-only. Training configuration does not remove surface execution restrictions or approve title.
+
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues for `rgalves-web/plm-title-automation`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context (root `GLOSSARY.md` + `docs/adr/`; until those exist, the glossary is the `## Domain glossary` section above). See `docs/agents/domain.md`.
