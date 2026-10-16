@@ -96,6 +96,7 @@ def preflight(repo,unit_id):
 def snapshot(repo):
     if not repo.operations_installed():
         return {'installed':False,'cases':[],'roles':roles(),'services':[],'last_event_id':0}
+    from src.casefile import rounds
     cases=[]
     for case in repo.operation_cases():
         uid=case['unit_id']
@@ -108,7 +109,8 @@ def snapshot(repo):
                       'artifact_counts':dict(Counter(a['kind'] for a in artifacts)),
                       'open_research':sum(r['status']=='aberta' for r in repo.pesquisas(uid)),
                       'external_dependencies':sum(j['status']=='blocked' for j in sources),
-                      'tasks':summaries,'pid':case['scope'].get('pid','')})
+                      'tasks':summaries,'pid':case['scope'].get('pid',''),
+                      'round':rounds.state(repo,uid)})
     from src.casefile.spending import state as shared_spending
     return serializable({'installed':True,'cases':cases,'roles':roles(),'services':repo.operation_services(),'shared_spending':shared_spending(repo),
                          'last_event_id':repo.operation_last_event(),'workers':4})
@@ -129,7 +131,8 @@ def detail(repo,unit_id):
         except (ValueError,OSError) as exc:
             knowledge={'release_id':config['release_id'],'error':str(exc)}
     from src.casefile.knowledge_registry import overview as knowledge_versions
-    return serializable({'case':case,'knowledge':knowledge,'knowledge_registry':knowledge_versions(repo),'tasks':repo.tarefas(unit_id),'artifacts':repo.operation_artifacts(unit_id),
+    from src.casefile import rounds
+    return serializable({'case':case,'round':rounds.state(repo,unit_id),'knowledge':knowledge,'knowledge_registry':knowledge_versions(repo),'tasks':repo.tarefas(unit_id),'artifacts':repo.operation_artifacts(unit_id),
                          'research':repo.pesquisas(unit_id),'source_jobs':repo.operation_sources(unit_id),
                          'followups':repo.operation_followups(unit_id),
                          'uncertain_requests':repo.conn.execute("SELECT q.*,t.title,t.id AS task_id FROM operation_requests q JOIN task_runs r ON r.id=q.run_id JOIN tasks t ON t.id=r.task_id WHERE t.unit_id=%s AND (q.status='unknown' OR (q.status='inflight' AND (r.finished_at IS NOT NULL OR r.lease_until<now()))) ORDER BY q.id",(unit_id,)).fetchall(),
@@ -218,8 +221,13 @@ def command(repo,body,actor=ACTOR):
                 raise ValueError('explicit_budget_between_zero_and_50_required')
             if budget<=repo.custo_acumulado(uid):
                 raise ValueError('approved_budget_has_no_remaining_balance')
+            # Issue 08: approving a Round requires its turn cap.
+            from src.casefile import rounds
+            cap=rounds.validate_cap(body.get('turn_cap'))
+            opened=rounds.approve(repo,uid,cap,actor,body['note'],cid)
             approval={'actor':actor,'note':body['note'],'at':datetime.now(timezone.utc).isoformat(),
-                      'scope_sha256':digest(scope),'budget_usd':budget,'command_id':cid}
+                      'scope_sha256':digest(scope),'budget_usd':budget,'command_id':cid,
+                      'round':opened['number'],'turn_cap':cap}
             repo.operation_update(uid,scope=scope,approved_budget_usd=budget,approval=approval,execution_state='running')
             seed_coordinator(repo,uid,budget-repo.custo_acumulado(uid))
         elif action=='pause':
@@ -245,6 +253,10 @@ def command(repo,body,actor=ACTOR):
                 raise ValueError('initial_approval_required')
             if has_unbounded_usage(repo,uid):
                 raise ValueError('reconcile_provider_usage_before_resume')
+            from src.casefile import rounds
+            current_round=rounds.state(repo,uid)
+            if not current_round or not current_round['open'] or current_round['turns_remaining']<=0:
+                raise ValueError('approve_new_round_with_turn_cap')
             repo.operation_update(uid,execution_state='running')
         elif action=='decide_task':
             tid=int(body['task_id'])

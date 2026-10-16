@@ -545,6 +545,7 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
     falha = ""
     provider_rejection = None
     execution_block = None
+    round_stop = None
     perdido: TransicaoInvalida | None = None
     try:
         log, _ = run_loop(system=ctx["sistema"], task=ctx["tarefa"],
@@ -565,6 +566,8 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
             from src.casefile.accounting import ProviderUnavailable,UnknownProviderUsage
             from src.casefile.spending import SharedSpendingCap
             from src.infra.terminal import TerminalError
+            from src.casefile.rounds import RoundTurnCapReached
+            if isinstance(exc,RoundTurnCapReached): round_stop=exc.code
             if isinstance(exc,ProviderUnavailable): provider_rejection=exc
             if isinstance(exc,(ExecutionNeedsReview,UnknownProviderUsage,SharedSpendingCap)):execution_block=str(exc)
             if isinstance(exc,TerminalError):execution_block=str(exc)
@@ -585,6 +588,19 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
             "prompt_sha256": _sha(ctx["sistema"] + "\n\n" + ctx["tarefa"]),
             "tokens_in": uso.input + uso.cache_write + uso.cache_read,
             "tokens_out": uso.output, "cost_usd": custo}
+    if round_stop:
+        # Issue 08: the Round has no turn left. Nothing about the task is
+        # wrong: it goes back to ready, uncounted, and the Case waits for
+        # Renato to approve a new Round. The reason is the run's stop reason.
+        with repo.transacao():
+            t=repo.fechar_run(run['id'],worker,output_json=entrega['saida'],output_valid=False,
+                             validation_errors=[round_stop],stop_reason=round_stop,para='pronta',**meta)
+            repo.operation_update(unit_id,execution_state='waiting')
+            result={'tarefa':t,'run_id':run['id'],'erros':[round_stop],'teto_atingido':False,
+                    'modelo':modelo,'custo_usd':custo,'parada':round_stop,'entregas':entrega['entregas'],
+                    'gravados':[],'proposta_id':None,'limite_usd':limite,'licoes':ctx['licoes'],'indisponiveis':ctx['indisponiveis']}
+            runtime.finalize(repo,task,result)
+        return result
     if execution_block:
         with repo.transacao():
             t=repo.fechar_run(run['id'],worker,output_json=entrega['saida'],output_valid=False,

@@ -44,7 +44,7 @@ def request(repo,unit,action,**extra):
 
 
 def approve(repo,unit,scope):
-    operations.command(repo,request(repo,unit,'start',budget_usd=50,scope=scope))
+    operations.command(repo,request(repo,unit,'start',budget_usd=50,scope=scope,turn_cap=200))
     coord=repo.tarefas(unit['id'])[0]
     repo.transicionar_tarefa(coord['id'],('pronta',),'cancelada','human:test','Only run the tested role.')
 
@@ -78,7 +78,7 @@ def test_budget_not_approved_does_not_dispatch(operation_case):
 
 def test_operator_command_replay_and_stale_revision(operation_case):
     repo,unit,scope=operation_case
-    body=request(repo,unit,'start',budget_usd=50,scope=scope)
+    body=request(repo,unit,'start',budget_usd=50,scope=scope,turn_cap=200)
     result=operations.command(repo,body)
     assert operations.command(repo,body)==result
     assert len(repo.tarefas(unit['id']))==1

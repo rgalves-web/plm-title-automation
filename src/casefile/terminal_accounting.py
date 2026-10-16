@@ -9,6 +9,9 @@ Issue 04: the process is launched from the input file read back from disk,
 never from the in-memory call, so the Function receives only what its own
 input file holds. Before launch, the quarantine of a blind extraction is
 checked against that file; a violation stops the call the same way.
+
+Issue 08: each launched call is one turn of the Case's current Round; a
+call never starts once the Round's turn cap is reached (`rounds`).
 """
 import hashlib
 
@@ -28,6 +31,11 @@ class TerminalClient:
         self.messages = self
 
     def create(self, **kwargs):
+        from src.casefile import rounds
+        # Issue 08: no call starts without a turn left in the Case's Round.
+        # Checked first: a Round closed by its cap also sets the Case waiting,
+        # and the reason to report is the cap.
+        current_round = rounds.take_turn(self.repo, self.task['unit_id'])
         require_running(self.repo, self.task['unit_id'])
         ordinal = self.turnos + 1
         with self.repo.transacao():
@@ -37,6 +45,8 @@ class TerminalClient:
         sent = self._input_for_call(row, ordinal, kwargs)
         with self.repo.transacao():
             self.repo.conn.execute("UPDATE task_runs SET usage_state='subscription_running' WHERE id=%s", (self.run['id'],))
+            self.repo.conn.execute('UPDATE operation_terminal_calls SET round_id=%s,launched_at=now() WHERE id=%s',
+                                   (current_round['id'], row['id']))
         try:
             message = self._launch(sent, kwargs)
         except Exception as exc:
@@ -44,7 +54,9 @@ class TerminalClient:
             with self.repo.transacao():
                 self.repo.conn.execute("UPDATE operation_terminal_calls SET status='interrupted',failure=%s,finished_at=now() WHERE id=%s", (reason, row['id']))
                 self.repo.conn.execute("UPDATE task_runs SET usage_state='subscription_interrupted' WHERE id=%s", (self.run['id'],))
+            rounds.after_turn(self.repo, self.task['unit_id'], current_round)
             raise TerminalError('terminal_interrupted_no_automatic_retry') from None
+        rounds.after_turn(self.repo, self.task['unit_id'], current_round)
         receipt = getattr(message, 'terminal_receipt', None) or {}
         expected = hashlib.sha256(sent['stdin'].encode('utf-8')).hexdigest()
         mismatch = bool(receipt.get('input_sha256')) and receipt['input_sha256'] != expected
