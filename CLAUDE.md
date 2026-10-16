@@ -52,15 +52,9 @@ own scope; the still-applicable operator checkpoints are preserved.
 
 ---
 
-## Domain glossary (so you don't misread the data)
+## Domain language
 
-- **DDR** — Due Diligence Report (Excel deliverable, per unit).
-- **TO** — Title Opinion PDF. Original + Supplements over the **same legal description** → the **most recent by certification date controls**; earlier ones are superseded. Use the ownership certification "as of" date, not the date printed at the top.
-- **DPU / DOU** — Declaration of Pooled Unit / Designation of Unit. Exhibit "A" lists the unit's leases (the perimeter authority); Exhibit "C" the tracts. Cross-checking DPU × both XREF sheets × Lease & Mineral Schedule is mandatory at kickoff; divergences are findings.
-- **XREF** — Lease-to-Well-and-Contract cross-reference workbook (two sheets; filter both).
-- **WI / NRI** — Working Interest / Net Revenue Interest. Leasehold (TO-derived) vs wellbore (Well List) mismatch is often JOA non-consent uplift, not a defect.
-- **Supplemental title** — chain from the controlling cert date to present, seller-affecting and **of record** only.
-- **Recording references** are multi-county strings (Cooke + Montague dual-recording exists); Cooke reception numbers restart each year — always pair with the year.
+The domain glossary lives in `GLOSSARY.md` at the repo root. Use its terms; architectural decisions live in `docs/adr/`.
 
 ## Known traps (from real runs)
 
@@ -82,12 +76,12 @@ Before any Cibola work, read `../Land Cibola Surface Titles/AGENTS.md` and `../L
 
 ### Issue tracker
 
-Issues live in GitHub Issues for `rgalves-web/plm-title-automation`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues live as local markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+Default vocabulary, recorded as a `Status:` line in each issue file: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-Single-context (root `GLOSSARY.md` + `docs/adr/`; until those exist, the glossary is the `## Domain glossary` section above). See `docs/agents/domain.md`.
+Single-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`.

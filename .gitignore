@@ -78,3 +78,6 @@ scratch_esteira_*.txt
 data/legacy_recovery/
 .pytest-terminal-*/
 scratch_terminal_*.txt
+
+# Local issue tracker: may name client parties or instruments (invariant 8)
+.scratch/

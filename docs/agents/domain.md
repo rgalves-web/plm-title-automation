@@ -8,7 +8,7 @@ How the engineering skills should consume this repo's domain documentation when 
 - **`GLOSSARY-MAP.md`** at the repo root if it exists: it points at one `GLOSSARY.md` per context. Read each one relevant to the topic.
 - **`docs/adr/`**: read ADRs that touch the area you're about to work in. In multi-context repos, also check `src/<context>/docs/adr/` for context-scoped decisions.
 
-**This repo today:** single-context. `GLOSSARY.md` and `docs/adr/` don't exist yet; the working domain glossary lives in the `## Domain glossary` section of `CLAUDE.md` (DDR, TO, DPU/DOU, XREF, WI/NRI…). Treat that section as the glossary until `/domain-modeling` creates `GLOSSARY.md`, and seed `GLOSSARY.md` from it when that happens. The governing architecture is in `docs/ARQUITETURA_GOVERNANTE.md` (read via `AGENTS.md`).
+**This repo today:** single-context. `GLOSSARY.md` holds the domain language (in English); ADRs live in `docs/adr/`. The governing architecture is in `docs/ARQUITETURA_GOVERNANTE.md` (read via `AGENTS.md`).
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
 

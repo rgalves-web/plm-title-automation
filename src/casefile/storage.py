@@ -59,6 +59,40 @@ def write_bytes(unit_id, relative, data):
     return target,sha
 
 
+def create_once(target, data):
+    """Create `target` with `data` atomically and never over an existing file.
+
+    The bytes go to a temporary sibling first (flushed and fsynced), then are
+    hard-linked into place: the link fails with FileExistsError when the target
+    already exists, so two writers can never both win and a reader never sees a
+    partial file. Filesystems without hard links fall back to an exclusive
+    create. Returns the sha256 of what is on disk after a round-trip read."""
+    target=Path(target)
+    sha=hashlib.sha256(data).hexdigest()
+    target.parent.mkdir(parents=True,exist_ok=True)
+    temporary=target.with_name('.'+target.name+'.'+str(os.getpid())+'.'+os.urandom(6).hex()+'.tmp')
+    try:
+        with temporary.open('xb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.link(temporary,target)
+        except FileExistsError:
+            raise
+        except OSError:
+            with target.open('xb') as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    if digest_file(target)!=sha:
+        raise ValueError('artifact_roundtrip_failed')
+    return sha
+
+
 def checked_artifact(artifact):
     path=preserved_path(artifact['path'])
     if not path.is_file() or digest_file(path)!=artifact['sha256']:
