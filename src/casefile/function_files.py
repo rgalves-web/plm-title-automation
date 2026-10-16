@@ -10,10 +10,15 @@ The index lives in `function_files` (one row per file, with the Call
 lifecycle per run: received, valid output, result applied) and in the
 operation artifact index, so the dashboard can open the file.
 
+Every terminal call's exact context is written as an input file before the
+process starts (issue 02), and the process is launched from that file read
+back from disk (`read_input`, issue 04).
+
 Plumbing only: nothing here reads, judges or compares title content.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
@@ -25,6 +30,11 @@ SCHEMA = 1
 class FunctionOutputNotApplicable(ValueError):
     """The output about to be applied has no accepted output file."""
     code = "function_output_not_applicable"
+
+
+class FunctionInputChanged(ValueError):
+    """The input file on disk is not the one indexed for the call."""
+    code = "function_input_changed"
 
 
 def _dumps(document: dict[str, Any]) -> bytes:
@@ -93,6 +103,33 @@ def write_input(repo: Any, task: dict[str, Any], run: dict[str, Any],
     return repo.function_file_add(
         unit_id, task["id"], run["id"], "input", ordinal, record.relative,
         record.sha256, record.size, "recorded", [], artifact["id"])
+
+
+def read_input(repo: Any, file_row: dict[str, Any]) -> dict[str, Any]:
+    """The input file document, read back from disk (issue 04): the terminal
+    process is launched from these bytes, never from the in-memory call.
+    Refuses bytes that differ from the indexed sha256."""
+    data = case_file_store.read_bytes(file_row["unit_id"], file_row["relative"])
+    if file_row["direction"] != "input" or \
+            hashlib.sha256(data).hexdigest() != file_row["sha256"]:
+        raise FunctionInputChanged(
+            "function_input_changed: the input file is not the one indexed "
+            "for this call")
+    return json.loads(data)
+
+
+def current_output(repo: Any, unit_id: int) -> dict[str, Any] | None:
+    """Inside an apply transaction: the accepted output file being applied
+    (from `plm.output_sha256`), or None outside one."""
+    sha = repo.conn.execute(
+        "SELECT nullif(current_setting('plm.output_sha256', true), '') AS sha"
+    ).fetchone()["sha"]
+    if not sha:
+        return None
+    rows = [f for f in repo.function_files(unit_id=unit_id, sha256=sha,
+                                           direction="output")
+            if f["status"] == "accepted"]
+    return rows[-1] if rows else None
 
 
 def begin_apply(repo: Any, file_row: dict[str, Any] | None) -> dict[str, Any]:

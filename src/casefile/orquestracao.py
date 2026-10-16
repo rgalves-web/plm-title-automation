@@ -462,3 +462,95 @@ def entrada_do_verificador(repo: Any, task: dict[str, Any]) -> dict[str, Any]:
             f"tarefa_verificada {alvo['id']} sem saída válida")
     afirmar_quarentena(entrada, validas[-1]["output_json"])
     return json.loads(json.dumps(entrada))
+
+
+# --- quarentena no arquivo de entrada (issue 04) ---------------------------------
+
+FERRAMENTAS_DA_EXTRACAO_CEGA = frozenset({"entregar_saida",
+                                          "ler_pagina_confirmada"})
+
+
+def _saidas_verificadas(repo: Any, task: dict[str, Any]
+                        ) -> tuple[list[Any], list[str]]:
+    """O que a extração cega NÃO pode ver: o Claim verificado (valor e
+    trecho) e o arquivo de saída que o produziu, com o sha256 dele."""
+    from src.casefile import case_file_store
+    entrada = task["input_json"] or {}
+    claim = repo.claim(entrada.get("claim_id")) \
+        if entrada.get("claim_id") is not None else None
+    if claim is None or claim["unit_id"] != task["unit_id"]:
+        raise QuarentenaViolada(
+            f"claim_verificado_inexistente: {entrada.get('claim_id')!r}")
+    saidas: list[Any] = [{"value": claim["value"],
+                          "evidence": claim["evidence"]}]
+    shas: list[str] = []
+    if claim.get("output_sha256"):
+        for f in repo.function_files(unit_id=task["unit_id"],
+                                     sha256=claim["output_sha256"],
+                                     direction="output"):
+            documento = json.loads(case_file_store.read_bytes(
+                task["unit_id"], f["relative"]))
+            saidas.append(documento.get("output"))
+            shas.append(f["sha256"])
+    return saidas, shas
+
+
+def _texto_da_aplicacao(payload: dict[str, Any]) -> str:
+    """O texto que a aplicação escreveu nas mensagens do usuário: tarefa,
+    entrada e avisos do loop. Fica de fora o que a fonte devolveu às
+    ferramentas permitidas (tool_result) e o que a própria Função disse."""
+    partes: list[str] = []
+    for mensagem in payload.get("messages") or []:
+        if mensagem.get("role") != "user":
+            continue
+        conteudo = mensagem.get("content")
+        if isinstance(conteudo, str):
+            partes.append(conteudo)
+            continue
+        for bloco in conteudo or []:
+            if isinstance(bloco, dict) and bloco.get("type") == "text":
+                partes.append(str(bloco.get("text", "")))
+    return "\n".join(partes)
+
+
+def afirmar_quarentena_do_arquivo(repo: Any, task: dict[str, Any],
+                                  documento: dict[str, Any]) -> None:
+    """Afirmação MECÂNICA pré-processo, sobre o arquivo de entrada já gravado
+    (issue 04): a extração cega recebe só a ficha publicada da função, as
+    ferramentas permitidas e uma entrada sem nenhum valor, trecho ou sha256
+    da saída verificada. As quarentenas existentes rodam contra o mesmo
+    Claim. Outras tarefas passam direto."""
+    if task["role"] != "verificador" or task["output_schema"] != "extracao_cega":
+        return
+    from src.casefile import worker
+    from src.infra.terminal import input_payload
+    saidas, shas = _saidas_verificadas(repo, task)
+    for saida in saidas:
+        afirmar_quarentena(dict(task["input_json"] or {}), saida)
+    payload = input_payload(documento["sent"])
+    nomes = sorted({str(t.get("name")) for t in payload.get("tools") or []}
+                   - FERRAMENTAS_DA_EXTRACAO_CEGA)
+    if nomes:
+        raise QuarentenaViolada(f"ferramenta_fora_da_quarentena: {nomes}")
+    instrucoes = payload.get("instructions")
+    if not isinstance(instrucoes, str):
+        instrucoes = "\n".join(str(b.get("text", "")) for b in instrucoes or [])
+    if instrucoes != worker.montar_contexto(task, blind=True)["sistema"]:
+        raise QuarentenaViolada("instrucoes_fora_da_ficha_publicada")
+    esquema = worker._esquema_com_refs(task["output_schema"],
+                                       agentes.RAIZ_PADRAO)
+    texto = f" {_norm(_texto_da_aplicacao(payload).replace(esquema, ' '))} "
+    for saida in saidas:
+        folhas: list[tuple[str, str]] = []
+        _folhas(saida, "", False, folhas)
+        for caminho, valor in folhas:
+            n = _norm(valor)
+            if len(n) >= 3 and f" {n} " in texto:
+                raise QuarentenaViolada(
+                    f"arquivo_de_entrada_contem_resposta: {caminho} "
+                    f"({valor[:40]!r})")
+    bruto = json.dumps(documento, ensure_ascii=False)
+    for sha in shas:
+        if sha in bruto:
+            raise QuarentenaViolada(
+                "arquivo_de_entrada_cita_a_saida_verificada")

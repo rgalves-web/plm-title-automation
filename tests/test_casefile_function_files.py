@@ -277,6 +277,154 @@ def test_input_file_holds_exactly_what_the_process_receives(monkeypatch,
         hashlib.sha256(sent["stdin"].encode("utf-8")).hexdigest()
 
 
+# --- issue 04: the process receives only its own input file -------------------
+
+SENTINEL = "producer-sentinel-7731"       # synthetic value, never on the page
+BLIND_OUTPUT = {"valor": {"field": "independent reading"},
+                "trecho": "Synthetic fixture only.", "evidencia_suficiente": True}
+
+
+def _claim_under_review(repo, unit, tmp_path):
+    """An examiner delivers one synthetic Claim through the terminal path;
+    the blind extraction of that Claim is then queued."""
+    artifact = source(repo, unit, tmp_path / "synthetic.pdf")
+    task(repo, unit, "examinador", "claims", mode="obrigatoria")
+    _terminal(repo, unit)
+    claim = {"tipo": "fact", "entidade": "Synthetic field",
+             "valor": {"tipo_resultado": "fato_documental", "field": SENTINEL},
+             "documento": "sha256:" + artifact["sha256"], "pagina": "1",
+             "trecho": "Synthetic fixture only.", "confianca": "alta",
+             "materialidade": "baixa"}
+    result = worker.executar_uma(
+        repo, unit["id"], "terminal-fixture", teto=50, operation=True,
+        client=_CheckedTerminal(repo, [[Use("entregar_saida",
+                                            {"saida": {"claims": [claim]}})]]))
+    assert result["erros"] == []
+    [produced] = _outputs(repo, result["run_id"])
+    blind = next(t for t in repo.tarefas(unit["id"])
+                 if t["role"] == "verificador")
+    return artifact, produced, blind
+
+
+def _official_cli(monkeypatch, replies):
+    """The real adapter, with only the process itself replaced: what it is
+    given on stdin is recorded."""
+    from src.infra import terminal
+    from tests.test_casefile_terminal import events
+    monkeypatch.setattr(terminal, "auth_status", lambda _: {"ok": True})
+    monkeypatch.setattr(terminal, "executable", lambda _: "official-cli")
+    stdins = []
+
+    def process(args, *, stdin="", cwd=None, timeout=600):
+        stdins.append(stdin)
+        calls = replies[len(stdins) - 1]
+        return 0, "\n".join(map(json.dumps, events(calls=calls))), ""
+
+    monkeypatch.setattr(terminal, "run_process", process)
+    return terminal.TerminalAdapter("B"), stdins
+
+
+def _call(name, arguments):
+    return {"name": name, "arguments": json.dumps(arguments)}
+
+
+def test_producer_output_is_absent_from_the_verifier_input_and_prompt(
+        operation_case, tmp_path, monkeypatch):
+    repo, unit, scope = operation_case
+    approve(repo, unit, scope)
+    artifact, produced, blind = _claim_under_review(repo, unit, tmp_path)
+    produced_bytes = case_file_store.read_bytes(unit["id"], produced["relative"])
+    assert SENTINEL.encode() in produced_bytes        # the producer did say it
+    page = {"documento": artifact["sha256"], "pagina": 1, "modo": "texto"}
+    adapter, stdins = _official_cli(monkeypatch, [
+        [_call("ler_pagina_confirmada", page)],
+        [_call("entregar_saida", {"saida": BLIND_OUTPUT})]])
+    result = worker.executar_uma(repo, unit["id"], "terminal-fixture",
+                                 teto=50, operation=True, client=adapter)
+    assert result["erros"] == [] and result["tarefa"]["id"] == blind["id"]
+    inputs = repo.function_files(run_id=result["run_id"], direction="input")
+    assert len(inputs) == len(stdins) == 2
+    for row, stdin in zip(inputs, stdins):
+        document = function_files.read_input(repo, row)
+        assert stdin == document["sent"]["stdin"]       # the prompt IS the file
+        raw = case_file_store.read_bytes(unit["id"], row["relative"])
+        assert SENTINEL.encode() not in raw and SENTINEL not in stdin
+        assert produced["sha256"].encode() not in raw
+        assert produced["relative"].encode() not in raw
+    # the second call carried the page the Verifier read, from the source
+    assert "Synthetic fixture only" in stdins[1]
+
+
+def test_scripted_client_receives_the_call_rebuilt_from_the_input_file(
+        operation_case):
+    from src.infra import terminal
+    repo, unit, scope = operation_case
+    approve(repo, unit, scope)
+    _terminal(repo, unit)
+    task(repo, unit)
+    client = _CheckedTerminal(repo, [[Use("entregar_saida",
+                                          {"saida": RESEARCH})]])
+    received = []
+    original = client.create
+
+    def record(**kwargs):
+        received.append(kwargs)
+        return original(**kwargs)
+
+    client.create = record
+    result = worker.executar_uma(repo, unit["id"], "terminal-fixture",
+                                 teto=50, operation=True, client=client)
+    [row] = repo.function_files(run_id=result["run_id"], direction="input")
+    sent = function_files.read_input(repo, row)["sent"]
+    [kwargs] = received
+    assert {k: kwargs[k] for k in ("model", "system", "messages", "tools")} \
+        == terminal.call_from_input(sent)
+    rebuilt = terminal.build_input("A", **terminal.call_from_input(sent))
+    assert rebuilt == sent                               # nothing lost or added
+
+
+@pytest.mark.parametrize("leak", ["context", "tool"])
+def test_verifier_call_that_breaks_quarantine_never_starts(
+        operation_case, tmp_path, monkeypatch, leak):
+    from src.casefile import runtime
+    repo, unit, scope = operation_case
+    approve(repo, unit, scope)
+    _claim_under_review(repo, unit, tmp_path)
+    if leak == "context":
+        original = runtime.context
+        monkeypatch.setattr(runtime, "context", lambda repo_, task_: (
+            original(repo_, task_) + "\nfield: " + SENTINEL))
+    else:
+        # a tool the role card declares but the blind extraction must not get
+        original_tools = runtime.tools
+        monkeypatch.setattr(runtime, "tools", lambda repo_, task_: {
+            **original_tools(repo_, task_),
+            "registrar_verificacao": (runtime.tool(
+                "registrar_verificacao", "Synthetic.", {}, []), lambda **_: {})})
+
+    class NeverCalled:
+        def __init__(self):
+            self.messages = self
+
+        def run_input(self, sent):
+            pytest.fail("the process must not start when quarantine fails")
+
+    result = worker.executar_uma(repo, unit["id"], "terminal-fixture",
+                                 teto=50, operation=True, client=NeverCalled())
+    assert result["tarefa"]["status"] == "bloqueada"
+    assert "terminal_input_quarantine_violated" in result["parada"]
+    call = repo.conn.execute(
+        "SELECT * FROM operation_terminal_calls ORDER BY id DESC").fetchone()
+    assert call["status"] == "interrupted" and call["input_sha256"]
+    expected = ("arquivo_de_entrada_contem_resposta" if leak == "context"
+                else "ferramenta_fora_da_quarentena")
+    assert expected in call["failure"]
+    # the refused input file stays as the evidence of what would have gone
+    [row] = repo.function_files(run_id=result["run_id"], direction="input")
+    assert SENTINEL.encode() in case_file_store.read_bytes(
+        unit["id"], row["relative"]) or leak == "tool"
+
+
 def test_begin_apply_refuses_rejected_missing_or_changed_file(operation_case):
     repo, unit, scope = operation_case
     approve(repo, unit, scope)

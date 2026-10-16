@@ -106,13 +106,13 @@ def codex_model():
     return value if isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9._-]+', value) else 'default'
 
 
-def _codex_isolation():
+def _codex_isolation(protocol=PROTOCOL):
     # Replace the complete connector maps for this process, keeping saved login.
     values = ['mcp_servers={}', 'plugins={}', 'model_provider="openai"',
               'forced_login_method="chatgpt"',
               'features.shell_tool=false', 'features.unified_exec=false',
               'features.skip_host_skill_discovery=true', 'agents.enabled=false',
-              'developer_instructions=' + json.dumps(PROTOCOL),
+              'developer_instructions=' + json.dumps(protocol),
               'web_search="disabled"', 'project_doc_max_bytes=0',
               'tools.view_image=false']
     return [part for value in values for part in ('-c', value)]
@@ -157,9 +157,38 @@ def build_input(family, *, model, system, messages, tools):
     else:
         stdin = prompt
         system_prompt = None  # family B receives PROTOCOL as developer_instructions
-    return {'family': family, 'model': model.rsplit('/', 1)[-1], 'protocol': PROTOCOL,
-            'system_prompt': system_prompt, 'stdin': stdin, 'images': images,
-            'output_schema': SCHEMA}
+    return {'family': family, 'model': model.rsplit('/', 1)[-1], 'requested_model': model,
+            'protocol': PROTOCOL, 'system_prompt': system_prompt, 'stdin': stdin,
+            'images': images, 'output_schema': SCHEMA}
+
+
+def input_payload(sent):
+    """The host JSON (instructions, messages, tools) that an input file's
+    stdin carries, for either family."""
+    data = json.loads(sent['stdin'])
+    if sent['family'] == 'A':
+        data = json.loads(data['message']['content'][0]['text'])
+    return data
+
+
+def call_from_input(sent):
+    """The call rebuilt from an input file alone (issue 04): what a client
+    that does not launch a process receives in its place. Attached images go
+    back where `_payload` numbered them."""
+    payload = input_payload(sent)
+    images = sent['images']
+
+    def put(value):
+        if isinstance(value, dict):
+            if value.get('type') == 'attached_image':
+                return images[value['number'] - 1]
+            return {k: put(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [put(v) for v in value]
+        return value
+    return {'model': sent.get('requested_model') or sent['model'],
+            'system': payload['instructions'], 'messages': put(payload['messages']),
+            'tools': payload['tools']}
 
 
 class TerminalAdapter:
@@ -171,20 +200,31 @@ class TerminalAdapter:
         self.messages = self
 
     def create(self, *, model, system, messages, tools, max_tokens, **_):
+        return self.run_input(build_input(self.family, model=model, system=system,
+                                          messages=messages, tools=tools))
+
+    def run_input(self, sent):
+        """Launch the official CLI from the content of one input file alone
+        (issue 04): stdin, images, system prompt, protocol, schema, model and
+        the tool contracts used to check the reply all come from `sent`."""
+        if sent.get('family') != self.family:
+            raise TerminalError('terminal_input_family_mismatch')
+        if sent.get('protocol') != PROTOCOL or sent.get('output_schema') != SCHEMA:
+            raise TerminalError('terminal_input_contract_mismatch')
         if not auth_status(self.family)['ok']:
             raise TerminalError('terminal_subscription_login_required:' + self.family)
         from src.casefile.storage import operation_root
         root = operation_root() / 'terminal_tmp'
         root.mkdir(parents=True, exist_ok=True)
-        sent = build_input(self.family, model=model, system=system, messages=messages, tools=tools)
         images, stdin = sent['images'], sent['stdin']
+        tools = input_payload(sent)['tools']
         cli = executable(self.family)
         with tempfile.TemporaryDirectory(prefix='turn-', dir=root) as folder:
             cwd = Path(folder).resolve()
             if not cwd.is_relative_to(root.resolve()):
                 raise TerminalError('terminal_workspace_outside_root')
             schema = cwd / 'output.schema.json'
-            schema.write_text(json.dumps(SCHEMA), encoding='utf-8')
+            schema.write_text(json.dumps(sent['output_schema']), encoding='utf-8')
             if self.family == 'A':
                 system_file = cwd / 'system.txt'
                 system_file.write_text(sent['system_prompt'], encoding='utf-8')
@@ -193,9 +233,9 @@ class TerminalAdapter:
                     '--input-format', 'stream-json', '--tools', '', '--strict-mcp-config',
                     '--mcp-config', '{"mcpServers":{}}', '--setting-sources', '',
                     '--no-session-persistence', '--max-turns', '3',
-                    '--model', sent['model'], '--json-schema', json.dumps(SCHEMA)]
+                    '--model', sent['model'], '--json-schema', json.dumps(sent['output_schema'])]
             else:
-                args = [cli, '-a', 'never', *_codex_isolation(), 'exec', '--sandbox', 'read-only',
+                args = [cli, '-a', 'never', *_codex_isolation(sent['protocol']), 'exec', '--sandbox', 'read-only',
                     '--ephemeral', '--skip-git-repo-check', '--json', '--output-schema', str(schema)]
                 if sent['model'] != 'default':
                     args += ['--model', sent['model']]
@@ -219,8 +259,8 @@ class TerminalAdapter:
                           for event in events if event.get('is_error') or event.get('type') == 'error']
                 raise TerminalError('terminal_failed_requires_review:' + self.family, stderr + '\n' + json.dumps(errors))
             message = self.parse(events, tools)
-            message.terminal_receipt.update({'requested_model': model,
-                'protocol_sha256': hashlib.sha256(PROTOCOL.encode('utf-8')).hexdigest(),
+            message.terminal_receipt.update({'requested_model': sent.get('requested_model') or sent['model'],
+                'protocol_sha256': hashlib.sha256(sent['protocol'].encode('utf-8')).hexdigest(),
                 'input_sha256': hashlib.sha256(stdin.encode('utf-8')).hexdigest(),
                 'input_image_sha256': [hashlib.sha256(base64.b64decode(p['source']['data'], validate=True)).hexdigest() for p in images]})
             return message

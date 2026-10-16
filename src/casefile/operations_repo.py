@@ -100,11 +100,14 @@ class OperationsRepo:
         return self.conn.execute("SELECT * FROM function_files WHERE id=%s",
                                  (file_id,)).fetchone()
 
-    def function_files(self, *, task_id=None, run_id=None, direction=None):
+    def function_files(self, *, task_id=None, run_id=None, direction=None,
+                       unit_id=None, sha256=None):
         return self.conn.execute(
             "SELECT * FROM function_files WHERE (%s::bigint IS NULL OR task_id=%s) "
             "AND (%s::bigint IS NULL OR run_id=%s) AND (%s::text IS NULL OR direction=%s) "
-            "ORDER BY id",(task_id,task_id,run_id,run_id,direction,direction)).fetchall()
+            "AND (%s::bigint IS NULL OR unit_id=%s) AND (%s::text IS NULL OR sha256=%s) "
+            "ORDER BY id",(task_id,task_id,run_id,run_id,direction,direction,
+                           unit_id,unit_id,sha256,sha256)).fetchall()
 
     def function_file_applied(self, file_id):
         got = self.conn.execute(
