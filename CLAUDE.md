@@ -6,6 +6,8 @@ Claude Code loads this file automatically at the start of every session. It is *
 
 ## What this repo is
 
+Current transport override (2026-10-16): Renato requested deletion of model API keys and operation through Claude Code and Codex terminals, with publication to his existing GitHub repository. Read `docs/EXECUCAO_TERMINAL.md`. Operational cases use `profile.execution_backend=terminal`; `PLM_API_DISABLED=1` prevents SDK fallback. CLI subscription receipts are separate from historical API charges. Login/limits can block work; never infer unlimited or free usage. Earlier API implementation notes below are historical for billing and migration, not authorization to restore API keys.
+
 A local-first title-automation system for Purple Land Management (PLM) land work, serving **Project Emirates** (engagement `BKV122TX`; client BKV Corp.; EOG Resources Inc. as Seller; ~300 units, Montague/Cooke Counties, Texas; per-unit **DDR** Excel deliverable).
 
 **The governing architecture is LLM-first — decided by the operator on 2026-08-23. Read `docs/ARQUITETURA_GOVERNANTE.md` first; it prevails over every other document, including this one's history.** In one line: no title decision in Python; AI judges, a second AI head verifies, Python only opens files, renders pages, calls models, saves bytes — and protects bytes (see "the pen" below).

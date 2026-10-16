@@ -144,7 +144,13 @@ class OpenAIAdapter:
             stop_reason='max_tokens' if response.status=='incomplete' else 'end_turn')
 
 
-def client(family):
+def client(family, *, transport='api'):
+    if transport == 'terminal':
+        from src.infra.terminal import TerminalAdapter
+        return TerminalAdapter(family)
+    import os
+    if os.environ.get('PLM_API_DISABLED') == '1':
+        raise RuntimeError('direct_api_disabled_use_terminal')
     if family=='B':
         return OpenAIAdapter()
     from anthropic import Anthropic

@@ -86,6 +86,10 @@ def apply(repo,case,body,actor):
             raise ValueError('two_new_attempts_exhausted_revise_scope_or_input')
         if any(r['usage_state'] in ('unknown','inflight') for r in repo.runs_da_tarefa(task['id'])):
             raise ValueError('reconcile_usage_before_retry')
+        reviewed=repo.conn.execute("UPDATE operation_terminal_calls c SET status='interrupted',receipt=c.receipt || %s::jsonb,finished_at=coalesce(c.finished_at,now()) FROM task_runs r WHERE c.run_id=r.id AND r.task_id=%s AND r.finished_at IS NOT NULL AND c.status IN ('running','interrupted') AND NOT (c.receipt ? 'reviewed_by') RETURNING c.id",
+            (_json({'reviewed_by':actor,'review_note':body['note']}),task['id'])).fetchall()
+        if reviewed:
+            repo.operation_event('terminal.retry_reviewed',actor,{'terminal_call_ids':[r['id'] for r in reviewed],'note':body['note']},unit_id=uid,task_id=task['id'])
         repo.transicionar_tarefa(task['id'],(task['status'],),'planejada',actor,body['note'])
         repo.promover_prontas(uid,'process:operacao')
     elif action=='replan':

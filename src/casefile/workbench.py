@@ -4,6 +4,13 @@ import argparse
 
 
 def main():
+    from src.casefile.db import _carregar_dotenv
+    _carregar_dotenv()
+    import os
+    if os.environ.get('PLM_API_DISABLED') == '1':
+        from src.infra.terminal import KEYS
+        for key in KEYS:
+            os.environ.pop(key, None)
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command',choices=['serve','prepare'])
     parser.add_argument('--port',type=int,default=8788)

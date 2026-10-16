@@ -114,6 +114,9 @@ def recover_previous_workers(repo):
         with repo.transacao():
             repo.operation_case(uid,lock=True)
             uncertain=repo.conn.execute("UPDATE operation_requests SET status='unknown',finished_at=now() WHERE run_id=%s AND status='inflight' RETURNING id",(run['id'],)).fetchall()
+            if run.get('execution_backend') == 'terminal':
+                repo.conn.execute("UPDATE operation_terminal_calls SET status='interrupted',failure='executor_restarted',finished_at=now() WHERE run_id=%s AND status='running'",(run['id'],))
+                repo.conn.execute("UPDATE task_runs SET usage_state='subscription_interrupted' WHERE id=%s",(run['id'],))
             known=repo.conn.execute("SELECT coalesce(sum(cost_usd),0) AS cost FROM operation_requests WHERE run_id=%s AND status='confirmed'",(run['id'],)).fetchone()['cost']
             reason='executor_restarted_usage_requires_reconciliation' if uncertain else 'executor_restarted_before_application'
             if uncertain:

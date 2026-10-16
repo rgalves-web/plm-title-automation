@@ -75,13 +75,18 @@ def preflight(repo,unit_id):
         checks.append({'name':'Perfil Cibola','ok':bool(profile),'detail':'Fontes e identidade conferidas' if profile else 'Configurar perfil'})
     except (ValueError,OSError) as exc:
         checks.append({'name':'Perfil Cibola','ok':False,'detail':str(exc)})
-    for variable,label in [('ANTHROPIC_API_KEY','Claude'),('OPENAI_API_KEY','OpenAI')]:
+    terminal = case['profile'].get('execution_backend') == 'terminal'
+    if terminal:
+        from src.infra.terminal import auth_status
+        checks.extend({'name': label, **auth_status(family)} for family,label in [('A','Claude Code'),('B','Codex / ChatGPT')])
+    for variable,label in ([] if terminal else [('ANTHROPIC_API_KEY','Claude'),('OPENAI_API_KEY','OpenAI')]):
         checks.append({'name':label,'ok':bool(os.environ.get(variable)), 'detail':'Credencial configurada' if os.environ.get(variable) else 'Credencial ausente'})
     models={**MODELO_POR_NIVEL,'independente':verificador.modelo_b()}
     proof=operation_root()/'servico'/'provedores.json'
     available=json.loads(proof.read_text('utf-8')) if proof.exists() else {}
     verified=available.get('models')==models and all(available.get('available',{}).get(k) for k in models)
-    checks.append({'name':'Modelos e tarifas','ok':verified and all(m in RATES for m in models.values()),'detail':'Catálogos conferidos sem inferência paga em '+str(available.get('verified_at')) if verified else 'Conferir disponibilidade nos provedores','models':models})
+    if not terminal:
+        checks.append({'name':'Modelos e tarifas','ok':verified and all(m in RATES for m in models.values()),'detail':'Catálogos conferidos sem inferência paga em '+str(available.get('verified_at')) if verified else 'Conferir disponibilidade nos provedores','models':models})
     checks.append({'name':'Template e exemplar','ok':bool(case['profile'].get('template_artifact_id') and case['profile'].get('lead_example_artifact_id')),'detail':'Selecionados pelo operador' if case['profile'].get('lead_example_artifact_id') else 'Confirmar exemplar vigente de Derek e template antes da escrita'})
     checks.append({'name':'Orçamento','ok':float(case['approved_budget_usd'])>0,'detail':'Aprovação registrada' if float(case['approved_budget_usd'])>0 else 'Nenhum gasto autorizado'})
     checks.append({'name':'Escopo temporal','ok':bool(case['scope'].get('through_date')),'detail':case['scope'].get('through_date') or 'Definir through date'})
@@ -141,6 +146,7 @@ def task_detail(repo,task_id):
     revision=repo.operation_case(task['unit_id'])['revision']
     runs=repo.runs_da_tarefa(task_id)
     return serializable({'task':task,'case_revision':revision,'runs':runs,'artifacts':[a for a in repo.operation_artifacts(task['unit_id']) if a['task_id']==task_id],
+                         'terminal_calls':repo.conn.execute('SELECT c.* FROM operation_terminal_calls c JOIN task_runs r ON r.id=c.run_id WHERE r.task_id=%s ORDER BY c.id',(task_id,)).fetchall(),
                          'claims':[repo.claim(cid) for cid in repo.claims_da_tarefa(task_id)],
                          'events':repo.operation_events(unit_id=task['unit_id'],limit=1000,task_id=task_id),
                          'training':[c for c in repo.knowledge_audit(task['unit_id'])['contexts']

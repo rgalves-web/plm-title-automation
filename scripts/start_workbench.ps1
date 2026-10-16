@@ -8,4 +8,5 @@ try {
     if ($plmResponse.StatusCode -eq 200) { exit 0 }
 } catch { }
 $plmLogs=Split-Path -Parent $plmConfig
-Start-Process -FilePath $plmSettings.python -ArgumentList '-X','utf8','-m','src.casefile.workbench','serve' -WorkingDirectory $plmRepo -WindowStyle Hidden -RedirectStandardOutput (Join-Path $plmLogs 'saida.log') -RedirectStandardError (Join-Path $plmLogs 'erros.log')
+$plmRunner=Join-Path $PSScriptRoot 'run_workbench.py'
+Start-Process -FilePath $plmSettings.python -ArgumentList '-X','utf8',('"'+$plmRunner+'"') -WorkingDirectory $plmRepo -WindowStyle Hidden -RedirectStandardOutput (Join-Path $plmLogs 'saida.log') -RedirectStandardError (Join-Path $plmLogs 'erros.log')

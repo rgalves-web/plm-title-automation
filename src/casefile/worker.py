@@ -353,6 +353,7 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
             raise ValueError('surface_explicit_profile_required')
     else:
         coordenacao.exigir_etapa_suportada(repo, unit_id, "trabalhar")
+    terminal = operation and case['profile'].get('execution_backend') == 'terminal'
     got = orq.pegar(repo, unit_id, worker, teto=teto, raiz=raiz,
                     lease_segundos=lease_segundos,
                     excluir_roles=() if operation else FUNCOES_FORA_DO_WORKER,
@@ -374,7 +375,11 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
     if operation and (task['role'] == 'verificador' or task['input_json'].get('independent_comparison')):
         from src.casefile.verificador import modelo_b
         modelo, familia = modelo_b(), 'B'
-    if modelo not in RATES:
+    if terminal:
+        from src.infra.terminal import codex_model
+        modelo = 'terminal/codex/' + codex_model() if familia == 'B' else 'terminal/claude/' + ('opus' if nivel == 'forte' else 'haiku' if nivel in ('barato','barato_a_medio') else 'sonnet')
+        repo.conn.execute("UPDATE task_runs SET execution_backend='terminal' WHERE id=%s", (run['id'],))
+    if not terminal and modelo not in RATES:
         repo.fechar_run(run["id"], worker, output_json=None,
                         output_valid=None, validation_errors=[],
                         stop_reason="modelo_sem_tarifa", para="pronta",
@@ -384,7 +389,7 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
 
     # reserva NO BANCO antes de qualquer chamada: dois workers nunca contam o
     # mesmo saldo da unit (a reserva é liberada quando o run fecha)
-    conta = repo.reservar_orcamento(run["id"], worker, teto)
+    conta = {'limite': 1} if terminal else repo.reservar_orcamento(run["id"], worker, teto)
     limite = conta["limite"]
 
     def _devolver(motivo: str, nota: str, **meta: Any) -> dict[str, Any]:
@@ -510,7 +515,7 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
         if operation:
             from src.infra.providers import client as provider_client
             try:
-                client = provider_client(familia)
+                client = provider_client(familia, transport='terminal') if terminal else provider_client(familia)
             except Exception as exc:
                 reason='provider_not_called:'+type(exc).__name__
                 repo.fechar_sessao(session_id,reason,0,{},0,'')
@@ -526,8 +531,12 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
             from src.infra.loop import _client
             client = _client()
     uso = Usage()
-    contado = _ClienteContado(client, uso, modelo, limite,
-                             RunAccounting(repo,task,run) if operation else None)
+    if terminal:
+        from src.casefile.terminal_accounting import TerminalClient
+        contado = TerminalClient(client, repo, task, run, uso, familia)
+    else:
+        contado = _ClienteContado(client, uso, modelo, limite,
+                                 RunAccounting(repo,task,run) if operation else None)
     falha = ""
     provider_rejection = None
     execution_block = None
@@ -535,7 +544,8 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
     try:
         log, _ = run_loop(system=ctx["sistema"], task=ctx["tarefa"],
                           tools=tools, dispatch=dispatch, model=modelo,
-                          max_turns=max_turnos, max_cost_usd=limite,
+                          max_turns=min(max_turnos,40) if terminal else max_turnos,
+                          max_cost_usd=None if terminal else limite,
                           max_output_tokens=16000 if operation and task['role']=='coordenador' else 8000,
                           on_turn=_renovar, client=contado)
         parada = log.stop_reason
@@ -549,8 +559,10 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
         if operation:
             from src.casefile.accounting import ProviderUnavailable,UnknownProviderUsage
             from src.casefile.spending import SharedSpendingCap
+            from src.infra.terminal import TerminalError
             if isinstance(exc,ProviderUnavailable): provider_rejection=exc
             if isinstance(exc,(ExecutionNeedsReview,UnknownProviderUsage,SharedSpendingCap)):execution_block=str(exc)
+            if isinstance(exc,TerminalError):execution_block=str(exc)
         parada = provider_rejection.reason if provider_rejection else f"erro_do_modelo: {exc.__class__.__name__}: {exc}"
         falha = "erro_do_modelo"
     custo = uso.cost(modelo) or 0.0
@@ -558,7 +570,8 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
         custo=float(repo.conn.execute("SELECT coalesce(sum(cost_usd),0) AS amount FROM operation_requests WHERE run_id=%s AND status='confirmed'",(run['id'],)).fetchone()['amount'])
     usage_unknown = operation and repo.run(run['id']).get('usage_state') in ('unknown','inflight')
     repo.fechar_sessao(session_id, parada, contado.turnos,
-                       uso.to_dict(modelo), None if usage_unknown else custo, "")
+                       {**uso.to_dict(modelo), **({'billing_mode':'subscription','api_charge_usd':0,'subscription_charge_usd':None} if terminal else {})},
+                       None if usage_unknown or terminal else custo, "")
     if perdido is not None:
         _custo_perdido(repo, unit_id, task, run, custo)
         raise perdido

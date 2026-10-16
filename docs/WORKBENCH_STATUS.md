@@ -1,4 +1,18 @@
-# Esteira visual — estado vigente em 12/10/2026
+# Esteira visual — transporte vigente em 16/10/2026
+
+Renato solicitou apagar as chaves de API do PLM e usar Claude Code e Codex pelos terminais oficiais. As duas chaves foram removidas da configuração local; a operação desativa o SDK e não faz fallback automático à API. Os dois clientes estão autenticados e passaram no diagnóstico real de solicitação de ferramenta, sem documentos de cliente. Modelos utilizados no diagnóstico: Claude Sonnet e Codex gpt-6.1-sol. A prova local está em `PLM_OPERACAO/servico/TERMINAIS_VERIFICADOS.json`, fora do Git.
+
+Os quatro casos conservam dados, aprovações, conhecimento, saídas e custos históricos, com `execution_backend=terminal`, pausados. Chamadas de assinatura possuem recibos próprios e não são convertidas em cobranças de API. A troca de transporte não aceita resultados pendentes, resolve title nem apaga cobranças antigas incertas. Limites das assinaturas e as decisões materiais continuam aplicáveis.
+
+Foi corrigida a inicialização automática: o Windows passa a chamar Python diretamente, sem depender de um arquivo PowerShell bloqueado pela política existente. A política de segurança não foi alterada. Nova cópia do banco restaurada e conferida em instância isolada após a migração 0013; produção preservada.
+
+Implementação, instalação e limites: [Execução terminal](EXECUCAO_TERMINAL.md).
+
+Validação desta versão: **1.359 testes passaram** na suíte completa; os dois terminais passaram no diagnóstico real do contrato de solicitação de ferramenta. O painel respondeu HTTP 200 com quatro executores e quatro casos no transporte terminal. O início direto por Python foi conferido e a recuperação do banco foi verificada em instância isolada.
+
+---
+
+## Histórico da etapa de API — fechamento de 12/10/2026
 
 A entrada operacional agora é [Operação visual](OPERACAO_VISUAL.md), com painel local em http://127.0.0.1:8788. Quatro casos Cibola incorporados e quatro executores disponíveis. O piloto foi aprovado e iniciou chamadas reais. Renato confirmou o exemplar de Derek para Cibola e impôs posteriormente US$ 20 adicionais no total das APIs do restante da implementação; o limite está instalado e persistido no banco.
 

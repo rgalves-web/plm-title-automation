@@ -199,9 +199,11 @@ class OrquestracaoRepo:
             if max_active_per_unit is not None:
                 self.conn.execute('SELECT id FROM units WHERE id=%s FOR UPDATE',(unit_id,))
                 pending=self.conn.execute("SELECT t.id FROM tasks t WHERE t.unit_id=%s AND t.status='pronta' AND EXISTS (SELECT 1 FROM task_runs r JOIN operation_requests q ON q.run_id=r.id WHERE r.task_id=t.id AND r.finished_at IS NOT NULL AND q.status IN ('unknown','inflight'))",(unit_id,)).fetchall()
+                terminal_pending=self.conn.execute("SELECT t.id FROM tasks t WHERE t.unit_id=%s AND t.status='pronta' AND EXISTS (SELECT 1 FROM task_runs r JOIN operation_terminal_calls c ON c.run_id=r.id WHERE r.task_id=t.id AND r.finished_at IS NOT NULL AND c.status IN ('running','interrupted') AND NOT (c.receipt ? 'reviewed_by'))",(unit_id,)).fetchall()
+                pending=list({r['id']:r for r in pending+terminal_pending}.values())
                 for affected in pending:
                     self.transicionar_tarefa(affected['id'],('pronta',),'bloqueada','process:recovery','reconcile_usage_before_retry')
-                    self.operation_event('task.recovery_required','process:recovery',{'reason':'Retomada mantém a tarefa com custo incerto suspensa; trabalhos independentes conservam suas reservas.'},unit_id=unit_id,task_id=affected['id'])
+                    self.operation_event('task.recovery_required','process:recovery',{'reason':'Conferir a chamada de API incerta ou o terminal interrompido antes de repetir; trabalhos independentes continuam disponíveis.'},unit_id=unit_id,task_id=affected['id'])
                 active=self.conn.execute('SELECT count(*) AS n FROM task_runs r JOIN tasks t ON t.id=r.task_id WHERE t.unit_id=%s AND r.finished_at IS NULL',(unit_id,)).fetchone()['n']
                 if active>=max_active_per_unit:return None
             t = self.conn.execute(

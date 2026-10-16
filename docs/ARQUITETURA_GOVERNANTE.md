@@ -5,6 +5,8 @@ Atualização operacional autorizada em 11–12/10/2026: `OPERACAO_VISUAL.md` de
 
 ## 1. A lei
 
+Transporte vigente por ordem de Renato em 16/10/2026: Claude Code e Codex pelos terminais oficiais, sem chaves locais de API. `EXECUCAO_TERMINAL.md` descreve autenticação, isolamento, recibos e limitações. O núcleo continua LLM-first, com produção e revisão de famílias independentes; a mudança não libera conclusões nem apaga custos históricos.
+
 **LLM-first puro, conforme a ordem de 12/08 (`docs/ARQUITETURA_LLM_FIRST.md`).** Nenhuma decisão de title em Python: nem limiar, nem tabela de autoridade, nem fórmula, nem portão que aprove ou repita julgamento. Quem confere um julgamento de IA é outra IA (Auditor de família independente), nunca um `if`.
 
 Precedência entre os documentos existentes:

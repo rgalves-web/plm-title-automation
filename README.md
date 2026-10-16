@@ -2,6 +2,8 @@
 
 Abra **http://127.0.0.1:8788**. O painel opera o Case File em PostgreSQL e conserva a trilha de tarefas, arquivos, revisões, custos e conhecimento.
 
+Execução vigente: **Claude Code na produção e Codex na revisão, pelo terminal**, autenticados nas contas das assinaturas. As chaves locais de API foram removidas; a operação não volta automaticamente ao SDK. Veja [configuração e limites](docs/EXECUCAO_TERMINAL.md). Os registros de cobrança anteriores continuam preservados.
+
 ```powershell
 python -m src.casefile.workbench serve
 ```

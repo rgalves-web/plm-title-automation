@@ -1,5 +1,7 @@
 # Operação visual PLM — arquitetura vigente
 
+**Transporte atualizado em 16/10/2026:** a operação usa Claude Code e Codex pelos terminais oficiais, sem chaves locais de API e sem fallback ao SDK. Leia [Execução terminal](EXECUCAO_TERMINAL.md). As descrições de API abaixo conservam os contratos e os custos históricos. A inicialização do Windows passa a chamar Python diretamente, evitando depender da execução de arquivos PowerShell.
+
 Aplicação local: **http://127.0.0.1:8788**. Entrada: `python -m src.casefile.workbench serve`.
 O serviço possui quatro executores e inicia ao entrar nesta conta do Windows. Fechar a página não encerra tarefas aprovadas. Cada chamada confere novamente pausa, orçamento e custo incerto.
 

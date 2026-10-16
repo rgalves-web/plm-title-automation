@@ -53,6 +53,9 @@ Thumbs.db
 
 # Claude Code local tooling config (launch profiles, local permissions)
 .claude/
+.codex/
+**/.credentials.json
+**/auth.json
 
 # PR-9: the attic (parked client-adjacent scratch) and fixture BYTES
 # never enter git — a fixture is a claim in git plus bytes outside
@@ -73,3 +76,5 @@ scratch_training_*.txt
 .pytest-esteira-*/
 scratch_esteira_*.txt
 data/legacy_recovery/
+.pytest-terminal-*/
+scratch_terminal_*.txt

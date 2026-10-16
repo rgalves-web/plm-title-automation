@@ -7,7 +7,8 @@ try {
     $plmListeners=Get-NetTCPConnection -LocalPort 8788 -State Listen -ErrorAction SilentlyContinue
     foreach ($plmListener in $plmListeners) {
         $plmProcess=Get-CimInstance Win32_Process -Filter "ProcessId=$($plmListener.OwningProcess)"
-        if ($plmProcess.CommandLine -notmatch 'src\.casefile\.workbench.*serve') { throw 'A porta pertence a outro processo; não encerrar.' }
+        $plmRunner=[regex]::Escape((Join-Path $PSScriptRoot 'run_workbench.py'))
+        if ($plmProcess.CommandLine -notmatch 'src\.casefile\.workbench.*serve' -and $plmProcess.CommandLine -notmatch $plmRunner) { throw 'A porta pertence a outro processo; não encerrar.' }
         Stop-Process -Id $plmProcess.ProcessId
     }
     & (Join-Path $PSScriptRoot 'start_workbench.ps1')
