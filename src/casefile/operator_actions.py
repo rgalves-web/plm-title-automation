@@ -92,6 +92,10 @@ def apply(repo,case,body,actor):
             repo.operation_event('terminal.retry_reviewed',actor,{'terminal_call_ids':[r['id'] for r in reviewed],'note':body['note']},unit_id=uid,task_id=task['id'])
         repo.transicionar_tarefa(task['id'],(task['status'],),'planejada',actor,body['note'])
         repo.promover_prontas(uid,'process:operacao')
+    elif action=='record_open_item':
+        # Issue 11: one click turns a Function's observation into an open item.
+        from src.casefile.decision_card import record_open_item
+        record_open_item(repo,uid,int(body['task_id']),int(body['observation']),actor,body['note'])
     elif action=='replan':
         from src.casefile.operations import seed_coordinator
         if not case['approval']:

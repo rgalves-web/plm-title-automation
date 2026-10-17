@@ -16,6 +16,8 @@
     "pagina": {"type": "string", "minLength": 1},
     "trecho": {"type": "string", "minLength": 1},
     "justificativa": {"type": "string", "minLength": 1},
+    "resumo": {"type": "string", "minLength": 1, "$comment": "Duas ou três frases para Renato: o desfecho e por quê."},
+    "observacoes": {"type": "array", "items": {"type": "string", "minLength": 1}, "$comment": "Cada ressalva, divergência interna ou limite de leitura, um por item; não altera a afirmação."},
     "novo_claim": {"$ref": "claims.json#/$defs/claim"},
     "escalonamento": {
       "type": "object",

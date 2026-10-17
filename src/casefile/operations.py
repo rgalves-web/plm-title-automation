@@ -149,8 +149,10 @@ def task_detail(repo,task_id):
     revision=repo.operation_case(task['unit_id'])['revision']
     runs=repo.runs_da_tarefa(task_id)
     from src.casefile import function_files
+    from src.casefile import decision_card
     return serializable({'task':task,'case_revision':revision,'runs':runs,
-                         'attempts':repo.task_attempts(task_id),'artifacts':[a for a in repo.operation_artifacts(task['unit_id']) if a['task_id']==task_id],
+                         'attempts':repo.task_attempts(task_id),
+                         'decision_card':decision_card.card(repo,task_id),'artifacts':[a for a in repo.operation_artifacts(task['unit_id']) if a['task_id']==task_id],
                          'function_files':repo.function_files(task_id=task_id),
                          'lifecycle':[function_files.lifecycle(repo,r['id']) for r in runs],
                          'terminal_calls':repo.conn.execute('SELECT c.* FROM operation_terminal_calls c JOIN task_runs r ON r.id=c.run_id WHERE r.task_id=%s ORDER BY c.id',(task_id,)).fetchall(),

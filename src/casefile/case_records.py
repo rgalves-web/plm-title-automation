@@ -155,6 +155,26 @@ def replace_claim(repo: Any, task: dict[str, Any], old_claim_id: int,
     return relative
 
 
+def write_open_item_file(repo: Any, task: dict[str, Any], claim_id: int,
+                         output_file: dict[str, Any], index: int) -> str:
+    """Issue 11: the Case file of an open item recorded from observation
+    `index` of an output file, beside that output."""
+    claim = repo.claim(claim_id)
+    record = _write(task["unit_id"], stage=repo.estado_da_unit(task["unit_id"]),
+                    function=task["role"], task=task["id"],
+                    name=f"open_item_{_stem(output_file)}_{index:02d}.json",
+                    document=_claim_document(
+                        claim, origin="observation", task_id=task["id"],
+                        function=task["role"],
+                        output_file={"relative": output_file["relative"],
+                                     "sha256": output_file["sha256"]},
+                        observation_index=index))
+    _set(repo, "claims", claim_id, record)
+    _index(repo, task["unit_id"], task, record, f"Item aberto (afirmação {claim_id})",
+           f"Observação {index} registrada como item aberto")
+    return record.relative
+
+
 # --- reviews -----------------------------------------------------------------
 
 def _review_document(repo: Any, verification: dict[str, Any],

@@ -22,3 +22,5 @@ ferramentas: [ler_pagina, ver_claim_e_verificacao, registrar_adjudicacao, abrir_
 ## Operação visual
 
 As ferramentas expostas e o esquema da tarefa descrevem o contrato executável. Consulte resultados anteriores no Case File. Entregue somente o que foi observado e cite a fonte; registro de execução não aprova title nem requisito de submissão.
+
+Na adjudicação, Renato decide a partir de `resumo` e `observacoes`: em `resumo`, duas ou três frases com o desfecho e o motivo; em `observacoes`, cada ressalva, divergência interna ou limite de leitura, um por item, sem alterar a afirmação.
