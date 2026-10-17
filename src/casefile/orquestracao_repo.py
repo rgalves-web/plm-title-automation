@@ -194,7 +194,7 @@ class OrquestracaoRepo:
                      versoes_pacote: dict[str, str],
                      lease_segundos: int,
                      excluir_roles: tuple[str, ...] = (), max_active_per_unit: int | None = None,
-                     somente_ids: list[int] | None = None
+                     somente_ids: list[int] | None = None, rodada: bool = False
                      ) -> tuple[dict[str, Any], dict[str, Any]] | None:
         with self.conn.transaction():
             if max_active_per_unit is not None:
@@ -207,13 +207,32 @@ class OrquestracaoRepo:
                     self.operation_event('task.recovery_required','process:recovery',{'reason':'Conferir a chamada de API incerta ou o terminal interrompido antes de repetir; trabalhos independentes continuam disponíveis.'},unit_id=unit_id,task_id=affected['id'])
                 active=self.conn.execute('SELECT count(*) AS n FROM task_runs r JOIN tasks t ON t.id=r.task_id WHERE t.unit_id=%s AND r.finished_at IS NULL',(unit_id,)).fetchone()['n']
                 if active>=max_active_per_unit:return None
-            # somente_ids: a focused Round's scope (issue 10); None = any task.
+            # somente_ids: only these tasks may be picked; None = any task.
+            # rodada (issue 10): the Case's latest Round decides in the same
+            # statement as the pick, so a Round closing meanwhile cannot let
+            # a task through: a closed latest Round picks nothing until a new
+            # Round is approved, and an open focused Round picks only its
+            # focus task and the follow-ups descending from it.
+            rodada_sql = (
+                " AND NOT EXISTS (SELECT 1 FROM operation_rounds r WHERE "
+                "r.unit_id = %(u)s AND r.closed_at IS NOT NULL AND r.number = "
+                "(SELECT max(number) FROM operation_rounds WHERE unit_id = %(u)s))"
+                " AND (NOT EXISTS (SELECT 1 FROM operation_rounds r WHERE "
+                "r.unit_id = %(u)s AND r.focus_task_id IS NOT NULL AND r.number = "
+                "(SELECT max(number) FROM operation_rounds WHERE unit_id = %(u)s))"
+                " OR id IN (WITH RECURSIVE scope(id) AS (SELECT r.focus_task_id "
+                "FROM operation_rounds r WHERE r.unit_id = %(u)s AND r.number = "
+                "(SELECT max(number) FROM operation_rounds WHERE unit_id = %(u)s) "
+                "UNION SELECT c.id FROM tasks c JOIN scope s ON "
+                "c.parent_task_id = s.id) SELECT id FROM scope))") if rodada else ""
             t = self.conn.execute(
-                "SELECT * FROM tasks WHERE unit_id = %s AND status = 'pronta' "
-                "AND NOT (role = ANY(%s)) "
-                "AND (%s::bigint[] IS NULL OR id = ANY(%s::bigint[])) "
-                "ORDER BY priority, id LIMIT 1 FOR UPDATE SKIP LOCKED",
-                (unit_id, list(excluir_roles), somente_ids, somente_ids)).fetchone()
+                "SELECT * FROM tasks WHERE unit_id = %(u)s AND status = 'pronta' "
+                "AND NOT (role = ANY(%(ex)s)) "
+                "AND (%(ids)s::bigint[] IS NULL OR id = ANY(%(ids)s::bigint[]))"
+                + rodada_sql +
+                " ORDER BY priority, id LIMIT 1 FOR UPDATE SKIP LOCKED",
+                {"u": unit_id, "ex": list(excluir_roles),
+                 "ids": somente_ids}).fetchone()
             if t is None:
                 return None
             role_v = versoes_funcao.get(t["role"])

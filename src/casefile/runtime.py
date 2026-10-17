@@ -199,7 +199,7 @@ def tools(repo,task):
                 repo.conn.execute('UPDATE tasks SET budget_usd=%s,priority=%s,updated_at=now() WHERE id=%s',
                     (amount,int(priority if priority is not None else target['priority']),task_id))
                 if target['status']=='bloqueada':
-                    if len(repo.runs_da_tarefa(task_id))>=3:raise ValueError('two_new_attempts_exhausted')
+                    if repo.task_attempts(task_id)>=3:raise ValueError('two_new_attempts_exhausted')
                     repo.transicionar_tarefa(task_id,('bloqueada',),'planejada','process:coordenador',motivo)
                 repo.promover_prontas(task['unit_id'],'process:coordenador')
             repo.operation_event('task.reallocated','process:coordenador',{'target_task_id':task_id,'budget_usd':budget_usd,'cancelled':cancelar,'reason':motivo},unit_id=task['unit_id'],task_id=task['id'])

@@ -124,24 +124,114 @@ def test_the_turn_cap_applies_inside_the_focus(operation_case):
         (1, False, rounds.CAP_REACHED)
 
 
-def test_retry_makes_a_blocked_task_ready_until_the_attempt_limit(operation_case):
-    """The command behind the dashboard's retry button keeps the limit."""
+def test_a_closed_focused_round_dispatches_nothing_until_a_new_round(
+        operation_case):
+    repo, unit, scope = operation_case
+    other = task(repo, unit)
+    focus = task(repo, unit)
+    _start(repo, unit, scope, turn_cap=10, focus_task_id=focus["id"])
+    assert _run(repo, unit, [[Use("entregar_saida",
+                                  {"saida": RESEARCH})]])["erros"] == []
+    assert _run(repo, unit, []) is None                  # the focus is done
+    assert rounds.state(repo, unit["id"])["close_reason"] == rounds.FOCUS_COMPLETE
+    # the race of 16/10: a worker that read the Case as running before the
+    # Round closed must still pick nothing
+    repo.operation_update(unit["id"], execution_state="running")
+    assert _run(repo, unit, []) is None
+    assert repo.runs_da_tarefa(other["id"]) == []
+    assert repo.tarefa(other["id"])["status"] == "pronta"
+    # a new Round is what lets the Case dispatch again
+    _start(repo, unit, scope, turn_cap=10)
+    picked = _run(repo, unit, [[Use("entregar_saida", {"saida": RESEARCH})]])
+    assert picked["tarefa"]["id"] == other["id"]
+
+
+def test_runs_that_launched_no_call_do_not_use_up_attempts(operation_case):
+    """The command behind the dashboard's retry button counts only runs that
+    launched a call toward its limit of three."""
     from src.casefile import orquestracao
     repo, unit, scope = operation_case
     item = task(repo, unit)
     _start(repo, unit, scope, turn_cap=10, focus_task_id=item["id"])
-    for attempt in range(3):
+
+    def run_once(launched):
         got = orquestracao.pegar(repo, unit["id"], "synthetic-worker", teto=50,
-                                 max_active_per_unit=1, somente_ids=[item["id"]])
+                                 max_active_per_unit=1, rodada=True)
+        if launched:
+            repo.conn.execute(
+                "INSERT INTO operation_terminal_calls(run_id,ordinal,family,"
+                "status,launched_at) VALUES (%s,1,'A','completed',now())",
+                (got[1]["id"],))
         repo.fechar_run(got[1]["id"], "synthetic-worker", output_json=None,
-                        output_valid=False, validation_errors=["synthetic"],
+                        output_valid=None, validation_errors=["synthetic"],
                         stop_reason="synthetic_block", para="bloqueada")
-        if attempt < 2:
-            operations.command(repo, request(repo, unit, "retry_task",
-                                             task_id=item["id"]))
-            assert repo.tarefa(item["id"])["status"] == "pronta"
-    assert len(repo.runs_da_tarefa(item["id"])) == 3
-    with pytest.raises(ValueError, match="two_new_attempts_exhausted"):
+
+    def retry():
         operations.command(repo, request(repo, unit, "retry_task",
                                          task_id=item["id"]))
+
+    for _ in range(3):                    # stopped before any call was made
+        run_once(launched=False)
+        retry()
+    assert len(repo.runs_da_tarefa(item["id"])) == 3
+    assert repo.task_attempts(item["id"]) == 0
+    for attempt in (1, 2, 3):
+        run_once(launched=True)
+        assert repo.task_attempts(item["id"]) == attempt
+        if attempt < 3:
+            retry()
+            assert repo.tarefa(item["id"])["status"] == "pronta"
+    with pytest.raises(ValueError, match="two_new_attempts_exhausted"):
+        retry()
     assert repo.tarefa(item["id"])["status"] == "bloqueada"
+    assert operations.task_detail(repo, item["id"])["attempts"] == 3
+
+
+def test_migration_0019_restores_attempts_of_runs_stopped_before_a_call(
+        operation_case):
+    """The data fix applied to the real database (task 65, run 100)."""
+    from pathlib import Path
+    from src.casefile import orquestracao
+    from src.casefile.db import _statements
+    repo, unit, scope = operation_case
+    item = task(repo, unit)
+    _start(repo, unit, scope, turn_cap=10, focus_task_id=item["id"])
+    old = orquestracao.pegar(repo, unit["id"], "synthetic-worker", teto=50,
+                             max_active_per_unit=1, rodada=True)[1]
+    repo.fechar_run(old["id"], "synthetic-worker", output_json=None,
+                    output_valid=None, validation_errors=[], stop_reason="concluida",
+                    para="pronta")
+    stopped = orquestracao.pegar(repo, unit["id"], "synthetic-worker", teto=50,
+                                 max_active_per_unit=1, rodada=True)[1]
+    repo.fechar_run(stopped["id"], "synthetic-worker", output_json=None,
+                    output_valid=False, validation_errors=[rounds.FOCUS_COMPLETE],
+                    stop_reason=rounds.FOCUS_COMPLETE, para="pronta")
+    # calls recorded before launch tracking existed: one ran, one never started
+    repo.conn.execute("INSERT INTO operation_terminal_calls(run_id,ordinal,"
+                      "family,status) VALUES (%s,1,'A','completed')", (old["id"],))
+    repo.conn.execute("INSERT INTO operation_terminal_calls(run_id,ordinal,family,"
+                      "status,failure) VALUES (%s,2,'A','interrupted',"
+                      "'terminal_input_file_not_written: synthetic')", (old["id"],))
+    assert repo.task_attempts(item["id"]) == 0           # before the fix
+    sql = (Path(__file__).resolve().parents[1] / "src" / "casefile" / "migrations"
+           / "0019_attempts_count_launched_calls.sql").read_text("utf-8")
+    for statement in _statements(sql):
+        repo.conn.execute(statement)
+    launched = [c["launched_at"] is not None for c in repo.conn.execute(
+        "SELECT * FROM operation_terminal_calls ORDER BY ordinal")]
+    assert launched == [True, False]       # the call that never started stays
+    assert repo.task_attempts(item["id"]) == 1           # the old run counts
+    assert repo.run(stopped["id"])["output_valid"] is None
+
+
+def test_a_round_stop_without_delivery_leaves_validity_unset(operation_case):
+    repo, unit, scope = operation_case
+    item = task(repo, unit)
+    _start(repo, unit, scope, turn_cap=10, focus_task_id=item["id"])
+    repo.conn.execute("DELETE FROM operation_rounds WHERE unit_id=%s", (unit["id"],))
+    _terminal(repo, unit)
+    result = _run(repo, unit, None, client=ScriptedTerminal([
+        [Use("entregar_saida", {"saida": RESEARCH})]]))
+    assert result["parada"] == rounds.NOT_APPROVED
+    run = repo.run(result["run_id"])
+    assert run["output_valid"] is None and repo.task_attempts(item["id"]) == 0

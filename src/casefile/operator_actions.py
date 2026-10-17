@@ -82,7 +82,7 @@ def apply(repo,case,body,actor):
         task=repo.tarefa(int(body['task_id']))
         if not task or task['unit_id']!=uid or task['status'] not in ('bloqueada','aguardando_operador','recusada'):
             raise ValueError('affected_case_task_required')
-        if len(repo.runs_da_tarefa(task['id']))>=3:
+        if repo.task_attempts(task['id'])>=3:
             raise ValueError('two_new_attempts_exhausted_revise_scope_or_input')
         if any(r['usage_state'] in ('unknown','inflight') for r in repo.runs_da_tarefa(task['id'])):
             raise ValueError('reconcile_usage_before_retry')

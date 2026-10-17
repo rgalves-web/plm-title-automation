@@ -96,6 +96,18 @@ class OperationsRepo:
             (unit_id,task_id,run_id,direction,ordinal,relative,sha256,
              size_bytes,status,_json(list(reason or [])),artifact_id)).fetchone()
 
+    def task_attempts(self, task_id):
+        """Runs of a task that launched a model call: a terminal call marked
+        launched or a recorded API request. A run stopped before any call
+        (a closed Round, an input file that could not be written) is not an
+        attempt and never uses up the retry limit."""
+        return self.conn.execute(
+            "SELECT count(*) AS n FROM task_runs r WHERE r.task_id=%s AND ("
+            "EXISTS (SELECT 1 FROM operation_terminal_calls c WHERE c.run_id=r.id "
+            "AND c.launched_at IS NOT NULL) OR "
+            "EXISTS (SELECT 1 FROM operation_requests q WHERE q.run_id=r.id))",
+            (task_id,)).fetchone()["n"]
+
     def function_file(self, file_id):
         return self.conn.execute("SELECT * FROM function_files WHERE id=%s",
                                  (file_id,)).fetchone()

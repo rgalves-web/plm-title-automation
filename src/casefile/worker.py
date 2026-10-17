@@ -362,18 +362,17 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
     else:
         coordenacao.exigir_etapa_suportada(repo, unit_id, "trabalhar")
     terminal = operation and case['profile'].get('execution_backend') == 'terminal'
-    scope = None
-    if operation:
-        # Issue 10: a focused Round dispatches only its focus and follow-ups.
-        from src.casefile import rounds
-        scope = rounds.focus_scope(repo, unit_id)
+    # Issue 10: in operation the Case's latest Round decides inside the pick
+    # itself: a closed Round picks nothing until a new one is approved, and
+    # a focused Round picks only its focus task and its follow-ups.
     got = orq.pegar(repo, unit_id, worker, teto=teto, raiz=raiz,
                     lease_segundos=lease_segundos,
                     excluir_roles=() if operation else FUNCOES_FORA_DO_WORKER,
                     max_active_per_unit=1 if operation else None,
-                    somente_ids=scope)
+                    rodada=operation)
     if got is None:
-        if scope is not None:
+        if operation:
+            from src.casefile import rounds
             rounds.close_focus_if_done(repo, unit_id)
         return None
     task, run = got
@@ -601,7 +600,9 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
         # wrong: it goes back to ready, uncounted, and the Case waits for
         # Renato to approve a new Round. The reason is the run's stop reason.
         with repo.transacao():
-            t=repo.fechar_run(run['id'],worker,output_json=entrega['saida'],output_valid=False,
+            # Nothing delivered means no output to judge: validity stays unset.
+            t=repo.fechar_run(run['id'],worker,output_json=entrega['saida'],
+                             output_valid=False if entrega['entregas'] else None,
                              validation_errors=[round_stop],stop_reason=round_stop,para='pronta',**meta)
             repo.operation_update(unit_id,execution_state='waiting')
             result={'tarefa':t,'run_id':run['id'],'erros':[round_stop],'teto_atingido':False,

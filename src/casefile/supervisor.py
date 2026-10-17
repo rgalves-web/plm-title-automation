@@ -76,9 +76,10 @@ class Supervisor:
                         return True
                     from src.casefile import rounds
                     latest_round=rounds.current(repo,uid)
-                    if latest_round and latest_round['focus_task_id']:
+                    if latest_round and (latest_round['focus_task_id'] or latest_round['closed_at']):
                         # Issue 10: a focused Round runs nothing beyond its
-                        # focus; it closes itself when the focus is done.
+                        # focus and closes itself when the focus is done; a
+                        # closed Round waits for Renato to approve a new one.
                         continue
                     if not any(t['status'] in ('pronta','em_execucao') for t in repo.tarefas(uid)):
                         from src.casefile.runtime import add_followup

@@ -261,19 +261,22 @@ def pegar(repo: Any, unit_id: int, worker: str, *, teto: float,
           raiz: str | Path | None = None,
           lease_segundos: int = LEASE_PADRAO_S,
           excluir_roles: tuple[str, ...] = (), max_active_per_unit: int | None = None,
-          somente_ids: list[int] | None = None
+          somente_ids: list[int] | None = None, rodada: bool = False
           ) -> tuple[dict[str, Any], dict[str, Any]] | None:
     """Libera travas vencidas, confere o teto, promove prontas e entrega a
     próxima (menor priority, depois id) com a versão das fichas no run.
     `excluir_roles`: funções que este worker não executa (ficam prontas).
-    `somente_ids`: só estas tarefas podem ser entregues (foco da rodada)."""
+    `somente_ids`: só estas tarefas podem ser entregues.
+    `rodada`: a última rodada do caso decide no próprio pick (issue 10)."""
     repo.liberar_leases_vencidos(unit_id, ATOR)
     checar_teto(repo, unit_id, teto)
     repo.promover_prontas(unit_id, ATOR)
     funcoes, pacotes = registrar_versoes(repo, raiz)
-    if somente_ids is not None:
+    if somente_ids is not None or rodada:
         return repo.pegar_tarefa(unit_id,worker,funcoes,pacotes,lease_segundos,tuple(excluir_roles),
-                                 max_active_per_unit,somente_ids=list(somente_ids))
+                                 max_active_per_unit,
+                                 somente_ids=list(somente_ids) if somente_ids is not None else None,
+                                 rodada=rodada)
     if max_active_per_unit is None:
         return repo.pegar_tarefa(unit_id, worker, funcoes, pacotes,lease_segundos,tuple(excluir_roles))
     return repo.pegar_tarefa(unit_id,worker,funcoes,pacotes,lease_segundos,tuple(excluir_roles),max_active_per_unit)
