@@ -51,3 +51,4 @@ here.
 - Casefile/triagem com nome ambíguo (2 conteúdos, mesmo logical) rotula ambos os hashes com o mesmo rótulo — aceitável no VS1, mas o VS3 deve rotular por conteúdo.
 - VS3/verificacao: a transcricao independente do Exhibit A (paginas 3-4 da DPU) nao devolve o bloco 0220604/001-018 em nenhuma das duas passadas (sub-serie/ditto na tabela?). 18 leases ficam evidencia_insuficiente — investigar recorte por regiao/zoom da pagina antes da proxima rodada.
 - VS3: sessao interrompida por credito nao registra intervencao de data de corte; a retomada (posicoes/grafo ausentes => re-roda) cobre, mas vale fechar sessao+custo em finally (item ja aberto) e registrar pergunta automatica.
+- Approval dialog ticks all six sources by default, including RRC; default should be local only.
