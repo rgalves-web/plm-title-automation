@@ -193,7 +193,8 @@ class OrquestracaoRepo:
                      versoes_funcao: dict[str, str],
                      versoes_pacote: dict[str, str],
                      lease_segundos: int,
-                     excluir_roles: tuple[str, ...] = (), max_active_per_unit: int | None = None
+                     excluir_roles: tuple[str, ...] = (), max_active_per_unit: int | None = None,
+                     somente_ids: list[int] | None = None
                      ) -> tuple[dict[str, Any], dict[str, Any]] | None:
         with self.conn.transaction():
             if max_active_per_unit is not None:
@@ -206,11 +207,13 @@ class OrquestracaoRepo:
                     self.operation_event('task.recovery_required','process:recovery',{'reason':'Conferir a chamada de API incerta ou o terminal interrompido antes de repetir; trabalhos independentes continuam disponíveis.'},unit_id=unit_id,task_id=affected['id'])
                 active=self.conn.execute('SELECT count(*) AS n FROM task_runs r JOIN tasks t ON t.id=r.task_id WHERE t.unit_id=%s AND r.finished_at IS NULL',(unit_id,)).fetchone()['n']
                 if active>=max_active_per_unit:return None
+            # somente_ids: a focused Round's scope (issue 10); None = any task.
             t = self.conn.execute(
                 "SELECT * FROM tasks WHERE unit_id = %s AND status = 'pronta' "
                 "AND NOT (role = ANY(%s)) "
+                "AND (%s::bigint[] IS NULL OR id = ANY(%s::bigint[])) "
                 "ORDER BY priority, id LIMIT 1 FOR UPDATE SKIP LOCKED",
-                (unit_id, list(excluir_roles))).fetchone()
+                (unit_id, list(excluir_roles), somente_ids, somente_ids)).fetchone()
             if t is None:
                 return None
             role_v = versoes_funcao.get(t["role"])

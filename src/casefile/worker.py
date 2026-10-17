@@ -362,11 +362,19 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
     else:
         coordenacao.exigir_etapa_suportada(repo, unit_id, "trabalhar")
     terminal = operation and case['profile'].get('execution_backend') == 'terminal'
+    scope = None
+    if operation:
+        # Issue 10: a focused Round dispatches only its focus and follow-ups.
+        from src.casefile import rounds
+        scope = rounds.focus_scope(repo, unit_id)
     got = orq.pegar(repo, unit_id, worker, teto=teto, raiz=raiz,
                     lease_segundos=lease_segundos,
                     excluir_roles=() if operation else FUNCOES_FORA_DO_WORKER,
-                    max_active_per_unit=1 if operation else None)
+                    max_active_per_unit=1 if operation else None,
+                    somente_ids=scope)
     if got is None:
+        if scope is not None:
+            rounds.close_focus_if_done(repo, unit_id)
         return None
     task, run = got
     if operation:

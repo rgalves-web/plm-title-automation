@@ -74,6 +74,12 @@ class Supervisor:
                     if result is not None:
                         repo.operation_update(uid,last_dispatched_at=datetime.now(timezone.utc))
                         return True
+                    from src.casefile import rounds
+                    latest_round=rounds.current(repo,uid)
+                    if latest_round and latest_round['focus_task_id']:
+                        # Issue 10: a focused Round runs nothing beyond its
+                        # focus; it closes itself when the focus is done.
+                        continue
                     if not any(t['status'] in ('pronta','em_execucao') for t in repo.tarefas(uid)):
                         from src.casefile.runtime import add_followup
                         from src.casefile.training import digest

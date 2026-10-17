@@ -224,12 +224,15 @@ def command(repo,body,actor=ACTOR):
             # Issue 08: approving a Round requires its turn cap.
             from src.casefile import rounds
             cap=rounds.validate_cap(body.get('turn_cap'))
-            opened=rounds.approve(repo,uid,cap,actor,body['note'],cid)
+            # Issue 10: an optional focus task; a focused Round seeds no Coordinator.
+            focus=rounds.validate_focus(repo,uid,body.get('focus_task_id'))
+            opened=rounds.approve(repo,uid,cap,actor,body['note'],cid,focus)
             approval={'actor':actor,'note':body['note'],'at':datetime.now(timezone.utc).isoformat(),
                       'scope_sha256':digest(scope),'budget_usd':budget,'command_id':cid,
-                      'round':opened['number'],'turn_cap':cap}
+                      'round':opened['number'],'turn_cap':cap,'focus_task_id':focus}
             repo.operation_update(uid,scope=scope,approved_budget_usd=budget,approval=approval,execution_state='running')
-            seed_coordinator(repo,uid,budget-repo.custo_acumulado(uid))
+            if focus is None:
+                seed_coordinator(repo,uid,budget-repo.custo_acumulado(uid))
         elif action=='pause':
             repo.operation_update(uid,execution_state='paused')
         elif action=='configure':

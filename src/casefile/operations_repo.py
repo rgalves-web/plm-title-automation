@@ -192,10 +192,10 @@ class OperationsRepo:
         return self.conn.execute("SELECT * FROM operation_cases WHERE execution_state='running' "
                                  "ORDER BY last_dispatched_at NULLS FIRST,unit_id").fetchall()
 
-    def operation_enqueue(self,uid,ref,role,title,data,schema,budget):
-        self.conn.execute('INSERT INTO operation_followups(unit_id,ref,role,title,input_json,output_schema,budget_usd) '
-                           'VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(unit_id,ref) DO NOTHING',
-                           (uid,ref,role,title,_json(data),schema,budget))
+    def operation_enqueue(self,uid,ref,role,title,data,schema,budget,parent_task_id=None):
+        self.conn.execute('INSERT INTO operation_followups(unit_id,ref,role,title,input_json,output_schema,budget_usd,parent_task_id) '
+                           'VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(unit_id,ref) DO NOTHING',
+                           (uid,ref,role,title,_json(data),schema,budget,parent_task_id))
 
     def operation_followups(self,uid):
         return self.conn.execute('SELECT * FROM operation_followups WHERE unit_id=%s AND task_id IS NULL ORDER BY id',(uid,)).fetchall()
@@ -217,6 +217,10 @@ class OperationsRepo:
                         'depends_on_refs':[],'budget_usd':float(item['budget_usd']),'priority':-1,
                         'verificacao':'nenhuma' if item['role']=='verificador' or item['output_schema']=='comparacao_independente' else 'operador'}],
                         'process:operacao')[0]
+                    if item.get('parent_task_id') is not None:
+                        # Issue 10: the follow-up keeps the task it came from.
+                        old=self.conn.execute('UPDATE tasks SET parent_task_id=%s WHERE id=%s RETURNING *',
+                                              (item['parent_task_id'],old['id'])).fetchone()
                     available-=float(item['budget_usd'])
                 self.conn.execute('UPDATE operation_followups SET task_id=%s WHERE id=%s',(old['id'],item['id']))
                 created.append(old['id'])

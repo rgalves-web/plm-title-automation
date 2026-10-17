@@ -232,7 +232,7 @@ def tools(repo,task):
         with repo.transacao():
             ids=persist_claims(repo,task,output,run['operation_session_id'])
             for cid in ids:
-                queue_claim_review(repo,task['unit_id'],repo.claim(cid))
+                queue_claim_review(repo,task['unit_id'],repo.claim(cid),parent=task['id'])
             repo.operation_event('claims.checkpointed','process:examinador',
                 {'run_id':run['id'],'claim_ids':ids,'task_completed':False},unit_id=task['unit_id'],task_id=task['id'])
         return {'claim_ids':ids,'task_completed':False,'independent_review_queued':True}
@@ -478,11 +478,11 @@ def persist_claims(repo,task,output,session_id,**kwargs):
     return ids
 
 
-def queue_claim_review(repo,uid,claim):
+def queue_claim_review(repo,uid,claim,parent=None):
     add_followup(repo,uid,'verificador','Revisão independente da afirmação '+str(claim['id']),
         {'claim_id':claim['id'],'claim_type':claim['claim_type'],'source_sha256':claim['source_sha256'],
          'pagina':claim['page'],'pergunta':'Transcreva os fatos e cláusulas legíveis desta página em um objeto valor, com trecho literal. Inclua partes, datas, identificação de registro, descrição territorial e restrições quando presentes. Não complete campos por suposição; declare se a evidência é insuficiente.'},
-        'extracao_cega',.6,ref='review-claim-'+str(claim['id']))
+        'extracao_cega',.6,ref='review-claim-'+str(claim['id']),parent=parent)
     if not cited_pages(claim['page']):
         review=repo.tarefa_por_ref(uid,'review-claim-'+str(claim['id']))
         if review and review['status'] in ('planejada','pronta'):
@@ -645,7 +645,7 @@ def finalize(repo,task,result):
     if task['role'] in ('examinador','arbitro'):
         claims=[repo.claim(i) for i in repo.claims_da_tarefa(task['id'])]
         for claim in claims:
-            queue_claim_review(repo,uid,claim)
+            queue_claim_review(repo,uid,claim,parent=task['id'])
         if repo.tarefa(task['id'])['status']=='aguardando_verificacao' and claims:
             orquestracao.aceitar_por_verificacao(repo,task['id'])
     if task['role']=='verificador' and task['output_schema']=='extracao_cega':
@@ -657,7 +657,7 @@ def finalize(repo,task,result):
         add_followup(repo,uid,'arbitro','Comparar as duas leituras da afirmação '+str(cid),
                      {'claim':repo.claim(cid),'blind_extraction':reviews[-1]['verifier_value'],
                       'blind_verification_id':reviews[-1]['id'],'independent_comparison':True},
-                     'comparacao_independente',0.6,ref='compare-claim-'+str(cid))
+                     'comparacao_independente',0.6,ref='compare-claim-'+str(cid),parent=task['id'])
     if task['output_schema']=='comparacao_independente':
         cid=task['input_json']['claim']['id']
         for parent in repo.tarefas(uid,'aguardando_verificacao'):
@@ -667,22 +667,24 @@ def finalize(repo,task,result):
                     claim=repo.claim(cid)
                     reviews=repo.verificacoes_do_claim(cid)
                     add_followup(repo,uid,'arbitro','Examinar divergência da afirmação '+str(cid),
-                                 {'claim':claim,'verification':reviews[-1]},'adjudicacao',1.0,ref='arbitrate-claim-'+str(cid))
+                                 {'claim':claim,'verification':reviews[-1]},'adjudicacao',1.0,ref='arbitrate-claim-'+str(cid),parent=task['id'])
     if task['role']=='retrospectivo':
         for lesson in repo.operation_lessons(uid):
             if lesson['task_id']==task['id'] and lesson['status']=='candidate':
                 add_followup(repo,uid,'verificador','Verificar lição candidata '+str(lesson['id']),
-                             {'lesson_id':lesson['id']},'revisao_licao',0.6,ref='review-lesson-'+str(lesson['id']))
+                             {'lesson_id':lesson['id']},'revisao_licao',0.6,ref='review-lesson-'+str(lesson['id']),parent=task['id'])
     repo.promover_prontas(uid,'process:operacao')
     path,sha=write_bytes(uid,f"execucoes/tarefa_{task['id']}_run_{result['run_id']}_{digest(record)[:12]}.json",raw)
     repo.operation_add_artifact(uid,'run_record',path,sha,len(raw),{},task['id'])
     repo.operation_event('task.persisted','process:worker',{'run_id':result['run_id'],'role':task['role']},unit_id=uid,task_id=task['id'])
 
 
-def add_followup(repo,uid,role,title,input_json,schema,budget,ref):
+def add_followup(repo,uid,role,title,input_json,schema,budget,ref,parent=None):
+    """Queue a follow-up task; `parent` is the task whose result produced it
+    (issue 10: a focused Round runs its focus task and these descendants)."""
     if repo.tarefa_por_ref(uid,ref):
         return
-    repo.operation_enqueue(uid,ref,role,title,serializable(input_json),schema,budget)
+    repo.operation_enqueue(uid,ref,role,title,serializable(input_json),schema,budget,parent)
     repo.operation_allocate(uid)
 
 
