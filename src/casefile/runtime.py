@@ -499,7 +499,11 @@ def persist_verification(repo,task,output,session_id,*,run_id=None,**_):
         return [task['input_json']['lesson_id']]
     data=task['input_json']
     claim=repo.claim(data['claim_id'])
-    if not claim or claim['unit_id']!=task['unit_id'] or claim['source_sha256']!=data['source_sha256'] or claim['page']!=str(data['pagina']):
+    # Same document; the review covers the Claim's cited pages, and may read
+    # further ones (a re-read of another page, issue 13).
+    covered=set(cited_pages(claim['page'])) if claim else set()
+    if not claim or claim['unit_id']!=task['unit_id'] or claim['source_sha256']!=data['source_sha256'] or not (
+            claim['page']==str(data['pagina']) or (covered and covered<=set(cited_pages(data['pagina'])))):
         raise ValueError('blind_verification_identity_mismatch')
     # Preserve the independent extraction before any comparison. A second AI
     # review judges agreement; Python never compares title values.
@@ -657,7 +661,10 @@ def finalize(repo,task,result):
         add_followup(repo,uid,'arbitro','Comparar as duas leituras da afirmação '+str(cid),
                      {'claim':repo.claim(cid),'blind_extraction':reviews[-1]['verifier_value'],
                       'blind_verification_id':reviews[-1]['id'],'independent_comparison':True},
-                     'comparacao_independente',0.6,ref='compare-claim-'+str(cid),parent=task['id'])
+                     'comparacao_independente',0.6,
+                     # A re-read (review-claim-N-rK) gets its own comparison.
+                     ref='compare-'+task['ref'].removeprefix('review-') if task['ref'].startswith('review-') else 'compare-claim-'+str(cid),
+                     parent=task['id'])
     if task['output_schema']=='comparacao_independente':
         cid=task['input_json']['claim']['id']
         for parent in repo.tarefas(uid,'aguardando_verificacao'):

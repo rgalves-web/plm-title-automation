@@ -93,6 +93,14 @@ def preflight(repo,unit_id):
     return checks
 
 
+def _lot_summary(repo,uid):
+    from src.casefile import autonomy
+    lot=autonomy.overview(repo,uid)
+    if not lot:
+        return None
+    return {k:lot[k] for k in ('lot_id','status','stop_reason','turn_cap','deliverable_artifact_id','exceptions_open','job')}
+
+
 def snapshot(repo):
     if not repo.operations_installed():
         return {'installed':False,'cases':[],'roles':roles(),'services':[],'last_event_id':0}
@@ -110,7 +118,7 @@ def snapshot(repo):
                       'open_research':sum(r['status']=='aberta' for r in repo.pesquisas(uid)),
                       'external_dependencies':sum(j['status']=='blocked' for j in sources),
                       'tasks':summaries,'pid':case['scope'].get('pid',''),
-                      'round':rounds.state(repo,uid)})
+                      'round':rounds.state(repo,uid),'lot':_lot_summary(repo,uid)})
     from src.casefile.spending import state as shared_spending
     return serializable({'installed':True,'cases':cases,'roles':roles(),'services':repo.operation_services(),'shared_spending':shared_spending(repo),
                          'last_event_id':repo.operation_last_event(),'workers':4})
@@ -131,8 +139,11 @@ def detail(repo,unit_id):
         except (ValueError,OSError) as exc:
             knowledge={'release_id':config['release_id'],'error':str(exc)}
     from src.casefile.knowledge_registry import overview as knowledge_versions
-    from src.casefile import rounds
-    return serializable({'case':case,'round':rounds.state(repo,unit_id),'knowledge':knowledge,'knowledge_registry':knowledge_versions(repo),'tasks':repo.tarefas(unit_id),'artifacts':repo.operation_artifacts(unit_id),
+    from src.casefile import rounds, autonomy
+    return serializable({'case':case,'round':rounds.state(repo,unit_id),'lot':autonomy.overview(repo,unit_id),
+                         'exceptions':autonomy.open_exceptions(repo,unit_id),
+                         'presets':{'reject':list(autonomy.REJECT_PRESETS),'blank':list(autonomy.BLANK_PRESETS),'sources':list(autonomy.SOURCES)},
+                         'knowledge':knowledge,'knowledge_registry':knowledge_versions(repo),'tasks':repo.tarefas(unit_id),'artifacts':repo.operation_artifacts(unit_id),
                          'research':repo.pesquisas(unit_id),'source_jobs':repo.operation_sources(unit_id),
                          'followups':repo.operation_followups(unit_id),
                          'uncertain_requests':repo.conn.execute("SELECT q.*,t.title,t.id AS task_id FROM operation_requests q JOIN task_runs r ON r.id=q.run_id JOIN tasks t ON t.id=r.task_id WHERE t.unit_id=%s AND (q.status='unknown' OR (q.status='inflight' AND (r.finished_at IS NOT NULL OR r.lease_until<now()))) ORDER BY q.id",(unit_id,)).fetchall(),

@@ -92,6 +92,24 @@ def apply(repo,case,body,actor):
             repo.operation_event('terminal.retry_reviewed',actor,{'terminal_call_ids':[r['id'] for r in reviewed],'note':body['note']},unit_id=uid,task_id=task['id'])
         repo.transicionar_tarefa(task['id'],(task['status'],),'planejada',actor,body['note'])
         repo.promover_prontas(uid,'process:operacao')
+    elif action=='create_lot':
+        # Issue 13: one declaration; the Coordinator runs each Case from here.
+        from src.casefile import autonomy
+        autonomy.create_lot(repo,actor,body['note'],body['command_id'],body.get('job') or {},
+                            body.get('unit_ids') or [uid],body.get('envelope') or {})
+    elif action=='resolve_exception':
+        from src.casefile import autonomy
+        autonomy.resolve_exception(repo,uid,actor,int(body['exception_id']),str(body['option']),
+                                   body.get('params') or {},body.get('note',''))
+    elif action=='release_case':
+        from src.casefile import autonomy
+        autonomy.release_case(repo,uid,actor,body['note'])
+    elif action=='audit_acceptance':
+        from src.casefile import autonomy
+        autonomy.audit_acceptance(repo,uid,actor,int(body['acceptance_id']),str(body['mark']),body.get('note',''))
+    elif action=='resume_autoaccept':
+        from src.casefile import autonomy
+        autonomy.resume_autoaccept(repo,uid,actor,str(body['claim_type']))
     elif action=='record_open_item':
         # Issue 11: one click turns a Function's observation into an open item.
         from src.casefile.decision_card import record_open_item
