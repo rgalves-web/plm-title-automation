@@ -323,6 +323,15 @@ def entregar(repo: Any, run_id: int, worker: str, saida: Any, *,
 
 # --- aceite ----------------------------------------------------------------------
 
+def _in_open_lot(repo: Any, unit_id: int) -> bool:
+    """Issue 13: inside a Lot only the Coordinator accepts, under its rule
+    and with an acceptance file; a verified result waits for it."""
+    conn = getattr(repo, "conn", None)
+    return conn is not None and conn.execute(
+        "SELECT 1 FROM operation_lot_cases WHERE unit_id=%s AND status<>'released'",
+        (unit_id,)).fetchone() is not None
+
+
 def aceitar_por_verificacao(repo: Any, task_id: int) -> dict[str, Any]:
     """aguardando_verificacao → aceita só se CADA claim vinculado tem, como
     última verificação válida, `concordancia`. Tentativa não é concordância."""
@@ -348,7 +357,7 @@ def aceitar_por_verificacao(repo: Any, task_id: int) -> dict[str, Any]:
         return {"aceita": False, "tarefa": task, "sem_verificacao": pendentes,
                 "nao_concordantes": divergentes}
     para = "aceita" if task["verificacao"] == "obrigatoria" \
-        else "aguardando_operador"
+        and not _in_open_lot(repo, task["unit_id"]) else "aguardando_operador"
     task = repo.transicionar_tarefa(
         task_id, ("aguardando_verificacao",), para, ATOR,
         f"{len(claims)} claims com verificação válida concordante")

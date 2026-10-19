@@ -59,6 +59,10 @@ class Supervisor:
                 return False
             if repo.conn.execute("SELECT 1 FROM operation_resources WHERE resource='dispatch_hold' AND lease_until>now()").fetchone():
                 return False
+            from src.casefile import autonomy
+            for uid in autonomy.parked_lot_cases(repo):
+                # Issue 13: a Lot Case the worker parked goes back to the Coordinator.
+                autonomy.wake(repo,uid)
             for case in repo.operation_dispatch_cases():
                 uid=case['unit_id']
                 repo.operation_allocate(uid)

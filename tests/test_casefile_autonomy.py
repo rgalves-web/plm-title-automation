@@ -370,6 +370,66 @@ def test_a_blocked_task_reaches_the_queue_and_retry_works(operation_case, tmp_pa
     assert autonomy.step(repo, unit["id"], _script(repo, unit, artifact)) == "ran"
 
 
+def test_a_case_the_worker_parks_goes_back_to_the_coordinator(operation_case, tmp_path):
+    from src.casefile import orquestracao
+    from tests.test_casefile_operations import task as ready_task
+    repo, _, _ = operation_case
+    unit, _ = _case(repo, tmp_path, "CASE-P")
+    _lot(repo, [unit])
+    uid = unit["id"]
+
+    def park(task_id):
+        got = orquestracao.pegar(repo, uid, "synthetic", teto=50, max_active_per_unit=1,
+                                 rodada=True)
+        assert got[0]["id"] == task_id
+        repo.fechar_run(got[1]["id"], "synthetic", output_json=None, output_valid=None,
+                        validation_errors=["synthetic"],
+                        stop_reason="terminal_interrupted_no_automatic_retry", para="bloqueada")
+        repo.operation_update(uid, execution_state="waiting")
+
+    coordinator = [t for t in repo.tarefas(uid) if t["role"] == "coordenador"][0]
+    park(coordinator["id"])
+    extra = ready_task(repo, unit)
+    assert autonomy.parked_lot_cases(repo) == [uid]
+    assert autonomy.wake(repo, uid) == "working"
+    assert repo.operation_case(uid)["execution_state"] == "running"
+    assert autonomy.open_lot_case(repo, uid)["status"] == "running"
+    assert [e["task_id"] for e in autonomy.open_exceptions(repo, uid)
+            if e["kind"] == "case_blocked"] == [coordinator["id"]]
+    assert repo.conn.execute(
+        "SELECT count(*) AS n FROM operation_coordinator_decisions WHERE unit_id=%s "
+        "AND kind='resume'", (uid,)).fetchone()["n"] == 1
+    repo.operation_update(uid, execution_state="paused")
+    assert autonomy.parked_lot_cases(repo) == []
+    assert autonomy.wake(repo, uid) == "idle"
+    assert repo.operation_case(uid)["execution_state"] == "paused"
+    repo.operation_update(uid, execution_state="running")
+    park(extra["id"])
+    assert autonomy.wake(repo, uid) == "awaiting_exceptions"
+    lc = autonomy.open_lot_case(repo, uid)
+    assert (lc["status"], lc["stop_reason"]) == ("stopped", "awaiting_exceptions")
+    assert autonomy.wake(repo, uid) == "idle"
+    assert len([e for e in autonomy.open_exceptions(repo, uid)
+                if e["kind"] == "case_blocked"]) == 2
+
+
+def test_in_a_lot_a_verified_result_waits_for_the_coordinator(operation_case, tmp_path):
+    from src.casefile import orquestracao
+    from tests.test_casefile_operations import task as ready_task
+    from tests.test_casefile_orquestracao import _claim
+    repo, _, _ = operation_case
+    unit, _ = _case(repo, tmp_path, "CASE-V")
+    _lot(repo, [unit])
+    exam = ready_task(repo, unit, role="examinador", mode="obrigatoria")
+    repo.transicionar_tarefa(exam["id"], ("pronta",), "aguardando_verificacao",
+                             "process:test", "Synthetic plumbing only.")
+    claim = _claim(repo, unit)
+    repo.vincular_claims(exam["id"], [claim])
+    repo.registrar_verificacao(claim, "q", "concordancia", "b", {}, {}, 0.0)
+    got = orquestracao.aceitar_por_verificacao(repo, exam["id"])
+    assert not got["aceita"] and got["tarefa"]["status"] == "aguardando_operador"
+
+
 def test_an_open_item_blocks_auto_accept_until_dismissed(operation_case, tmp_path):
     repo, _, _ = operation_case
     unit, artifact = _case(repo, tmp_path, "CASE-H")

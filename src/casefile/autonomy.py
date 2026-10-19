@@ -577,7 +577,7 @@ def coordinate(repo: Any, unit_id: int) -> str:
             reason = str((last or {}).get("stop_reason") or "")
             if task["status"] == "bloqueada" and last:
                 if "terminal_subscription_login_required" in reason or \
-                        "terminal_not_installed" in reason:
+                        "terminal_not_installed" in reason or "provider_not_called" in reason:
                     _stop(repo, lc, "envelope_cli", "O terminal oficial pede login ou "
                           "atingiu o limite da assinatura: " + reason, f"envelope:cli:run{last['id']}")
                     return "stopped"
@@ -989,12 +989,55 @@ def overview(repo: Any, unit_id: int) -> dict[str, Any] | None:
                 (unit_id,)).fetchall()}
 
 
+def parked_lot_cases(repo: Any) -> list[int]:
+    return [r["unit_id"] for r in repo.conn.execute(
+        "SELECT lc.unit_id FROM operation_lot_cases lc JOIN operation_cases o "
+        "ON o.unit_id=lc.unit_id WHERE lc.status='running' AND o.execution_state='waiting' "
+        "ORDER BY lc.unit_id").fetchall()]
+
+
+def wake(repo: Any, unit_id: int) -> str:
+    """The worker parks a Case in 'waiting' when a task stops with no
+    automatic retry (a terminal call failed, the Round cap was reached
+    mid-run). In a Lot the Coordinator owns the Case: it puts the block in
+    the exceptions queue and keeps the rest moving within the envelope, or
+    stops the Case with a reason. A Case Renato paused stays paused."""
+    from src.casefile.operations import has_unbounded_usage
+    lc = open_lot_case(repo, unit_id)
+    if not lc or lc["status"] != "running" or \
+            repo.operation_case(unit_id)["execution_state"] != "waiting":
+        return "idle"
+    action = coordinate(repo, unit_id)
+    if action not in ("working", "writer", "qa"):
+        return action
+    with repo.transacao():
+        if repo.operation_case(unit_id, lock=True)["execution_state"] != "waiting":
+            return action
+        lc = open_lot_case(repo, unit_id)
+        if has_unbounded_usage(repo, unit_id):
+            _stop(repo, lc, "awaiting_exceptions", "Um run terminou sem recibo de uso "
+                  "conferido; o caso espera a conferência na fila.", "usage:unbounded",
+                  exception=False)
+            return "stopped"
+        repo.operation_update(unit_id, execution_state="running")
+        blocked = sorted(e["task_id"] for e in open_exceptions(repo, unit_id)
+                         if e.get("kind") == "case_blocked" and e.get("task_id"))
+        _decision(repo, lc["lot_id"], unit_id, "resume",
+                  "Uma tarefa parou sem nova tentativa automática e está na fila de "
+                  "exceções; o restante do caso segue dentro do envelope.",
+                  {"blocked_tasks": blocked})
+    return action
+
+
 def step(repo: Any, unit_id: int, client: Any = None,
          worker_name: str = "process:worker-lot") -> str:
     """The supervisor's unit of work for a Case in a Lot, also used by tests:
     a Coordinator step, then at most one task run when work is runnable."""
     from src.casefile import worker
-    action = coordinate(repo, unit_id)
+    if repo.operation_case(unit_id)["execution_state"] == "waiting":
+        action = wake(repo, unit_id)
+    else:
+        action = coordinate(repo, unit_id)
     if action not in ("working", "writer", "qa"):
         return action
     case = repo.operation_case(unit_id)
