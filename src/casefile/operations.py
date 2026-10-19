@@ -98,7 +98,8 @@ def _lot_summary(repo,uid):
     lot=autonomy.overview(repo,uid)
     if not lot:
         return None
-    return {k:lot[k] for k in ('lot_id','status','stop_reason','turn_cap','deliverable_artifact_id','exceptions_open','job')}
+    return {k:lot[k] for k in ('lot_id','status','stop_reason','turn_cap','deliverable_artifact_id','exceptions_open','job',
+                               'resume_at','turns_by_function','turns_used')}
 
 
 def snapshot(repo):
@@ -173,18 +174,27 @@ def task_detail(repo,task_id):
                                      if c['session_id'] in [r.get('operation_session_id') for r in runs]]})
 
 
-def seed_coordinator(repo,unit_id,budget):
+def seed_coordinator(repo,unit_id,budget,routine=None):
+    # Issue 14: a Lot's Coordinator plans from its Job's routine pack, never the default.
+    from src.casefile import routines
+    chosen=routines.get(routine) if routine else None
+    pack=chosen['pack'] if chosen else PACK
     existing=[t for t in repo.tarefas(unit_id) if t['role']=='coordenador' and t['status'] not in ('recusada','cancelada','aceita')]
+    for stale in [t for t in existing if t['pack']!=pack and t['status'] in ('planejada','pronta')]:
+        repo.transicionar_tarefa(stale['id'],(stale['status'],),'cancelada','process:operacao',
+                                 f"A rotina do job usa o pacote {pack}; este Coordenador usava {stale['pack']}.")
+        existing.remove(stale)
     if existing:
         return existing[0]
     case=repo.operation_case(unit_id)
     orquestracao.registrar_versoes(repo)
     role=next(f for f in agentes.carregar() if f.tipo=='Role' and f.nome=='coordenador')
     task={
-        'ref':'operacao-coordenador-'+str(case['revision']),'role':'coordenador','pack':PACK,
+        'ref':'operacao-coordenador-'+str(case['revision']),'role':'coordenador','pack':pack,
         'title':'Organizar o trabalho restante deste tract','output_schema':role.front['saida_esquema'],
         'acceptance':'Cobrir as pendências atuais; usar apenas escopo, fontes e orçamento aprovados.',
-        'input_json':{'operation':True,'scope':case['scope'],'operation_revision':case['revision']},
+        'input_json':{'operation':True,'scope':case['scope'],'operation_revision':case['revision'],
+                      **({'routine':{k:chosen[k] for k in ('id','pack','label')}} if chosen else {})},
         'budget_usd':min(8.0,float(budget)),'verificacao':'operador','depends_on_refs':[],
         'priority':0,'pendencias':[]}
     created=repo.criar_tarefas(unit_id,[task],'process:operacao')[0]
@@ -193,7 +203,8 @@ def seed_coordinator(repo,unit_id,budget):
 
 
 def validate_scope(scope):
-    if scope.get('work_type')!='surface_title' or not scope.get('through_date'):
+    from src.casefile import routines
+    if scope.get('work_type') not in routines.WORK_TYPES or not scope.get('through_date'):
         raise ValueError('surface_scope_and_through_date_required')
     start=datetime.fromisoformat(scope.get('start_date','1966-01-01'))
     end=datetime.fromisoformat(scope['through_date'])

@@ -18,6 +18,7 @@ Transformar um projeto (escopo, pacote de domínio, censo do acervo, orçamento)
 ## Entrada
 - escopo do projeto e decisões do operador (`operator_decisions`);
 - pacote de domínio ativo (fluxo padrão de gates, fontes, template);
+- rotina do Job, quando o caso roda num lote (`input_json.routine`): planeje pelos gates do pacote dessa rotina, nunca por outra rotina nem pelo pacote padrão;
 - censo do acervo e estado atual das tarefas, claims e custos.
 
 ## Saída (esquema `plano_tarefas`)

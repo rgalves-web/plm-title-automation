@@ -494,7 +494,8 @@ def executar_uma(repo: Any, unit_id: int, worker: str, *, teto: float,
             from src.casefile.training_runtime import prepare
             provenance={'role':task['role'],'role_version':run['role_version'],'pack':task['pack'],
                 'pack_version':run['pack_version'],'lessons':[{'path':p,'sha256':agentes.versao((Path(raiz) if raiz else agentes.RAIZ_PADRAO)/p)} for p in ctx['licoes']]}
-            training_context, training_tools, training_dispatch = prepare(repo,unit,session_id,'tarefa:'+task['role'],provenance=provenance)
+            training_context, training_tools, training_dispatch = prepare(repo,unit,session_id,'tarefa:'+task['role'],provenance=provenance,
+                                                                          relevance=task['title']+' '+task['acceptance']+' '+json.dumps(task.get('input_json') or {},ensure_ascii=False)[:4000])
             ctx['sistema'] += training_context
             tools += training_tools
             dispatch.update(training_dispatch)

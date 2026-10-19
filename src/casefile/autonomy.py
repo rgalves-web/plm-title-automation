@@ -114,13 +114,16 @@ def _envelope(raw: dict[str, Any], case: dict[str, Any], spent: float) -> dict[s
 
 
 def _job(raw: dict[str, Any]) -> dict[str, Any]:
+    from src.casefile import routines
     plm_job = str(raw.get("plm_job_id") or "").strip()
     if not plm_job:
         raise ValueError("plm_job_id_required")
+    # Issue 14: the Job names its routine; there is no default.
+    routine = routines.get(raw.get("routine"))
     extra = raw.get("extra_requests") or []
     if isinstance(extra, str):
         extra = [line.strip() for line in extra.splitlines() if line.strip()]
-    return {"plm_job_id": plm_job,
+    return {"plm_job_id": plm_job, "routine": routine["id"],
             "deliverable_type": raw.get("deliverable_type") or "surface_runsheet",
             "template_artifact_id": raw.get("template_artifact_id"),
             "package_format": raw.get("package_format") or "plm_standard",
@@ -140,6 +143,7 @@ def create_lot(repo: Any, actor: str, note: str, command_id: str,
                envelope: dict[str, Any]) -> dict[str, Any]:
     """Declare a Lot once. Each Case is approved for the whole envelope, its
     Round is opened by the Coordinator, and the Case starts running."""
+    from src.casefile import routines
     from src.casefile.operations import seed_coordinator, validate_scope
     ids = list(dict.fromkeys(int(u) for u in unit_ids))
     if not ids:
@@ -158,6 +162,7 @@ def create_lot(repo: Any, actor: str, note: str, command_id: str,
             raise ValueError("pause_and_wait_before_lot")
         cases[uid] = case
     first = cases[ids[0]]
+    routine = routines.get(job["routine"])
     stored = _envelope(envelope, first, repo.custo_acumulado(ids[0]))
     lot = repo.conn.execute(
         "INSERT INTO operation_lots(job,envelope,created_by,note,command_id) "
@@ -168,6 +173,7 @@ def create_lot(repo: Any, actor: str, note: str, command_id: str,
         env = _envelope(envelope, case, repo.custo_acumulado(uid))
         scope = validate_scope({**case["scope"], "sources": env["sources"],
                                 "through_date": env["through_date"],
+                                "work_type": routine["work_type"],
                                 "status": "approved"})
         approval = {"actor": actor, "note": note, "lot_id": lot["id"],
                     "command_id": command_id, "scope_sha256": digest(scope),
@@ -194,7 +200,8 @@ def create_lot(repo: Any, actor: str, note: str, command_id: str,
                   {"round_id": opened["id"], "envelope": env})
         advance(repo, lot["id"], uid, "PLANEJANDO",
                 "O Coordenador recebe o caso inteiro dentro do envelope do lote.")
-        seed_coordinator(repo, uid, env["cost_cap_usd_per_case"] - repo.custo_acumulado(uid))
+        seed_coordinator(repo, uid, env["cost_cap_usd_per_case"] - repo.custo_acumulado(uid),
+                         routine=routine["id"])
         repo.operation_event("lot.case_started", actor,
                              {"lot_id": lot["id"], "job": job["plm_job_id"]}, unit_id=uid)
     return lot
@@ -202,9 +209,31 @@ def create_lot(repo: Any, actor: str, note: str, command_id: str,
 
 # --- coordinator files ------------------------------------------------------------
 
+TURN_RECORDS = ("stop", "wait_limit", "deliverable_ready")
+
+
+def turns_by_function(repo: Any, unit_id: int, lot_id: int | None = None) -> dict[str, int]:
+    """Issue 14: launched terminal calls (turns) per Function in the Case's
+    Lot Rounds, i.e. the Rounds approved since the Lot was declared."""
+    lot = lot_id or (open_lot_case(repo, unit_id) or {}).get("lot_id")
+    if not lot:
+        return {}
+    rows = repo.conn.execute(
+        "SELECT t.role, count(*) AS n FROM operation_terminal_calls c "
+        "JOIN task_runs r ON r.id=c.run_id JOIN tasks t ON t.id=r.task_id "
+        "JOIN operation_rounds o ON o.id=c.round_id JOIN operation_lots l ON l.id=%s "
+        "WHERE t.unit_id=%s AND c.launched_at IS NOT NULL AND o.approved_at >= l.created_at "
+        "GROUP BY t.role ORDER BY n DESC, t.role", (lot, unit_id)).fetchall()
+    return {r["role"]: r["n"] for r in rows}
+
+
 def _decision(repo: Any, lot_id: int | None, unit_id: int, kind: str,
               reason: str, detail: dict[str, Any] | None = None) -> str:
-    """Every Coordinator decision is a write-once Case file with its reason."""
+    """Every Coordinator decision is a write-once Case file with its reason.
+    The decisions that close a stretch of work also record the turns each
+    Function used (issue 14)."""
+    if kind in TURN_RECORDS:
+        detail = {**(detail or {}), "turns_by_function": turns_by_function(repo, unit_id, lot_id)}
     document = {"schema": 1, "kind": "coordinator_decision", "decision": kind,
                 "decided_by": COORDINATOR, "lot_id": lot_id, "unit_id": unit_id,
                 "reason": reason, "detail": detail or {}}
@@ -242,9 +271,31 @@ def advance(repo: Any, lot_id: int | None, unit_id: int, target: str,
 
 def _exception(repo: Any, lot_id: int | None, unit_id: int, task_id: int | None,
                kind: str, key: str, question: str,
-               detail: dict[str, Any] | None = None) -> int | None:
+               detail: dict[str, Any] | None = None, adopt: tuple[int, Any] | None = None
+               ) -> int | None:
     """Open an entry in the exceptions queue once per key; returns its id
-    when it is new (and records the Coordinator's decision to send it)."""
+    when it is new (and records the Coordinator's decision to send it).
+    Issue 14: `adopt` = (task id, run start) takes over the entry the worker
+    opened for that same failure, so one failure is one queue entry."""
+    if repo.conn.execute("SELECT 1 FROM escalations WHERE unit_id=%s AND exception_key=%s",
+                         (unit_id, key)).fetchone():
+        return None
+    worker_entry = repo.conn.execute(
+        "SELECT id FROM escalations WHERE unit_id=%s AND task_id=%s AND respondido_em IS NULL "
+        "AND exception_key IS NULL AND kind='escalation' AND created_at >= %s "
+        "ORDER BY id DESC LIMIT 1", (unit_id, adopt[0], adopt[1])).fetchone() if adopt else None
+    if worker_entry:
+        row = repo.conn.execute(
+            "UPDATE escalations SET motivo=%s,pergunta=%s,opcoes=%s,kind=%s,detail=%s,"
+            "lot_id=%s,exception_key=%s WHERE id=%s RETURNING id",
+            (KINDS[kind], question, json.dumps(OPTIONS[kind]), kind,
+             json.dumps({**(detail or {}), "adopted_worker_entry": True},
+                        ensure_ascii=False, default=str), lot_id, key,
+             worker_entry["id"])).fetchone()
+        _decision(repo, lot_id, unit_id, "exception", f"{KINDS[kind]}: {question}",
+                  {"exception_id": row["id"], "kind": kind, "task_id": task_id,
+                   "adopted_worker_entry": True})
+        return row["id"]
     row = repo.conn.execute(
         "INSERT INTO escalations(unit_id,task_id,motivo,pergunta,opcoes,kind,detail,"
         "lot_id,exception_key) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
@@ -461,13 +512,13 @@ def _accept(repo: Any, lot: dict[str, Any], task: dict[str, Any],
 # --- the Coordinator's step ------------------------------------------------------------
 
 def _stop(repo: Any, lc: dict[str, Any], reason: str, question: str,
-          key: str, exception: bool = True) -> None:
+          key: str, exception: bool = True, adopt: tuple[int, Any] | None = None) -> None:
     repo.conn.execute(
-        "UPDATE operation_lot_cases SET status='stopped',stop_reason=%s,updated_at=now() "
-        "WHERE lot_id=%s AND unit_id=%s", (reason, lc["lot_id"], lc["unit_id"]))
+        "UPDATE operation_lot_cases SET status='stopped',stop_reason=%s,resume_at=NULL,"
+        "updated_at=now() WHERE lot_id=%s AND unit_id=%s", (reason, lc["lot_id"], lc["unit_id"]))
     repo.operation_update(lc["unit_id"], execution_state="waiting")
     new = _exception(repo, lc["lot_id"], lc["unit_id"], None, "envelope_exhausted",
-                     key, question, {"reason": reason}) if exception else None
+                     key, question, {"reason": reason}, adopt=adopt) if exception else None
     if new or not exception:
         _decision(repo, lc["lot_id"], lc["unit_id"], "stop", question, {"reason": reason})
 
@@ -535,9 +586,10 @@ def _create_phase_task(repo: Any, lot: dict[str, Any], kind: str) -> dict[str, A
         row = {"role": "qa_pacote", "output_schema": "relatorio_qa",
                "title": f"Conferir o entregável do lote {lot_id}",
                "acceptance": "Relatório de QA da versão exata; observação, não aprovação."}
+    from src.casefile import routines
     orquestracao.registrar_versoes(repo)
     created = repo.criar_tarefas(uid, [{
-        **row, "ref": f"lote-{lot_id}-{kind}-{n}", "pack": "title-texas-surface",
+        **row, "ref": f"lote-{lot_id}-{kind}-{n}", "pack": routines.get(job["routine"])["pack"],
         "input_json": {"operation": True, "lot_id": lot_id, "job": job},
         "depends_on_refs": [], "budget_usd": 1.0, "priority": 0,
         "verificacao": "operador"}], COORDINATOR)[0]
@@ -558,6 +610,92 @@ def _writer_prerequisites(repo: Any, unit_id: int) -> list[str]:
     return missing
 
 
+ATTEMPTS = 3
+
+
+def _call_failure(repo: Any, run: dict[str, Any]) -> dict[str, Any] | None:
+    return repo.conn.execute(
+        "SELECT * FROM operation_terminal_calls WHERE run_id=%s AND failure_class IS NOT NULL "
+        "ORDER BY ordinal DESC, id DESC LIMIT 1", (run["id"],)).fetchone()
+
+
+def _settle(repo: Any, task: dict[str, Any], since: Any, answer: str) -> None:
+    """Close the worker's entry for a failure the Coordinator resolves by
+    itself (a limit wait, an automatic retry), with the reason."""
+    repo.conn.execute(
+        "UPDATE escalations SET resposta=%s,respondido_por=%s,respondido_em=now(),resolution=%s "
+        "WHERE unit_id=%s AND task_id=%s AND respondido_em IS NULL AND exception_key IS NULL "
+        "AND kind='escalation' AND created_at >= %s",
+        (answer, COORDINATOR, json.dumps({"option": "auto", "rule": RULE}),
+         task["unit_id"], task["id"], since))
+
+
+def _auto_retry(repo: Any, task: dict[str, Any], note: str) -> None:
+    """The Coordinator's retry: the failed call is marked reviewed (its text
+    and class are on file), and the task goes back to planned."""
+    repo.conn.execute(
+        "UPDATE operation_terminal_calls c SET receipt=c.receipt || %s::jsonb FROM task_runs r "
+        "WHERE c.run_id=r.id AND r.task_id=%s AND r.finished_at IS NOT NULL "
+        "AND c.status IN ('running','interrupted') AND NOT (c.receipt ? 'reviewed_by')",
+        (json.dumps({"reviewed_by": COORDINATOR, "review_note": note}), task["id"]))
+    repo.transicionar_tarefa(task["id"], ("bloqueada",), "planejada", COORDINATOR, note)
+    repo.promover_prontas(task["unit_id"], COORDINATOR)
+
+
+def _blocked(repo: Any, lc: dict[str, Any], task: dict[str, Any], last: dict[str, Any],
+             reason: str) -> str:
+    """Issue 14: a blocked task, by the class of its last failed call."""
+    from src.casefile import cli_failures
+    uid = task["unit_id"]
+    failure = _call_failure(repo, last)
+    kind = failure["failure_class"] if failure else (
+        "login" if cli_failures.classify(reason) == "login" else None)
+    text = (failure or {}).get("failure_text") or reason
+    adopt = (task["id"], last["started_at"])
+    if kind == "login":
+        _stop(repo, lc, "envelope_cli", "O terminal oficial pede login (ou não está "
+              f"instalado): {text[:300]}", f"envelope:cli:run{last['id']}", adopt=adopt)
+        return "stopped"
+    if kind == "limit":
+        until = cli_failures.resume_at(text)
+        _auto_retry(repo, task, "O limite da assinatura foi atingido; a tarefa volta quando ele passar.")
+        _settle(repo, task, last["started_at"], "O Coordenador aguarda o limite da assinatura "
+                f"e retoma sozinho em {until.isoformat()}.")
+        repo.conn.execute(
+            "UPDATE operation_lot_cases SET stop_reason='waiting_limit',resume_at=%s,updated_at=now() "
+            "WHERE lot_id=%s AND unit_id=%s", (until, lc["lot_id"], uid))
+        repo.operation_update(uid, execution_state="waiting")
+        _decision(repo, lc["lot_id"], uid, "wait_limit",
+                  f"Tarefa {task['id']} atingiu o limite da assinatura; o caso espera até "
+                  f"{until.isoformat()} e retoma sozinho, sem contar a tentativa.",
+                  {"task_id": task["id"], "run_id": last["id"], "resume_at": until.isoformat(),
+                   "failure_file": (failure or {}).get("failure_relative")})
+        return "waiting_limit"
+    if kind == "invalid_output" and repo.task_attempts(task["id"]) < ATTEMPTS:
+        _auto_retry(repo, task, "Saída fora do contrato; nova tentativa automática.")
+        _settle(repo, task, last["started_at"], "O Coordenador repetiu a tarefa: a saída do "
+                "terminal veio fora do contrato.")
+        _decision(repo, lc["lot_id"], uid, "retry",
+                  f"Tarefa {task['id']}: a saída do terminal veio fora do contrato; nova "
+                  f"tentativa ({repo.task_attempts(task['id'])} de {ATTEMPTS} usadas).",
+                  {"task_id": task["id"], "run_id": last["id"],
+                   "failure_file": (failure or {}).get("failure_relative")})
+        return "retried"
+    labels = {"crash": "o terminal falhou", "invalid_output": "a saída veio fora do contrato "
+              "em todas as tentativas"}
+    question = (f"Tarefa {task['id']} ({task['title']}) parou: "
+                f"{labels.get(kind, reason or 'sem motivo registrado')}."
+                + (f" Texto do terminal: {text[:400]}" if failure else ""))
+    _exception(repo, lc["lot_id"], uid, task["id"], "case_blocked",
+               f"task:{task['id']}:blocked:run{last['id']}", question,
+               {"reason": reason, "run_id": last["id"], "failure_class": kind,
+                "failure_file": (failure or {}).get("failure_relative")}, adopt=adopt)
+    if kind == "crash":
+        _stop(repo, lc, "cli_crash", question, f"crash:run{last['id']}", exception=False)
+        return "stopped"
+    return "queued"
+
+
 def coordinate(repo: Any, unit_id: int) -> str:
     """One Coordinator step for a Case in an open Lot. Returns what it did:
     idle (not in a running Lot), stopped, working (tasks to run), writer,
@@ -576,21 +714,16 @@ def coordinate(repo: Any, unit_id: int) -> str:
             last = runs[-1] if runs else None
             reason = str((last or {}).get("stop_reason") or "")
             if task["status"] == "bloqueada" and last:
-                if "terminal_subscription_login_required" in reason or \
-                        "terminal_not_installed" in reason or "provider_not_called" in reason:
-                    _stop(repo, lc, "envelope_cli", "O terminal oficial pede login ou "
-                          "atingiu o limite da assinatura: " + reason, f"envelope:cli:run{last['id']}")
-                    return "stopped"
-                _exception(repo, lc["lot_id"], unit_id, task["id"], "case_blocked",
-                           f"task:{task['id']}:blocked:run{last['id']}",
-                           f"Tarefa {task['id']} ({task['title']}) parou: {reason or 'sem motivo registrado'}.",
-                           {"reason": reason, "run_id": last["id"]})
+                acted = _blocked(repo, lc, task, last, reason)
+                if acted in ("stopped", "waiting_limit"):
+                    return acted
             elif task["status"] == "recusada" and last and \
                     task["created_at"] >= lc["lot_created_at"]:
                 _exception(repo, lc["lot_id"], unit_id, task["id"], "case_blocked",
                            f"task:{task['id']}:refused:run{last['id']}",
                            f"Tarefa {task['id']} ({task['title']}) foi recusada após as "
-                           f"tentativas: {reason}.", {"reason": reason, "run_id": last["id"]})
+                           f"tentativas: {reason}.", {"reason": reason, "run_id": last["id"]},
+                           adopt=(task["id"], last["started_at"]))
         in_flight = _claims_in_flight(repo, unit_id)
         for task in repo.tarefas(unit_id, "aguardando_operador"):
             pending = repo.conn.execute(
@@ -976,7 +1109,10 @@ def overview(repo: Any, unit_id: int) -> dict[str, Any] | None:
         return None
     acceptances = repo.conn.execute(
         "SELECT * FROM operation_acceptances WHERE unit_id=%s ORDER BY id", (unit_id,)).fetchall()
+    turns = turns_by_function(repo, unit_id, lc["lot_id"])
     return {"lot_id": lc["lot_id"], "status": lc["status"], "stop_reason": lc["stop_reason"],
+            "resume_at": lc.get("resume_at"), "turns_by_function": turns,
+            "turns_used": sum(turns.values()),
             "turn_cap": lc["turn_cap"], "job": lc["job"], "envelope": lc["envelope"],
             "deliverable_artifact_id": lc["deliverable_artifact_id"],
             "exceptions_open": len(open_exceptions(repo, unit_id)),
@@ -1007,6 +1143,13 @@ def wake(repo: Any, unit_id: int) -> str:
     if not lc or lc["status"] != "running" or \
             repo.operation_case(unit_id)["execution_state"] != "waiting":
         return "idle"
+    after_limit = bool(lc.get("resume_at"))
+    if after_limit:
+        if lc["resume_at"] > datetime.now(timezone.utc):
+            return "waiting_limit"
+        repo.conn.execute(
+            "UPDATE operation_lot_cases SET stop_reason='',resume_at=NULL,updated_at=now() "
+            "WHERE lot_id=%s AND unit_id=%s", (lc["lot_id"], unit_id))
     action = coordinate(repo, unit_id)
     if action not in ("working", "writer", "qa"):
         return action
@@ -1023,6 +1166,8 @@ def wake(repo: Any, unit_id: int) -> str:
         blocked = sorted(e["task_id"] for e in open_exceptions(repo, unit_id)
                          if e.get("kind") == "case_blocked" and e.get("task_id"))
         _decision(repo, lc["lot_id"], unit_id, "resume",
+                  "O limite da assinatura passou; o caso retoma dentro do envelope."
+                  if after_limit else
                   "Uma tarefa parou sem nova tentativa automática e está na fila de "
                   "exceções; o restante do caso segue dentro do envelope.",
                   {"blocked_tasks": blocked})

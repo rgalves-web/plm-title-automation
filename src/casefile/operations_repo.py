@@ -104,7 +104,10 @@ class OperationsRepo:
         return self.conn.execute(
             "SELECT count(*) AS n FROM task_runs r WHERE r.task_id=%s AND ("
             "EXISTS (SELECT 1 FROM operation_terminal_calls c WHERE c.run_id=r.id "
-            "AND c.launched_at IS NOT NULL) OR "
+            "AND c.launched_at IS NOT NULL "
+            # Issue 14: a subscription limit or a missing login is not the task's attempt.
+            "AND c.failure_class IS DISTINCT FROM 'limit' "
+            "AND c.failure_class IS DISTINCT FROM 'login') OR "
             "EXISTS (SELECT 1 FROM operation_requests q WHERE q.run_id=r.id))",
             (task_id,)).fetchone()["n"]
 
@@ -212,6 +215,12 @@ class OperationsRepo:
     def operation_followups(self,uid):
         return self.conn.execute('SELECT * FROM operation_followups WHERE unit_id=%s AND task_id IS NULL ORDER BY id',(uid,)).fetchall()
 
+    def operation_pack(self,uid):
+        """Issue 14: a Case in an open Lot plans with its Job's routine pack."""
+        from src.casefile import routines
+        row=self.conn.execute("SELECT l.job->>'routine' AS routine FROM operation_lot_cases c JOIN operation_lots l ON l.id=c.lot_id WHERE c.unit_id=%s AND c.status<>'released'",(uid,)).fetchone()
+        return routines.get(row['routine'])['pack'] if row and row['routine'] else 'title-texas-surface'
+
     def operation_allocate(self,uid):
         with self.conn.transaction():
             case=self.operation_case(uid,lock=True)
@@ -223,7 +232,7 @@ class OperationsRepo:
                     break
                 old=self.tarefa_por_ref(uid,item['ref'])
                 if old is None:
-                    old=self.criar_tarefas(uid,[{'ref':item['ref'],'role':item['role'],'pack':'title-texas-surface',
+                    old=self.criar_tarefas(uid,[{'ref':item['ref'],'role':item['role'],'pack':self.operation_pack(uid),
                         'title':item['title'],'input_json':item['input_json'],'output_schema':item['output_schema'],
                         'acceptance':'Saída rastreável; julgamento pela função e revisão independente.',
                         'depends_on_refs':[],'budget_usd':float(item['budget_usd']),'priority':-1,

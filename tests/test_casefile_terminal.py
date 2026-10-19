@@ -123,6 +123,28 @@ def test_terminal_failure_blocks_without_automatic_retry(operation_case):
     assert repo.conn.execute('SELECT status FROM operation_terminal_calls').fetchone()['status']=='interrupted'
 
 
+def test_a_failed_call_keeps_its_cli_text_as_a_case_file_with_its_class(operation_case):
+    from src.casefile import case_file_store
+    repo,unit,scope=operation_case
+    approve(repo,unit,scope)
+    repo.operation_update(unit['id'],profile={**repo.operation_case(unit['id'])['profile'],'execution_backend':'terminal'})
+    task(repo,unit)
+    text='{"type": "turn.failed", "error": {"message": "You have hit your usage limit (synthetic)"}}'
+    class Limited:
+        messages=None
+        def __init__(self):self.messages=self
+        def create(self,**kwargs):raise terminal.TerminalError('terminal_failed_requires_review:B',text)
+    result=worker.executar_uma(repo,unit['id'],'terminal-fixture',teto=50,operation=True,client=Limited())
+    assert result['tarefa']['status']=='bloqueada'
+    call=repo.conn.execute('SELECT * FROM operation_terminal_calls').fetchone()
+    assert (call['status'],call['failure_class'],call['failure_text'])==('interrupted','limit',text)
+    saved=json.loads(case_file_store.read_bytes(unit['id'],call['failure_relative']))
+    assert saved['kind']=='function_call_failure' and saved['class']=='limit' and saved['text']==text
+    assert call['failure_relative'].endswith(f"failure_run{result['run_id']}_call01.json")
+    assert repo.run(result['run_id'])['stop_reason']=='terminal_interrupted_no_automatic_retry:limit'
+    assert repo.task_attempts(result['tarefa']['id'])==0
+
+
 @pytest.mark.parametrize('family',['A','B'])
 def test_launch_contract_retains_subscription_login_and_no_native_tools(monkeypatch,tmp_path,family):
     monkeypatch.setenv('PLM_OPERATION_ROOT',str(tmp_path))

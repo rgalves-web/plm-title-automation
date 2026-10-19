@@ -162,10 +162,14 @@ alternativo por `--store`; a ativação conserva seu caminho.
 `sessao.rodar` prepara o contexto nos caminhos de planejamento/exame. A
 publicação, escopo, aprovação, versões elegíveis e critérios esperados ficam
 em `knowledge_contexts`. `knowledge_events` guarda ofertas, consultas,
-aplicações, revisões, leituras OKF e novas propostas. O contexto inicial oferece
-até quatro fichas, e consultas até oito, com limite de 24 mil caracteres por
-oferta; omissões por limite são explícitas. Isso é orçamento de contexto, não
-limiar de validade de title.
+aplicações, revisões, leituras OKF e novas propostas. Desde a issue 14
+(19/10/2026), o primeiro turno de cada função com escopo de training lista
+todas as fichas aplicáveis ao escopo e à etapa (id, versão, início do literal)
+e traz o texto integral das mais relevantes para a tarefa até 24 mil
+caracteres. Toda ficha listada conta como oferecida. Consultas trazem até oito,
+com o mesmo limite, e as omissões por limite são explícitas. Isso é orçamento de
+contexto, não limiar de validade de title. O verificador cego (família B)
+continua sem training, por decisão de Renato em 19/10/2026.
 
 - `consultar_training(assunto)` consulta a publicação fixada e registra o retorno.
 - `aplicar_training` exige versão realmente oferecida, razão, conflitos, lacuna

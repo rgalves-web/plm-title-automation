@@ -272,13 +272,16 @@ class TerminalAdapter:
         for event in events:
             if self.family == 'A' and event.get('type') == 'result':
                 if event.get('is_error') or event.get('subtype') != 'success':
-                    raise TerminalError('terminal_failed_requires_review:A')
+                    raise TerminalError('terminal_failed_requires_review:A', json.dumps(
+                        {k: event.get(k) for k in ('subtype', 'is_error', 'result', 'error')},
+                        ensure_ascii=False, default=str))
                 result = event.get('structured_output')
                 receipt = event
                 usage = event.get('usage')
             elif self.family == 'B':
                 if event.get('type') in ('turn.failed', 'error'):
-                    raise TerminalError('terminal_failed_requires_review:B')
+                    raise TerminalError('terminal_failed_requires_review:B',
+                                        json.dumps(event, ensure_ascii=False, default=str))
                 if event.get('type') == 'item.completed':
                     item = event.get('item', {})
                     if item.get('type') in ('command_execution', 'file_change', 'mcp_tool_call', 'web_search'):

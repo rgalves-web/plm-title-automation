@@ -30,7 +30,11 @@ TOOLS = [
             ['rule_id', 'version', 'estado', 'claim_ids', 'razao', 'responsavel'])]
 
 
-def prepare(repo, unit, sid, command, store=None, provenance=None):
+def _terms(text):
+    return set(re.findall(r'\w+', str(text).casefold()))
+
+
+def prepare(repo, unit, sid, command, store=None, provenance=None, relevance=''):
     uid = unit['id']
     # Only an answered, explicit operator decision enables a publication.
     decisions = [d for d in repo.decisoes_da_unit(uid)
@@ -120,16 +124,37 @@ def prepare(repo, unit, sid, command, store=None, provenance=None):
                               claim_ids=claim_ids, razao=razao, responsavel=responsavel))
         return {'registered': True, 'operator_approval': False}
 
-    initial = offer([c for c in cards if c['nature'] != 'review_criterion'][:4])
+    # Issue 14: every card in the Case's scope is offered in the first turn:
+    # all of them listed (id, version, opening of the literal), and the full
+    # text of as many as fit the context budget, most relevant to the task
+    # first. Any listed card can be consulted, applied or reviewed.
+    wanted = _terms(relevance)
+    ordered = sorted(cards, key=lambda c: (-len(wanted & _terms(
+        c['rule_id'] + ' ' + c['literal'] + ' ' + c['interpretation'])), c['rule_id']))
+    initial, size = [], 0
+    for c in ordered:
+        length = len(json.dumps(c, ensure_ascii=False))
+        if size + length <= 24000:
+            size += length
+            initial.append(c)
+    for c in ordered:
+        offered.add((c['rule_id'], c['version']))
+    index = [{'rule_id': c['rule_id'], 'version': c['version'], 'nature': c['nature'],
+              'literal': c['literal'][:160]} for c in ordered]
+    event('offered', {'versions': [{'rule_id': c['rule_id'], 'version': c['version']} for c in ordered],
+                      'full_text': [c['rule_id'] for c in initial],
+                      'listed_only': len(ordered) - len(initial), 'omitted_by_context_budget': 0})
     context = '\n\nTRAINING SUITE — somente metodologia, nunca prova da unit. '
-    context += 'Consulte por assunto; declare uso e conflitos com aplicar_training. '
+    context += 'Todas as fichas do escopo estao listadas em "index"; as de "offered" vem com '
+    context += 'texto integral. Consulte as demais por assunto; declare uso e conflitos com aplicar_training. '
     context += 'Revise TODOS os criterios exigidos, inclusive insuficientes e nao aplicaveis. '
     context += 'Exemplos/quizzes nao integram este contexto. Condicoes exigem julgamento.\n'
     context += 'O status candidate nos bytes da ficha e historico; o aceite esta na publicacao fixada.\n'
     context += json.dumps({'status': manifest['status'], 'release_id': release,
                            'publication_approved': approval is not None,
                            'release_changed': manifest['release_changed'],
-                           'scope': scope, 'criteria': criteria, 'offered': initial}, ensure_ascii=False)
+                           'scope': scope, 'criteria': criteria, 'index': index,
+                           'offered': initial}, ensure_ascii=False)
     return context, TOOLS, {'consultar_training': consult, 'aplicar_training': apply,
                            'revisar_training': review}
 

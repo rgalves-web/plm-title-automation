@@ -110,6 +110,32 @@ def test_offered_consulted_applied_and_version_pinning(tmp_path):
     assert current['cards'][0]['version'] == c['version']
 
 
+def test_every_card_in_scope_is_offered_in_the_first_turn(tmp_path):
+    store = training.Store(tmp_path / 'store')
+    made = []
+    for n in range(12):
+        c = card(tmp_path, rule_id=f'rule-{n:02d}'); c['interpretation'] = 'x ' * 2000
+        made.append(store.put(c))
+    release = store.publish([{'rule_id': c['rule_id'], 'version': c['version']} for c in made],
+                            reviewer='synthetic reviewer', reason='fixture only', reviewed_at='2026-09-11')
+    repo = RepoFake(); unit = unit_de_teste(repo, tmp_path / 'unit')
+    scope = {k: v[0] for k, v in made[0]['scope'].items()}
+    repo.decisions.append(dict(id=1, unit_id=unit['id'], kind='training_scope', decided_at='2026-09-11',
+                               answer=json.dumps({'release_id': release, 'scope': scope})))
+    sid = repo.abrir_sessao(unit['id'], 'exame.vs3', 'fixture')
+    text, _, dispatch = training_runtime.prepare(repo, unit, sid, 'exame.vs3', store,
+                                                 relevance='rule-07 memorandum')
+    payload = json.loads(text.rsplit('\n', 1)[1])
+    assert sorted(i['rule_id'] for i in payload['index']) == sorted(c['rule_id'] for c in made)
+    full = [c['rule_id'] for c in payload['offered']]
+    assert full[0] == 'rule-07' and 0 < len(full) < 12
+    assert len(json.dumps(payload['offered'], ensure_ascii=False)) <= 24000 + 2 * len(full)
+    event = [e for e in repo.knowledge_audit(unit['id'])['events'] if e['kind'] == 'offered'][0]
+    assert len(event['detail']['versions']) == 12 and event['detail']['listed_only'] == 12 - len(full)
+    listed = next(c for c in made if c['rule_id'] not in full)
+    dispatch['aplicar_training'](listed['rule_id'], listed['version'], 'reason', [], '', 'reviewer')
+
+
 def test_criteria_population_never_disappears(tmp_path):
     store, c, _, repo, unit, sid = setup(tmp_path, 'review_criterion')
     _, _, dispatch = training_runtime.prepare(repo, unit, sid, 'exame.vs3', store)

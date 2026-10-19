@@ -137,10 +137,10 @@ def _script(repo, unit, artifact, verdict="concordancia"):
     })
 
 
-def _lot(repo, units, turns=40, **envelope):
+def _lot(repo, units, turns=40, routine="cibola_surface", **envelope):
     first = units[0]
     operations.command(repo, request(
-        repo, first, "create_lot", job={"plm_job_id": "SYNTH-JOB-1"},
+        repo, first, "create_lot", job={"plm_job_id": "SYNTH-JOB-1", "routine": routine},
         unit_ids=[u["id"] for u in units],
         envelope={"sources": ["local"], "turn_cap_per_case": turns, **envelope}))
     return repo.conn.execute("SELECT * FROM operation_lots ORDER BY id DESC").fetchone()
@@ -216,6 +216,15 @@ def test_a_two_case_lot_runs_to_release_with_no_operator_action_but_release(
         for kind in ("open_round", "advance_stage", "writer_ready", "qa_ready",
                      "deliverable_ready"):
             assert kind in kinds
+        ready = repo.conn.execute(
+            "SELECT relative FROM operation_coordinator_decisions WHERE unit_id=%s "
+            "AND kind='deliverable_ready'", (unit["id"],)).fetchone()
+        turns = json.loads(case_file_store.read_bytes(unit["id"], ready["relative"])
+                           )["detail"]["turns_by_function"]
+        assert turns == autonomy.turns_by_function(repo, unit["id"])
+        assert set(turns) <= {"coordenador", "examinador", "verificador", "arbitro",
+                              "redator", "qa_pacote"} and turns["examinador"] >= 1
+        assert sum(turns.values()) == autonomy.overview(repo, unit["id"])["turns_used"]
         for d in repo.conn.execute("SELECT relative FROM operation_coordinator_decisions "
                                    "WHERE unit_id=%s", (unit["id"],)):
             assert json.loads(case_file_store.read_bytes(unit["id"], d["relative"]))["reason"]
@@ -430,6 +439,87 @@ def test_in_a_lot_a_verified_result_waits_for_the_coordinator(operation_case, tm
     repo.registrar_verificacao(claim, "q", "concordancia", "b", {}, {}, 0.0)
     got = orquestracao.aceitar_por_verificacao(repo, exam["id"])
     assert not got["aceita"] and got["tarefa"]["status"] == "aguardando_operador"
+
+
+class FailingCall:
+    """A terminal whose call fails with the given reason and CLI text."""
+
+    def __init__(self, reason, text=""):
+        self.reason, self.text, self.messages = reason, text, self
+
+    def create(self, **kwargs):
+        from src.infra.terminal import TerminalError
+        raise TerminalError(self.reason, self.text)
+
+
+@pytest.mark.parametrize("reason,text,expected", [
+    ("terminal_failed_requires_review:A", '{"result": "Claude AI usage limit reached (synthetic)"}',
+     "limit"),
+    ("terminal_failed_requires_review:A", "synthetic crash: exit status 3", "crash"),
+    ("terminal_output_invalid", "", "invalid_output"),
+    ("terminal_subscription_login_required:A", "", "login"),
+])
+def test_the_coordinator_acts_on_the_failure_class_with_one_queue_entry(
+        operation_case, tmp_path, reason, text, expected):
+    repo, _, _ = operation_case
+    unit, _ = _case(repo, tmp_path, "CASE-T")
+    _lot(repo, [unit])
+    uid = unit["id"]
+    [coordinator] = [t for t in repo.tarefas(uid) if t["role"] == "coordenador"]
+    assert autonomy.step(repo, uid, FailingCall(reason, text)) == "ran"
+    assert repo.tarefa(coordinator["id"])["status"] == "bloqueada"
+    assert repo.operation_case(uid)["execution_state"] == "waiting"
+    [call] = repo.conn.execute("SELECT * FROM operation_terminal_calls").fetchall()
+    assert call["failure_class"] == expected and call["failure_relative"]
+    action = autonomy.wake(repo, uid)
+    lc = autonomy.open_lot_case(repo, uid)
+    entries = [e for e in autonomy.open_exceptions(repo, uid)
+               if e["task_id"] == coordinator["id"] or e["kind"] == "envelope_exhausted"]
+    if expected == "limit":
+        assert action == "waiting_limit"
+        assert (lc["status"], lc["stop_reason"]) == ("running", "waiting_limit")
+        assert lc["resume_at"] and entries == [] and repo.task_attempts(coordinator["id"]) == 0
+        assert repo.tarefa(coordinator["id"])["status"] == "pronta"
+        assert autonomy.wake(repo, uid) == "waiting_limit"
+        assert repo.operation_case(uid)["execution_state"] == "waiting"
+        repo.conn.execute("UPDATE operation_lot_cases SET resume_at=now()-interval '1 minute' "
+                          "WHERE unit_id=%s", (uid,))
+        assert autonomy.wake(repo, uid) == "working"
+        assert repo.operation_case(uid)["execution_state"] == "running"
+    elif expected == "invalid_output":
+        assert action == "working" and entries == []
+        assert repo.tarefa(coordinator["id"])["status"] == "pronta"
+        assert repo.task_attempts(coordinator["id"]) == 1
+    else:
+        assert action == "stopped" and len(entries) == 1
+        assert entries[0]["detail"]["adopted_worker_entry"] is True
+        assert lc["stop_reason"] == {"crash": "cli_crash", "login": "envelope_cli"}[expected]
+    assert not [e for e in autonomy.open_exceptions(repo, uid)
+                if e["kind"] == "escalation" and e["task_id"] == coordinator["id"]]
+
+
+def test_the_job_routine_sets_the_pack_and_never_falls_back_to_the_default(
+        operation_case, tmp_path):
+    from src.casefile.operations import seed_coordinator
+    repo, _, _ = operation_case
+    unit, _ = _case(repo, tmp_path, "CASE-R")
+    with pytest.raises(ValueError, match="job_routine_required"):
+        operations.command(repo, request(
+            repo, unit, "create_lot", job={"plm_job_id": "SYNTH-JOB-1"},
+            unit_ids=[unit["id"]], envelope={"sources": ["local"]}))
+    stale = seed_coordinator(repo, unit["id"], 5)
+    assert stale["pack"] == "title-texas-surface"
+    _lot(repo, [unit], routine="emirates_minerals")
+    assert repo.tarefa(stale["id"])["status"] == "cancelada"
+    [live] = [t for t in repo.tarefas(unit["id"])
+              if t["role"] == "coordenador" and t["status"] == "pronta"]
+    assert live["pack"] == "title-texas-oil-gas-dd"
+    assert live["input_json"]["routine"]["id"] == "emirates_minerals"
+    assert repo.operation_case(unit["id"])["scope"]["work_type"] == "oil_gas_dd"
+    assert repo.operation_pack(unit["id"]) == "title-texas-oil-gas-dd"
+    writer = autonomy._create_phase_task(repo, autonomy.open_lot_case(repo, unit["id"]),
+                                         "redator")
+    assert writer["pack"] == "title-texas-oil-gas-dd"
 
 
 def test_an_open_item_blocks_auto_accept_until_dismissed(operation_case, tmp_path):

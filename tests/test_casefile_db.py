@@ -36,9 +36,9 @@ def test_migrar_aplica_reaplicar_e_noop_e_seeds_presentes(pg):
                      "0014_function_output_files", "0015_function_input_files",
                      "0016_case_records", "0017_round_turn_cap",
                      "0018_round_focus", "0019_attempts_count_launched_calls",
-                     "0020_autonomous_operation"]
+                     "0020_autonomous_operation", "0021_autonomy_hardening"]
     assert migrar(pg) == []                      # reaplicar é no-op
-    assert [m["version"] for m in estado_migracoes(pg)] == list(range(1,21))
+    assert [m["version"] for m in estado_migracoes(pg)] == list(range(1,22))
     # 11 do VS1 + `fact` ativado pela 0003 (leituras dirigidas do VS2)
     ativos = pg.execute(
         "SELECT count(*) AS n FROM claim_types WHERE active").fetchone()["n"]
