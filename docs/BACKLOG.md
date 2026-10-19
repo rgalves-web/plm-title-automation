@@ -52,3 +52,5 @@ here.
 - VS3/verificacao: a transcricao independente do Exhibit A (paginas 3-4 da DPU) nao devolve o bloco 0220604/001-018 em nenhuma das duas passadas (sub-serie/ditto na tabela?). 18 leases ficam evidencia_insuficiente — investigar recorte por regiao/zoom da pagina antes da proxima rodada.
 - VS3: sessao interrompida por credito nao registra intervencao de data de corte; a retomada (posicoes/grafo ausentes => re-roda) cobre, mas vale fechar sessao+custo em finally (item ja aberto) e registrar pergunta automatica.
 - Approval dialog ticks all six sources by default, including RRC; default should be local only.
+- Casefile/search_corpus failed with an internal error in several Training Lot 2 Cases (2026-10-19), so presence or absence in the local corpus stayed unproven; find the cause before the next real Lot.
+- Casefile/page reader returns empty text for a page past the end of the document instead of naming the page count; models then reported "pages 2-4 without text" and inferred page counts from OCR errors.

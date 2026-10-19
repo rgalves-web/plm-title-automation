@@ -222,8 +222,9 @@ def test_a_two_case_lot_runs_to_release_with_no_operator_action_but_release(
         turns = json.loads(case_file_store.read_bytes(unit["id"], ready["relative"])
                            )["detail"]["turns_by_function"]
         assert turns == autonomy.turns_by_function(repo, unit["id"])
-        assert set(turns) <= {"coordenador", "examinador", "verificador", "arbitro",
-                              "redator", "qa_pacote"} and turns["examinador"] >= 1
+        assert set(turns) <= {"coordenador", "examinador", "verificador", "comparacao",
+                              "arbitro", "redator", "qa_pacote"} and turns["examinador"] >= 1
+        assert turns["comparacao"] >= 1 and "arbitro" not in turns
         assert sum(turns.values()) == autonomy.overview(repo, unit["id"])["turns_used"]
         for d in repo.conn.execute("SELECT relative FROM operation_coordinator_decisions "
                                    "WHERE unit_id=%s", (unit["id"],)):
@@ -496,6 +497,43 @@ def test_the_coordinator_acts_on_the_failure_class_with_one_queue_entry(
         assert lc["stop_reason"] == {"crash": "cli_crash", "login": "envelope_cli"}[expected]
     assert not [e for e in autonomy.open_exceptions(repo, uid)
                 if e["kind"] == "escalation" and e["task_id"] == coordinator["id"]]
+
+
+def test_the_arbiter_escalation_and_the_divergence_are_one_queue_item_per_claim(
+        operation_case, tmp_path):
+    repo, _, _ = operation_case
+    unit, artifact = _case(repo, tmp_path, "CASE-M")
+    _lot(repo, [unit])
+    page = {"documento": artifact["sha256"], "pagina": 1, "modo": "texto"}
+    script = _script(repo, unit, artifact, verdict="divergencia")
+    script.scripts["arbitro"] = [
+        [[Use("read_page", page)], lambda: _comparison(repo, unit, artifact, "divergencia")],
+        [[Use("ler_pagina", page)], lambda: [Use("entregar_saida", {"saida": {
+            "claim_id": repo.claims_da_unit(unit["id"])[0]["id"],
+            "verificacao_id": repo.verificacoes_do_claim(
+                repo.claims_da_unit(unit["id"])[0]["id"])[-1]["id"],
+            "desfecho": "escalado", "material_conclusao_titulo": True,
+            "justificativa": "Synthetic plumbing only.",
+            "documento": "sha256:" + artifact["sha256"], "pagina": "1",
+            "trecho": "Synthetic fixture only.",
+            "escalonamento": {"motivo": "material_title",
+                              "pergunta": "Synthetic arbiter question.",
+                              "opcoes": ["consultar SME", "fornecer evidência"],
+                              "evidencias": [{"documento": "sha256:" + artifact["sha256"],
+                                              "pagina": "1",
+                                              "trecho": "Synthetic fixture only."}]}}})]]]
+    assert _drive(repo, [(unit, script)]) == {unit["id"]: "awaiting_exceptions"}
+    [claim] = repo.claims_da_unit(unit["id"])
+    about_claim = [e for e in autonomy.open_exceptions(repo, unit["id"])
+                   if e["kind"] in autonomy.RESULT_KINDS or e["motivo"] == "material_title"]
+    assert len(about_claim) == 1 and about_claim[0]["kind"] == "divergence"
+    assert "Synthetic arbiter question." in about_claim[0]["pergunta"]
+    [merged] = about_claim[0]["detail"]["merged_escalations"]
+    closed = repo.conn.execute("SELECT * FROM escalations WHERE id=%s", (merged["id"],)).fetchone()
+    assert closed["respondido_em"] and closed["resolution"]["merged_into"] == about_claim[0]["id"]
+    assert repo.conn.execute(
+        "SELECT count(*) AS n FROM operation_coordinator_decisions WHERE unit_id=%s "
+        "AND kind='merge'", (unit["id"],)).fetchone()["n"] == 1
 
 
 def test_the_job_routine_sets_the_pack_and_never_falls_back_to_the_default(

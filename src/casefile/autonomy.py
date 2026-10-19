@@ -214,16 +214,20 @@ TURN_RECORDS = ("stop", "wait_limit", "deliverable_ready")
 
 def turns_by_function(repo: Any, unit_id: int, lot_id: int | None = None) -> dict[str, int]:
     """Issue 14: launched terminal calls (turns) per Function in the Case's
-    Lot Rounds, i.e. the Rounds approved since the Lot was declared."""
+    Lot Rounds, i.e. the Rounds approved since the Lot was declared.
+    Issue 15: the independent comparison of every Claim runs on the
+    Verifier's family under the Arbiter's card; it is counted on its own
+    (`comparacao`), so `arbitro` counts only arbitrations."""
     lot = lot_id or (open_lot_case(repo, unit_id) or {}).get("lot_id")
     if not lot:
         return {}
     rows = repo.conn.execute(
-        "SELECT t.role, count(*) AS n FROM operation_terminal_calls c "
+        "SELECT CASE WHEN t.input_json ? 'independent_comparison' THEN 'comparacao' "
+        "ELSE t.role END AS role, count(*) AS n FROM operation_terminal_calls c "
         "JOIN task_runs r ON r.id=c.run_id JOIN tasks t ON t.id=r.task_id "
         "JOIN operation_rounds o ON o.id=c.round_id JOIN operation_lots l ON l.id=%s "
         "WHERE t.unit_id=%s AND c.launched_at IS NOT NULL AND o.approved_at >= l.created_at "
-        "GROUP BY t.role ORDER BY n DESC, t.role", (lot, unit_id)).fetchall()
+        "GROUP BY 1 ORDER BY n DESC, 1", (lot, unit_id)).fetchall()
     return {r["role"]: r["n"] for r in rows}
 
 
@@ -586,10 +590,10 @@ def _create_phase_task(repo: Any, lot: dict[str, Any], kind: str) -> dict[str, A
         row = {"role": "qa_pacote", "output_schema": "relatorio_qa",
                "title": f"Conferir o entregável do lote {lot_id}",
                "acceptance": "Relatório de QA da versão exata; observação, não aprovação."}
-    from src.casefile import routines
     orquestracao.registrar_versoes(repo)
+    # A Lot declared before issue 14 has no routine; its pack stays the surface one.
     created = repo.criar_tarefas(uid, [{
-        **row, "ref": f"lote-{lot_id}-{kind}-{n}", "pack": routines.get(job["routine"])["pack"],
+        **row, "ref": f"lote-{lot_id}-{kind}-{n}", "pack": repo.operation_pack(uid),
         "input_json": {"operation": True, "lot_id": lot_id, "job": job},
         "depends_on_refs": [], "budget_usd": 1.0, "priority": 0,
         "verificacao": "operador"}], COORDINATOR)[0]
@@ -611,6 +615,51 @@ def _writer_prerequisites(repo: Any, unit_id: int) -> list[str]:
 
 
 ATTEMPTS = 3
+RESULT_KINDS = ("divergence", "insufficient_evidence", "needs_decision", "open_item",
+                "audit_suspended")
+
+
+def _merge_claim_entries(repo: Any, lc: dict[str, Any]) -> None:
+    """Issue 15: one queue item per Claim. An escalation the Arbiter (or the
+    independent comparison) opened on a Claim joins the Coordinator's entry
+    for that Claim: its question is appended to the entry, and it is closed
+    as merged, with the entry it joined."""
+    uid = lc["unit_id"]
+    entries = repo.conn.execute(
+        "SELECT * FROM escalations WHERE unit_id=%s AND respondido_em IS NULL AND kind = ANY(%s) "
+        "ORDER BY id", (uid, list(RESULT_KINDS))).fetchall()
+    for entry in entries:
+        detail = entry["detail"] or {}
+        claim_ids = [str(c["claim_id"]) for c in detail.get("claims", [])]
+        if not claim_ids:
+            continue
+        tasks = {entry["task_id"]} | {r["id"] for r in repo.conn.execute(
+            "SELECT id FROM tasks WHERE unit_id=%s AND (input_json->'claim'->>'id' = ANY(%s) "
+            "OR input_json->>'claim_id' = ANY(%s))", (uid, claim_ids, claim_ids))}
+        others = repo.conn.execute(
+            "SELECT id, motivo, pergunta FROM escalations WHERE unit_id=%s AND respondido_em IS NULL "
+            "AND kind='escalation' AND exception_key IS NULL AND task_id = ANY(%s) ORDER BY id",
+            (uid, [t for t in tasks if t])).fetchall()
+        if not others:
+            continue
+        ids = [o["id"] for o in others]
+        repo.conn.execute(
+            "UPDATE escalations SET resposta=%s,respondido_por=%s,respondido_em=now(),resolution=%s "
+            "WHERE id = ANY(%s)",
+            (f"Unido ao item {entry['id']} da fila: uma entrada por afirmação.", COORDINATOR,
+             json.dumps({"option": "merged", "merged_into": entry["id"]}), ids))
+        merged = detail.get("merged_escalations", []) + [
+            {"id": o["id"], "motivo": o["motivo"], "pergunta": o["pergunta"]} for o in others]
+        question = entry["pergunta"] + "".join(
+            f"\nÁrbitro: {o['pergunta'][:600]}" for o in others)
+        repo.conn.execute(
+            "UPDATE escalations SET pergunta=%s,detail=%s WHERE id=%s",
+            (question, json.dumps({**detail, "merged_escalations": merged},
+                                  ensure_ascii=False, default=str), entry["id"]))
+        _decision(repo, lc["lot_id"], uid, "merge",
+                  f"As escalações {', '.join(map(str, ids))} do Árbitro sobre a(s) afirmação(ões) "
+                  f"{', '.join(claim_ids)} foram unidas ao item {entry['id']} da fila.",
+                  {"exception_id": entry["id"], "merged": ids})
 
 
 def _call_failure(repo: Any, run: dict[str, Any]) -> dict[str, Any] | None:
@@ -750,6 +799,7 @@ def coordinate(repo: Any, unit_id: int) -> str:
                        f"Tarefa {task['id']} ({task['title']}) não reúne as quatro "
                        f"disposições para aceite automático: {_failure_text(verdict)}",
                        {"failures": verdict["failures"], "claims": verdict["claims"]})
+        _merge_claim_entries(repo, lc)
         if _runnable(repo, unit_id):
             if repo.estado_da_unit(unit_id) == "PLANEJANDO" and any(
                     t["role"] == "coordenador" and t["status"] == "aceita" and

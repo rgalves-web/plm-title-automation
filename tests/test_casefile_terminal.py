@@ -123,6 +123,12 @@ def test_terminal_failure_blocks_without_automatic_retry(operation_case):
     assert repo.conn.execute('SELECT status FROM operation_terminal_calls').fetchone()['status']=='interrupted'
 
 
+def test_the_cli_turn_limit_is_part_of_the_call_input_file():
+    sent=terminal.build_input('A',model='terminal/claude/sonnet',system='s',messages=[{'role':'user','content':'x'}],tools=[])
+    assert sent['cli_max_turns']==terminal.CLI_MAX_TURNS and terminal.CLI_MAX_TURNS>3
+    assert terminal.build_input('B',model='terminal/codex/default',system='s',messages=[{'role':'user','content':'x'}],tools=[])['cli_max_turns'] is None
+
+
 def test_a_failed_call_keeps_its_cli_text_as_a_case_file_with_its_class(operation_case):
     from src.casefile import case_file_store
     repo,unit,scope=operation_case
@@ -156,6 +162,7 @@ def test_launch_contract_retains_subscription_login_and_no_native_tools(monkeypa
         if family=='A':
             assert '--safe-mode' in args and '--bare' not in args
             assert args[args.index('--tools')+1]==''
+            assert args[args.index('--max-turns')+1]==str(terminal.CLI_MAX_TURNS)
             from pathlib import Path
             trusted=Path(args[args.index('--system-prompt-file')+1]).read_text('utf-8')
             assert 'trusted-contract-marker' in trusted

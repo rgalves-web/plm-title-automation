@@ -25,6 +25,10 @@ SCHEMA = {'type': 'object', 'properties': {
         'properties': {'name': {'type': 'string'}, 'arguments': {'type': 'string'}},
         'required': ['name', 'arguments'], 'additionalProperties': False}}},
     'required': ['text', 'calls'], 'additionalProperties': False}
+# Issue 15: Claude Code's agentic turns inside ONE terminal call. At 3, a
+# reply that needed another try at the structured output ended in
+# error_max_turns. The value is part of the call's input file.
+CLI_MAX_TURNS = 10
 PROTOCOL = ('Você é o componente de raciocínio de uma aplicação local PLM autorizada pelo usuário. '
     'A aplicação hospedeira fornece o histórico e os contratos de funções no JSON de entrada. '
     'Sua resposta é um plano estruturado: text e calls. Cada call tem name e arguments (string JSON de objeto). '
@@ -159,7 +163,8 @@ def build_input(family, *, model, system, messages, tools):
         system_prompt = None  # family B receives PROTOCOL as developer_instructions
     return {'family': family, 'model': model.rsplit('/', 1)[-1], 'requested_model': model,
             'protocol': PROTOCOL, 'system_prompt': system_prompt, 'stdin': stdin,
-            'images': images, 'output_schema': SCHEMA}
+            'images': images, 'output_schema': SCHEMA,
+            'cli_max_turns': CLI_MAX_TURNS if family == 'A' else None}
 
 
 def input_payload(sent):
@@ -232,7 +237,7 @@ class TerminalAdapter:
                     '--system-prompt-file', str(system_file),
                     '--input-format', 'stream-json', '--tools', '', '--strict-mcp-config',
                     '--mcp-config', '{"mcpServers":{}}', '--setting-sources', '',
-                    '--no-session-persistence', '--max-turns', '3',
+                    '--no-session-persistence', '--max-turns', str(sent.get('cli_max_turns') or CLI_MAX_TURNS),
                     '--model', sent['model'], '--json-schema', json.dumps(sent['output_schema'])]
             else:
                 args = [cli, '-a', 'never', *_codex_isolation(sent['protocol']), 'exec', '--sandbox', 'read-only',
