@@ -411,3 +411,43 @@ def test_decision_rejects_different_result_even_with_current_case_revision(opera
     assert repo.tarefa(created['id'])['status']=='aguardando_operador'
     operations.command(repo,request(repo,unit,'decide_task',task_id=created['id'],accept=True,expected_run_id=result['run_id']))
     assert repo.tarefa(created['id'])['status']=='aceita'
+
+
+def test_search_corpus_returns_results_and_is_cached(operation_case,tmp_path):
+    repo,unit,scope=operation_case
+    approve(repo,unit,scope)
+    artifact=source(repo,unit,tmp_path/'searchable.pdf')
+    examiner={**task(repo,unit,'examinador','claims',mode='obrigatoria'),'_operation_run_id':12345}
+    search=runtime.tools(repo,examiner)['search_corpus'][1]
+    found=search('Field A')
+    assert found['populations']['no_texto']==1 and found['job_id']
+    assert found['no_texto'][0]['documento'].startswith('sha256:'+artifact['sha256'])
+    again=search('Field A')
+    assert again['cached'] is True and again['job_id']==found['job_id']
+
+
+def test_search_corpus_failure_is_a_named_error(operation_case,tmp_path,monkeypatch):
+    from src.casefile.acervo import Acervo
+    repo,unit,scope=operation_case
+    approve(repo,unit,scope)
+    source(repo,unit,tmp_path/'searchable.pdf')
+    examiner={**task(repo,unit,'examinador','claims',mode='obrigatoria'),'_operation_run_id':12345}
+    def broken(self,term):raise RuntimeError('synthetic failure')
+    monkeypatch.setattr(Acervo,'search',broken)
+    with pytest.raises(runtime.CorpusSearchError,match='corpus_search_failed: RuntimeError'):
+        runtime.tools(repo,examiner)['search_corpus'][1]('Field A')
+
+
+@pytest.mark.parametrize('mode',['texto','ocr','imagem'])
+def test_reading_past_the_last_page_names_the_page_count(operation_case,tmp_path,mode):
+    repo,unit,scope=operation_case
+    approve(repo,unit,scope)
+    artifact=source(repo,unit,tmp_path/'one-page.pdf')
+    examiner={**task(repo,unit,'examinador','claims',mode='obrigatoria'),'_operation_run_id':12345}
+    read=runtime.tools(repo,examiner)['ler_pagina'][1]
+    for page in (2,'3',0):
+        with pytest.raises(runtime.PageOutOfRange,match=r'page_out_of_range: .* tem 1 página\(s\)'):
+            read('sha256:'+artifact['sha256'],page,mode)
+    assert not repo.operation_events(unit_id=unit['id'],limit=50,kind='source.page_read')
+    if mode=='texto':
+        assert 'Field A' in read('sha256:'+artifact['sha256'],1,mode)['text']

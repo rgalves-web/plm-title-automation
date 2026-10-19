@@ -10,6 +10,14 @@ from src.casefile.storage import checked_artifact,digest_file,write_bytes
 from src.casefile.training import digest
 
 
+class PageOutOfRange(ValueError):
+    """Issue 16: a page that is not in the document, with its page count."""
+
+
+class CorpusSearchError(ValueError):
+    """Issue 16: the local corpus search failed; named, never internal."""
+
+
 def tool(name,description,properties=None,required=None):
     return {'name':name,'description':description,'input_schema':{'type':'object','properties':properties or {},'required':required or []}}
 
@@ -48,7 +56,16 @@ def tools(repo,task):
         checked_artifact(artifact)
         if task['role']=='verificador' and str(pagina) not in cited_pages(task['input_json'].get('pagina')):
             raise ValueError('blind_verifier_page_mismatch')
-        result=acervo.read_page('sha256:'+sha+Path(artifact['path']).suffix.lower(),pagina,modo)
+        name='sha256:'+sha+Path(artifact['path']).suffix.lower()
+        from src.infra.corpus import XLSX_SUFFIXES
+        if Path(artifact['path']).suffix.lower() not in XLSX_SUFFIXES and re.fullmatch(r'\s*-?\d+\s*',str(pagina)):
+            # Issue 16: a page past the end is named, with the page count,
+            # in every mode; never empty text or an off-by-one IndexError.
+            total=acervo.page_count(name)
+            if not 1<=int(str(pagina))<=total:
+                raise PageOutOfRange(f'page_out_of_range: o documento sha256:{sha} tem {total} '
+                                     f'página(s); a página {str(pagina).strip()} não existe')
+        result=acervo.read_page(name,pagina,modo)
         if result.get('kind') in ('text','image'):
             import hashlib
             payload=result.get('png') or result.get('text','').encode('utf-8')
@@ -237,8 +254,17 @@ def tools(repo,task):
                 {'run_id':run['id'],'claim_ids':ids,'task_completed':False},unit_id=task['unit_id'],task_id=task['id'])
         return {'claim_ids':ids,'task_completed':False,'independent_review_queued':True}
     def search_corpus(termo):
+        # Issue 16: results or a named error; an internal failure is never
+        # passed through as if it were the search's answer.
+        try:
+            return _search_corpus(termo)
+        except Exception as exc:
+            raise CorpusSearchError(f'corpus_search_failed: {type(exc).__name__}; a busca no acervo '
+                                    'local não foi feita e nada foi concluído sobre presença ou '
+                                    'ausência') from exc
+    def _search_corpus(termo):
         key=digest({'kind':'local_corpus_text','term':termo,'artifacts':sorted(artifacts)})
-        job=repo.operation_source_request(task['unit_id'],'local',key,{'kind':'local_corpus_text','terms':[termo]},task['id'])
+        job=repo.operation_source_request(task['unit_id'],'local',key,{'kind':'local_corpus_text','terms':[termo]},task_id=task['id'])
         if job['status']=='complete':
             receipt=job['receipt']
             return {'job_id':job['id'],'cached':True,'results':receipt['results'][:25],
