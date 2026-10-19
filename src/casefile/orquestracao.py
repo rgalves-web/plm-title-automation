@@ -328,7 +328,7 @@ def _in_open_lot(repo: Any, unit_id: int) -> bool:
     and with an acceptance file; a verified result waits for it."""
     conn = getattr(repo, "conn", None)
     return conn is not None and conn.execute(
-        "SELECT 1 FROM operation_lot_cases WHERE unit_id=%s AND status<>'released'",
+        "SELECT 1 FROM operation_lot_cases WHERE unit_id=%s AND status NOT IN ('released','superseded')",
         (unit_id,)).fetchone() is not None
 
 

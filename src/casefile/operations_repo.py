@@ -218,7 +218,7 @@ class OperationsRepo:
     def operation_pack(self,uid):
         """Issue 14: a Case in an open Lot plans with its Job's routine pack."""
         from src.casefile import routines
-        row=self.conn.execute("SELECT l.job->>'routine' AS routine FROM operation_lot_cases c JOIN operation_lots l ON l.id=c.lot_id WHERE c.unit_id=%s AND c.status<>'released'",(uid,)).fetchone()
+        row=self.conn.execute("SELECT l.job->>'routine' AS routine FROM operation_lot_cases c JOIN operation_lots l ON l.id=c.lot_id WHERE c.unit_id=%s AND c.status NOT IN ('released','superseded')",(uid,)).fetchone()
         return routines.get(row['routine'])['pack'] if row and row['routine'] else 'title-texas-surface'
 
     def operation_allocate(self,uid):

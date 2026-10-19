@@ -221,13 +221,17 @@ def tools(repo,task):
                 repo.promover_prontas(task['unit_id'],'process:coordenador')
             repo.operation_event('task.reallocated','process:coordenador',{'target_task_id':task_id,'budget_usd':budget_usd,'cancelled':cancelar,'reason':motivo},unit_id=task['unit_id'],task_id=task['id'])
             return serializable(repo.tarefa(task_id))
-    def escalate(motivo,pergunta,opcoes,artifact_id=None,pagina=None,trecho=None):
+    def escalate(motivo,pergunta,opcoes,artifact_id=None,pagina=None,trecho=None,tipo=None):
         evidence={}
         if artifact_id is not None:
             artifact=next((a for a in repo.operation_artifacts(task['unit_id']) if a['id']==artifact_id),None)
             if not artifact:raise ValueError('escalation_evidence_outside_case')
             checked_artifact(artifact)
             evidence={'artifact_id':artifact_id,'sha256':artifact['sha256'],'page':pagina,'quote':trecho}
+        if orquestracao._in_open_lot(repo,task['unit_id']):
+            from src.casefile import autonomy
+            identifier=autonomy.lot_escalation(repo,task,str(tipo or ''),motivo,pergunta,evidence)
+            return {'escalation_id':identifier,'owner':'Renato','external_message_sent':False}
         question=pergunta+(('\nEvidência: '+json.dumps(evidence,ensure_ascii=False)) if evidence else '')
         existing=next((e for e in repo.escalonamentos(task['unit_id'],abertos=True) if e['motivo']==motivo and e['pergunta']==question),None)
         if existing:return {'escalation_id':existing['id'],'owner':'Renato','external_message_sent':False}
@@ -306,7 +310,7 @@ def tools(repo,task):
         'inspecionar_documento':(tool('inspecionar_documento','Confira arquivo, hash e número real de páginas.',{'artifact_id':{'type':'integer'}},['artifact_id']),inspect_document),
         'ler_controle':(tool('ler_controle','Leia registros históricos com paginação; observações não provam aprovação.',{'artifact_id':{'type':'integer'},'offset':{'type':'integer'},'limite':{'type':'integer'}},['artifact_id']),read_control),
         'atualizar_tarefa':(tool('atualizar_tarefa','Redistribua orçamento/prioridade ou cancele tarefa sem execução, dentro dos limites aprovados.',{'task_id':{'type':'integer'},'motivo':{'type':'string'},'budget_usd':{'type':'number'},'priority':{'type':'integer'},'cancelar':{'type':'boolean'}},['task_id','motivo']),update_task),
-        'abrir_escalonamento':(tool('abrir_escalonamento','Prepare decisão ou consulta ao SME, com evidência e responsável; nenhum envio externo.',{'motivo':{'type':'string'},'pergunta':{'type':'string'},'opcoes':{'type':'array','items':{'type':'string'}},'artifact_id':{'type':'integer'},'pagina':{'type':'string'},'trecho':{'type':'string'}},['motivo','pergunta','opcoes']),escalate),
+        'abrir_escalonamento':(tool('abrir_escalonamento','Prepare decisão ou consulta ao SME, com evidência e responsável; nenhum envio externo. Dentro de um lote, só credencial, documento pago ou comunicação externa (tipo); o resto se pesquisa nas fontes do job ou vira lacuna declarada.',{'motivo':{'type':'string'},'pergunta':{'type':'string'},'opcoes':{'type':'array','items':{'type':'string'}},'artifact_id':{'type':'integer'},'pagina':{'type':'string'},'trecho':{'type':'string'},'tipo':{'enum':['credencial','documento_pago','comunicacao_externa']}},['motivo','pergunta','opcoes']),escalate),
         'ler_trilha_da_unit':(tool('ler_trilha_da_unit','Leia registros reais de execução, correções e artefatos de origem, com paginação.',{'offset':{'type':'integer'},'limite':{'type':'integer'}}),read_trace),
         'ler_escalonamentos':(tool('ler_escalonamentos','Leia questões abertas deste caso.'),lambda:case_file('escalonamentos'))}
     # Preserve the reading name used by the role cards. Both names share the
@@ -380,6 +384,10 @@ def persist_plan(repo,task,output,session_id,*,run_id=None,**_):
     targets={'open_research_ids':['pesquisa:'+str(r['id']) for r in repo.pesquisas(task['unit_id']) if r['status']=='aberta']}
     pid=repo.registrar_proposta(task['unit_id'],task['id'],run_id,task['pack'],output,targets,{'covered':targets['open_research_ids']})
     stop=output.get('parada',{})
+    if orquestracao._in_open_lot(repo,task['unit_id']):
+        # Issue 17: inside a Lot the plan's stops are researched in the Job's
+        # sources or shipped as declared gaps; they stay in the proposal.
+        return [pid]
     for category in ('dependencias_externas','decisoes_do_operador'):
         for question in stop.get(category,[]):
             if not any(e['motivo']==category and e['pergunta']==question for e in repo.escalonamentos(task['unit_id'],abertos=True)):
@@ -594,7 +602,7 @@ def persist_comparison(repo,task,output,session_id,*,run_id=None,**_):
                  'raw_response':json.dumps(output,ensure_ascii=False),'request_id':request['provider_request_id'] if request else '',
                  'model_params':{'model':run['model'],'stage':'independent_ai_comparison'}})
     case_records.write_review_file(repo,task,vid,function_files.current_output(repo,task['unit_id']))
-    if output['material_divergence']:
+    if output['material_divergence'] and not orquestracao._in_open_lot(repo,task['unit_id']):
         repo.abrir_escalonamento(task['unit_id'],task['id'],'material_title',output['reason'],['consultar SME','fornecer evidência complementar'])
     return [vid]
 
@@ -623,7 +631,9 @@ def persist_arbitration(repo,task,output,session_id,**_):
     claim=repo.claim(output['claim_id'])
     if not claim or claim['unit_id']!=task['unit_id']:
         raise ValueError('arbitration_claim_outside_case')
-    if output['desfecho']=='escalado' or output['material_conclusao_titulo']:
+    if (output['desfecho']=='escalado' or output['material_conclusao_titulo']) and orquestracao._in_open_lot(repo,task['unit_id']):
+        pass    # issue 17: the Coordinator researches the Claim or declares the gap
+    elif output['desfecho']=='escalado' or output['material_conclusao_titulo']:
         escalation=output.get('escalonamento',{})
         repo.abrir_escalonamento(task['unit_id'],task['id'],'material_title',
                                  escalation.get('pergunta',output['justificativa']),escalation.get('opcoes',['consultar SME','fornecer evidência']))

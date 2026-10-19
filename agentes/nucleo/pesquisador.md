@@ -10,7 +10,7 @@ verified: []
 saida_esquema: resultado_pesquisa
 nivel_modelo: medio
 verifica: amostral
-ferramentas: [definidas_pelo_pacote_por_fonte, registrar_pesquisa, registrar_busca_negativa, solicitar_captura, ler_case_file, list_documents, search_corpus, read_page, pesquisar_fonte, ler_controle, ler_resultados_busca]
+ferramentas: [definidas_pelo_pacote_por_fonte, registrar_pesquisa, registrar_busca_negativa, solicitar_captura, ler_case_file, list_documents, search_corpus, read_page, pesquisar_fonte, capturar_preview, ler_controle, ler_resultados_busca]
 ---
 ## Missão
 Encontrar os instrumentos exigidos pela tarefa numa fonte declarada (índice de condado, Drive, portal regulatório, acervo local) e deixar prova do que foi e do que não foi encontrado.

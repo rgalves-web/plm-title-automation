@@ -31,8 +31,9 @@ from src.casefile.training import digest
 
 COORDINATOR = "process:coordenador"
 RULE = "autoaccept-v1"
-SOURCES = ("local", "drive", "countyrecords", "texasfile", "rrc", "cad",
-           "pacer", "sos")
+# Sources a Lot declared before issue 17 (no routine) may still name.
+LEGACY_SOURCES = ("local", "drive", "countyrecords", "texasfile", "cad", "pacer", "sos")
+OPEN_LOT = "c.status NOT IN ('released','superseded')"
 STAGE_ORDER = [s for s in ESTADOS if s != "BLOQUEADA"]
 OPEN_ITEM_NATURES = ("item_aberto", "decisao_humana")
 LAYOUT = ("1. Landman Submitted/Maps", "1. Landman Submitted/Misc. Title Files",
@@ -43,6 +44,9 @@ LAYOUT = ("1. Landman Submitted/Maps", "1. Landman Submitted/Misc. Title Files",
           "1. Landman Submitted/Title Documents/Mortgages",
           "1. Landman Submitted/Title Documents/Surface")
 KINDS = {
+    "source_access": "Acesso à fonte (login, credencial ou rede)",
+    "paid_document": "Documento ou consulta paga",
+    "external_communication": "Comunicação externa",
     "divergence": "Divergência não resolvida pelo Árbitro",
     "insufficient_evidence": "Evidência insuficiente nas fontes permitidas",
     "envelope_exhausted": "Envelope esgotado",
@@ -55,6 +59,9 @@ KINDS = {
     "escalation": "Questão levantada por uma função",
 }
 OPTIONS = {
+    "source_access": ["retry_source", "dismiss"],
+    "paid_document": ["dismiss"],
+    "external_communication": ["acknowledge", "dismiss"],
     "divergence": ["accept", "reject", "re_read", "release_blank", "dismiss"],
     "insufficient_evidence": ["accept", "reject", "re_read", "allow_source",
                               "release_blank", "dismiss"],
@@ -85,9 +92,15 @@ CLAIM_BLOCKING = ("divergence", "insufficient_evidence", "needs_decision",
 
 # --- lot and envelope ------------------------------------------------------------
 
-def _envelope(raw: dict[str, Any], case: dict[str, Any], spent: float) -> dict[str, Any]:
-    sources = list(dict.fromkeys(raw.get("sources") or ["local"]))
-    if not sources or set(sources) - set(SOURCES):
+def _envelope(raw: dict[str, Any], case: dict[str, Any], spent: float,
+              routine: str | None = None) -> dict[str, Any]:
+    from src.casefile import routines
+    # Issue 17: the envelope is every source the Job lists; RRC never.
+    allowed = routines.job_sources(routine) if routine else list(LEGACY_SOURCES)
+    sources = list(dict.fromkeys(raw.get("sources") or allowed))
+    if set(sources) & routines.FORBIDDEN_SOURCES:
+        raise ValueError("envelope_source_forbidden_rrc")
+    if not sources or set(sources) - set(allowed):
         raise ValueError("envelope_sources_unknown")
     turns = rounds.validate_cap(raw.get("turn_cap_per_case", 60))
     default_cost = float(case["approved_budget_usd"] or 0) or \
@@ -135,7 +148,7 @@ def open_lot_case(repo: Any, unit_id: int) -> dict[str, Any] | None:
     return repo.conn.execute(
         "SELECT c.*, l.job, l.envelope, l.created_at AS lot_created_at "
         "FROM operation_lot_cases c JOIN operation_lots l ON l.id=c.lot_id "
-        "WHERE c.unit_id=%s AND c.status <> 'released'", (unit_id,)).fetchone()
+        f"WHERE c.unit_id=%s AND {OPEN_LOT}", (unit_id,)).fetchone()
 
 
 def create_lot(repo: Any, actor: str, note: str, command_id: str,
@@ -154,7 +167,8 @@ def create_lot(repo: Any, actor: str, note: str, command_id: str,
         case = repo.operation_case(uid, lock=True)
         if not case:
             raise ValueError("operation_case_not_registered")
-        if open_lot_case(repo, uid):
+        current = open_lot_case(repo, uid)
+        if current and current["status"] != "stopped":
             raise ValueError("case_already_in_an_open_lot")
         if repo.conn.execute(
                 "SELECT 1 FROM task_runs r JOIN tasks t ON t.id=r.task_id WHERE "
@@ -163,14 +177,25 @@ def create_lot(repo: Any, actor: str, note: str, command_id: str,
         cases[uid] = case
     first = cases[ids[0]]
     routine = routines.get(job["routine"])
-    stored = _envelope(envelope, first, repo.custo_acumulado(ids[0]))
+    stored = _envelope(envelope, first, repo.custo_acumulado(ids[0]), job["routine"])
     lot = repo.conn.execute(
         "INSERT INTO operation_lots(job,envelope,created_by,note,command_id) "
         "VALUES (%s,%s,%s,%s,%s) RETURNING *",
         (json.dumps(job, ensure_ascii=False), json.dumps(stored, ensure_ascii=False),
          actor, note, command_id)).fetchone()
     for uid, case in cases.items():
-        env = _envelope(envelope, case, repo.custo_acumulado(uid))
+        previous = open_lot_case(repo, uid)
+        if previous:
+            # Issue 17: a stopped Lot case is superseded by this declaration;
+            # its row, decisions and queue entries stay as history.
+            repo.conn.execute(
+                "UPDATE operation_lot_cases SET status='superseded',updated_at=now() "
+                "WHERE lot_id=%s AND unit_id=%s", (previous["lot_id"], uid))
+            _decision(repo, previous["lot_id"], uid, "superseded",
+                      f"Renato declarou o lote {lot['id']} para este caso; o lote "
+                      f"{previous['lot_id']} (parado: {previous['stop_reason']}) fica como histórico.",
+                      {"new_lot_id": lot["id"]})
+        env = _envelope(envelope, case, repo.custo_acumulado(uid), job["routine"])
         scope = validate_scope({**case["scope"], "sources": env["sources"],
                                 "through_date": env["through_date"],
                                 "work_type": routine["work_type"],
@@ -594,7 +619,8 @@ def _create_phase_task(repo: Any, lot: dict[str, Any], kind: str) -> dict[str, A
     # A Lot declared before issue 14 has no routine; its pack stays the surface one.
     created = repo.criar_tarefas(uid, [{
         **row, "ref": f"lote-{lot_id}-{kind}-{n}", "pack": repo.operation_pack(uid),
-        "input_json": {"operation": True, "lot_id": lot_id, "job": job},
+        "input_json": {"operation": True, "lot_id": lot_id, "job": job,
+                       "lacunas_declaradas": declared_gaps(repo, uid, lot_id)},
         "depends_on_refs": [], "budget_usd": 1.0, "priority": 0,
         "verificacao": "operador"}], COORDINATOR)[0]
     repo.promover_prontas(uid, COORDINATOR)
@@ -612,6 +638,290 @@ def _writer_prerequisites(repo: Any, unit_id: int) -> list[str]:
                                                     "clear_declared_cells"):
         missing.append("limpeza dos dados de amostra do template não confirmada")
     return missing
+
+
+# --- issue 17: research every Job source before anything reaches the queue -----------
+
+RESEARCHABLE = ("divergence", "insufficient_evidence", "open_item")
+LOT_QUEUE_KINDS = ("source_access", "paid_document", "external_communication",
+                   "protocol_pending")
+
+
+def _lot_queue(repo: Any, lc: dict[str, Any]) -> list[dict[str, Any]]:
+    """This Lot's queue: entries it opened, and entries opened after it was
+    declared. Older entries stay on the Case as history outside it."""
+    return [e for e in open_exceptions(repo, lc["unit_id"])
+            if e.get("lot_id") == lc["lot_id"] or
+            (e.get("lot_id") is None and e["created_at"] >= lc["lot_created_at"])]
+
+
+def _first_lot_at(repo: Any, unit_id: int) -> Any:
+    return repo.conn.execute(
+        "SELECT min(l.created_at) AS at FROM operation_lot_cases c JOIN operation_lots l "
+        "ON l.id=c.lot_id WHERE c.unit_id=%s", (unit_id,)).fetchone()["at"]
+
+
+def _outside_lot(repo: Any, task: dict[str, Any]) -> bool:
+    """Learning is never accepted inside a Lot (invariant 7), and a result
+    that was already waiting for Renato before any Lot stays his."""
+    if task["role"] == "retrospectivo" or task["output_schema"] == "fichas_candidatas":
+        return True
+    first = _first_lot_at(repo, task["unit_id"])
+    return first is not None and task["updated_at"] < first
+
+
+def _probe(repo: Any, lc: dict[str, Any], source: str) -> str | None:
+    """A source gated by login, payment or network is tried once per Case
+    (and again after Renato answers its queue item), with no model call.
+    Returns the block, or None when the Researcher can use it."""
+    from src.casefile import routines, source_adapters
+    if routines.access(source) == "public":
+        return None
+    uid = lc["unit_id"]
+    generation = repo.conn.execute(
+        "SELECT count(*) AS n FROM escalations WHERE unit_id=%s AND lot_id=%s AND "
+        "exception_key LIKE %s AND respondido_em IS NOT NULL",
+        (uid, lc["lot_id"], f"source:{source}:%")).fetchone()["n"]
+    request = {"kind": "access_probe", "source": source, "lot_id": lc["lot_id"],
+               "generation": generation}
+    job = repo.operation_source_request(uid, source, digest(request), request,
+                                        impact=f"Sondagem de acesso do lote {lc['lot_id']}")
+    if job["status"] == "blocked":
+        return job["receipt"].get("reason") or "blocked"
+    if job["status"] == "complete":
+        return None
+    case = repo.operation_case(uid)
+    try:
+        if routines.access(source) == "paid":
+            raise source_adapters.SourceUnavailable("paid_source:" + source)
+        if source == "terrell_cad":
+            source_adapters.cad_view(case, {"terms": []})
+        elif source == "drive":
+            source_adapters.drive_catalog(case, {"terms": []})
+        else:
+            recipe = (case["profile"].get("source_recipes") or {}).get(source) or {}
+            if not recipe.get("verified_by"):
+                raise source_adapters.SourceUnavailable(
+                    f"login_required:{source}:verified_recipe_and_operator_session_missing")
+        repo.operation_source_result(job["id"], "complete",
+                                     {"reachable": True, "source": source})
+        return None
+    except source_adapters.SourceUnavailable as exc:
+        reason = str(exc)
+        repo.operation_source_result(job["id"], "blocked", {
+            "blocked": True, "reason": reason, "source": source, "owner": "Renato",
+            "access": source_adapters.blocked_access(source, reason)})
+        return reason
+
+
+def _access_entry(repo: Any, lc: dict[str, Any], source: str, reason: str,
+                  claim_ids: list[int]) -> None:
+    from src.casefile import routines, source_adapters
+    access = source_adapters.blocked_access(source, reason)
+    generation = repo.conn.execute(
+        "SELECT count(*) AS n FROM escalations WHERE unit_id=%s AND lot_id=%s AND "
+        "exception_key LIKE %s AND respondido_em IS NOT NULL",
+        (lc["unit_id"], lc["lot_id"], f"source:{source}:%")).fetchone()["n"]
+    name = routines.label(source)
+    question = {
+        "paid": f"{name} é fonte paga: autorizar a compra ou consulta com o custo apresentado, "
+                "ou manter a lacuna declarada.",
+        "network": f"{name} não responde desta máquina ({reason}). Fornecer a rede (VPN) ou "
+                   "manter a lacuna declarada.",
+    }.get(access, f"{name} exige login ou credencial do operador ({reason}). Entrar na sessão "
+                  "ou manter a lacuna declarada.")
+    _exception(repo, lc["lot_id"], lc["unit_id"], None,
+               "paid_document" if access == "paid" else "source_access",
+               f"source:{source}:g{generation}", question,
+               {"source": source, "reason": reason, "access": access, "claims": claim_ids})
+
+
+def _lot_tasks(repo: Any, lc: dict[str, Any], kind: str) -> list[dict[str, Any]]:
+    prefix = f"lote-{lc['lot_id']}-{kind}-"
+    return [t for t in repo.tarefas(lc["unit_id"]) if t["ref"].startswith(prefix)]
+
+
+TERMINAL = ("aceita", "recusada", "cancelada")
+
+
+def _claim_brief(repo: Any, cid: int, reason: str) -> dict[str, Any]:
+    claim = repo.claim(cid)
+    return {"id": cid, "entidade": claim["entity"], "valor": claim["value"],
+            "documento": "sha256:" + claim["source_sha256"], "pagina": claim["page"],
+            "limitacoes": claim.get("limitations"), "motivo": reason}
+
+
+def _research_or_gap(repo: Any, lc: dict[str, Any], needing: dict[int, str]) -> str:
+    """For Claims that need another source: research every reachable Job
+    source not yet tried for them; re-examine once with the documents found;
+    then declare the gap with each source's outcome. Never a queue item."""
+    from src.casefile import routines
+    uid, lot_id = lc["unit_id"], lc["lot_id"]
+    sources = [s for s in lc["envelope"].get("sources", []) if s not in routines.FORBIDDEN_SOURCES]
+    research = _lot_tasks(repo, lc, "pesquisa")
+    reexam_ids = {t["id"] for t in _lot_tasks(repo, lc, "reexame")}
+    state: dict[tuple[int, str], str] = {}
+    for cid in needing:
+        origin = repo.conn.execute("SELECT task_id FROM task_claims WHERE claim_id=%s", (cid,)).fetchone()
+        if origin and origin["task_id"] in reexam_ids:
+            # A Claim born of a re-examination already had every source tried.
+            for source in sources:
+                state[(cid, source)] = f"pesquisada antes do reexame da tarefa {origin['task_id']}"
+    for t in research:
+        for cid in t["input_json"].get("claim_ids", []):
+            state[(cid, t["input_json"].get("fonte"))] = (
+                f"pesquisada na tarefa {t['id']} ({t['status']})" if t["status"] in TERMINAL
+                else "in_flight")
+    blocked, busy = {}, False
+    for source in sources:
+        reason = _probe(repo, lc, source)
+        if reason:
+            blocked[source] = reason
+            _access_entry(repo, lc, source, reason, sorted(needing))
+            continue
+        todo = [c for c in needing if (c, source) not in state]
+        if todo:
+            n = 1 + sum(t["input_json"].get("fonte") == source for t in research)
+            repo.criar_tarefas(uid, [{
+                "ref": f"lote-{lot_id}-pesquisa-{source}-{n}", "role": "pesquisador",
+                "pack": repo.operation_pack(uid), "output_schema": "resultado_pesquisa",
+                "title": f"Pesquisar em {routines.label(source)} para {len(todo)} afirmação(ões)",
+                "acceptance": "Fonte pesquisada com termos, intervalo e resultados completos; "
+                              "documentos públicos pertinentes capturados; buscas negativas com limites.",
+                "input_json": {"operation": True, "lot_id": lot_id, "fonte": source,
+                               "claim_ids": todo,
+                               "afirmacoes": [_claim_brief(repo, c, needing[c]) for c in todo],
+                               "instrucao": f"Use pesquisar_fonte(fonte='{source}') com as partes, "
+                                            "abstracts, referências e descrições destas afirmações. "
+                                            "Capture com capturar_preview os documentos públicos "
+                                            "pertinentes. Registre o que não foi encontrado com os "
+                                            "limites da fonte. Não conclua title."},
+                "depends_on_refs": [], "budget_usd": 1.0, "priority": 0,
+                "verificacao": "nenhuma"}], COORDINATOR)
+            repo.promover_prontas(uid, COORDINATOR)
+            _decision(repo, lot_id, uid, "research",
+                      f"{len(todo)} afirmação(ões) precisam de outra fonte; o Pesquisador vai a "
+                      f"{routines.label(source)} antes de qualquer item na fila.",
+                      {"source": source, "claims": todo})
+            busy = True
+        elif any(state.get((c, source)) == "in_flight" for c in needing):
+            busy = True
+    if busy:
+        return "researching"
+    found = {}
+    for t in research:
+        docs = [a for a in repo.operation_artifacts(uid, "source") if a.get("task_id") == t["id"]]
+        for cid in t["input_json"].get("claim_ids", []):
+            if cid in needing and docs:
+                found.setdefault(cid, []).extend(docs)
+    reexams = _lot_tasks(repo, lc, "reexame")
+    covered = {c: t for t in reexams for c in t["input_json"].get("claim_ids", [])}
+    if any(covered[c]["status"] not in TERMINAL for c in needing if c in covered):
+        return "researching"
+    fresh = [c for c in needing if c in found and c not in covered and
+             not any((c, s) in state and state[(c, s)].startswith("pesquisada antes do reexame")
+                     for s in sources)]
+    if fresh:
+        docs = {a["id"]: a for c in fresh for a in found[c]}
+        repo.criar_tarefas(uid, [{
+            "ref": f"lote-{lot_id}-reexame-{1 + len(reexams)}", "role": "examinador",
+            "pack": repo.operation_pack(uid), "output_schema": "claims",
+            "title": f"Reexaminar {len(fresh)} afirmação(ões) com os documentos novos",
+            "acceptance": "Afirmações com documento, página e trecho dos documentos novos; o que "
+                          "seguir sem prova fica como item aberto com motivo.",
+            "input_json": {"operation": True, "lot_id": lot_id, "claim_ids": fresh,
+                           "afirmacoes": [_claim_brief(repo, c, needing[c]) for c in fresh],
+                           "documentos_novos": [{"artifact_id": a["id"], "documento": "sha256:" + a["sha256"],
+                                                 "nome": a["metadata"].get("display_name")} for a in docs.values()]},
+            "depends_on_refs": [], "budget_usd": 1.0, "priority": 0,
+            "verificacao": "obrigatoria_e_operador"}], COORDINATOR)
+        repo.promover_prontas(uid, COORDINATOR)
+        _decision(repo, lot_id, uid, "reexamine",
+                  f"A pesquisa trouxe {len(docs)} documento(s) novo(s); o Examinador reexamina "
+                  f"{len(fresh)} afirmação(ões).", {"claims": fresh, "documents": sorted(docs)})
+        return "researching"
+    for cid in needing:
+        if repo.claim(cid)["status"] != "ativo":
+            continue
+        if cid in covered and covered[cid]["status"] == "aceita":
+            repo.atualizar_claim_status(uid, cid, "retirado", None,
+                                        nota=f"Substituída pelo reexame da tarefa {covered[cid]['id']} "
+                                             f"(lote {lot_id}).")
+            _decision(repo, lot_id, uid, "superseded_by_reexam",
+                      f"A afirmação {cid} foi reexaminada com documentos novos na tarefa "
+                      f"{covered[cid]['id']}.", {"claim_id": cid, "task_id": covered[cid]["id"]})
+            continue
+        outcomes = {s: (f"bloqueada: {blocked[s]}" if s in blocked else state.get((cid, s), "não tentada"))
+                    for s in sources}
+        reason = (f"Lacuna declarada: {needing[cid]}. Todas as fontes do job foram tentadas: "
+                  + "; ".join(f"{routines.label(s)} — {o}" for s, o in outcomes.items()) + ".")
+        repo.atualizar_claim_status(uid, cid, "retirado", None, nota=reason[:1500])
+        _close_claim_escalations(repo, uid, cid, reason)
+        claim = repo.claim(cid)
+        _decision(repo, lot_id, uid, "declared_gap", reason,
+                  {"claim_id": cid, "entity": claim["entity"], "value": claim["value"],
+                   "sources": outcomes})
+    return "gaps_declared"
+
+
+def _close_claim_escalations(repo: Any, unit_id: int, cid: int, reason: str) -> None:
+    """Questions opened about a Claim before this rule close with its gap."""
+    tasks = [r["id"] for r in repo.conn.execute(
+        "SELECT id FROM tasks WHERE unit_id=%s AND (input_json->'claim'->>'id' = %s "
+        "OR input_json->>'claim_id' = %s)", (unit_id, str(cid), str(cid)))]
+    if tasks:
+        repo.conn.execute(
+            "UPDATE escalations SET resposta=%s,respondido_por=%s,respondido_em=now(),resolution=%s "
+            "WHERE unit_id=%s AND respondido_em IS NULL AND kind='escalation' AND task_id = ANY(%s)",
+            (reason[:4000], COORDINATOR, json.dumps({"option": "declared_gap", "claim_id": cid}),
+             unit_id, tasks))
+
+
+LOT_ESCALATION_KINDS = {"credencial": "source_access", "documento_pago": "paid_document",
+                        "comunicacao_externa": "external_communication"}
+
+
+def lot_escalation(repo: Any, task: dict[str, Any], tipo: str, motivo: str, pergunta: str,
+                   evidence: dict[str, Any]) -> int | None:
+    """Issue 17: inside a Lot a Function may only ask for a credential, a paid
+    document or an external communication. Anything else is researched in
+    the Job's sources or shipped as a declared gap."""
+    lc = open_lot_case(repo, task["unit_id"])
+    if tipo not in LOT_ESCALATION_KINDS:
+        raise ValueError("lot_queue_only_credencial_documento_pago_comunicacao_externa: pesquise "
+                         "as fontes do job com pesquisar_fonte ou registre a lacuna na sua saída")
+    kind = LOT_ESCALATION_KINDS[tipo]
+    question = pergunta + (("\nEvidência: " + json.dumps(evidence, ensure_ascii=False)) if evidence else "")
+    return _exception(repo, lc["lot_id"], task["unit_id"], task["id"], kind,
+                      f"tool:{task['id']}:{digest({'tipo': tipo, 'q': question})[:16]}",
+                      question, {"motivo": motivo, "tipo": tipo, "evidence": evidence})
+
+
+def declared_gaps(repo: Any, unit_id: int, lot_id: int) -> list[dict[str, Any]]:
+    rows = repo.conn.execute(
+        "SELECT relative FROM operation_coordinator_decisions WHERE unit_id=%s AND lot_id=%s "
+        "AND kind='declared_gap' ORDER BY id", (unit_id, lot_id)).fetchall()
+    gaps = []
+    for row in rows:
+        document = json.loads(case_file_store.read_bytes(unit_id, row["relative"]))
+        gaps.append({"claim_id": document["detail"].get("claim_id"),
+                     "entity": document["detail"].get("entity"),
+                     "reason": document["reason"], "file": row["relative"]})
+    return gaps
+
+
+def _failing_claims(verdict: dict[str, Any]) -> dict[int, str]:
+    needing = {}
+    by_id = {c["claim_id"]: c for c in verdict["claims"]}
+    for kind, value in verdict["failures"]:
+        if kind in ("divergence", "insufficient_evidence") and isinstance(value, int):
+            c = by_id.get(value, {})
+            needing[value] = (f"Árbitro {(c.get('arbiter') or {}).get('value') or 'sem disposição'}, "
+                              f"Verificador {(c.get('verifier') or {}).get('value') or 'sem comparação'}")
+        elif kind == "open_item":
+            for cid in value:
+                needing.setdefault(cid, "item aberto")
+    return needing
 
 
 ATTEMPTS = 3
@@ -774,21 +1084,32 @@ def coordinate(repo: Any, unit_id: int) -> str:
                            f"tentativas: {reason}.", {"reason": reason, "run_id": last["id"]},
                            adopt=(task["id"], last["started_at"]))
         in_flight = _claims_in_flight(repo, unit_id)
+        needing: dict[int, str] = {}
         for task in repo.tarefas(unit_id, "aguardando_operador"):
+            if _outside_lot(repo, task):
+                continue
             pending = repo.conn.execute(
                 "SELECT id FROM escalations WHERE unit_id=%s AND respondido_em IS NULL "
                 "AND exception_key LIKE %s", (unit_id, f"task:{task['id']}:decision:%")).fetchall()
             verdict = dispositions(repo, task)
             if in_flight & {c["claim_id"] for c in verdict["claims"]}:
                 continue            # a review of these Claims is still running
-            if verdict["ok"]:
+            no_claims_left = verdict["kind"] == "needs_decision" and bool(verdict.get("output"))
+            if verdict["ok"] or no_claims_left:
+                # Issue 17: a result with no active Claim left to check (none, or
+                # every one a declared gap or superseded) asserts nothing more.
                 for row in pending:
                     repo.conn.execute(
                         "UPDATE escalations SET resposta=%s,respondido_por=%s,respondido_em=now(),"
                         "resolution=%s WHERE id=%s AND respondido_em IS NULL",
-                        ("Resolvido pelo Coordenador: as quatro disposições passaram a valer.",
+                        ("Resolvido pelo Coordenador: as quatro disposições passaram a valer."
+                         if verdict["ok"] else "Resolvido pelo Coordenador: não resta afirmação "
+                         "ativa a conferir (lacunas declaradas ou substituídas).",
                          COORDINATOR, json.dumps({"option": "auto", "rule": RULE}), row["id"]))
                 _accept(repo, lc, task, verdict)
+                continue
+            if verdict["kind"] in RESEARCHABLE:
+                needing.update(_failing_claims(verdict))
                 continue
             if pending:
                 continue
@@ -799,6 +1120,8 @@ def coordinate(repo: Any, unit_id: int) -> str:
                        f"Tarefa {task['id']} ({task['title']}) não reúne as quatro "
                        f"disposições para aceite automático: {_failure_text(verdict)}",
                        {"failures": verdict["failures"], "claims": verdict["claims"]})
+        if needing:
+            _research_or_gap(repo, lc, needing)
         _merge_claim_entries(repo, lc)
         if _runnable(repo, unit_id):
             if repo.estado_da_unit(unit_id) == "PLANEJANDO" and any(
@@ -816,9 +1139,11 @@ def _next_phase(repo: Any, lc: dict[str, Any]) -> str:
     writer = _lot_task(repo, uid, lot_id, "redator")
     qa = _lot_task(repo, uid, lot_id, "qa")
     if writer is None:
-        blocking = [e for e in open_exceptions(repo, uid) if e.get("kind") in CLAIM_BLOCKING]
+        blocking = [e for e in _lot_queue(repo, lc) if e.get("kind") in CLAIM_BLOCKING]
         if blocking:
             return _await(repo, lc)
+        if any(not _outside_lot(repo, t) for t in repo.tarefas(uid, "aguardando_operador")):
+            return "working"        # a result is being researched or re-evaluated
         missing = _writer_prerequisites(repo, uid)
         if missing:
             _exception(repo, lot_id, uid, None, "deliverable_prerequisite",
@@ -829,7 +1154,7 @@ def _next_phase(repo: Any, lc: dict[str, Any]) -> str:
         accepted = repo.conn.execute(
             "SELECT count(*) AS n FROM claims WHERE unit_id=%s AND status='ativo'",
             (uid,)).fetchone()["n"]
-        opened = len(open_exceptions(repo, uid))
+        opened = len(_lot_queue(repo, lc))
         _create_phase_task(repo, lc, "redator")
         advance(repo, lot_id, uid, "PREENCHENDO",
                 "Não resta tarefa executável de pesquisa e exame.")
@@ -852,7 +1177,7 @@ def _next_phase(repo: Any, lc: dict[str, Any]) -> str:
 
 def _await(repo: Any, lc: dict[str, Any]) -> str:
     """Nothing runnable and the next phase waits on the exceptions queue."""
-    if open_exceptions(repo, lc["unit_id"]):
+    if [e for e in _lot_queue(repo, lc) if e.get("kind") not in LOT_QUEUE_KINDS]:
         repo.conn.execute(
             "UPDATE operation_lot_cases SET status='stopped',stop_reason='awaiting_exceptions',"
             "updated_at=now() WHERE lot_id=%s AND unit_id=%s", (lc["lot_id"], lc["unit_id"]))
@@ -860,7 +1185,7 @@ def _await(repo: Any, lc: dict[str, Any]) -> str:
         _decision(repo, lc["lot_id"], lc["unit_id"], "stop",
                   "Nada mais é executável até as exceções abertas serem tratadas.",
                   {"reason": "awaiting_exceptions",
-                   "open_exceptions": len(open_exceptions(repo, lc["unit_id"]))})
+                   "open_exceptions": len(_lot_queue(repo, lc))})
         return "awaiting_exceptions"
     return "working"
 
@@ -946,7 +1271,7 @@ def release_case(repo: Any, unit_id: int, actor: str, note: str) -> None:
         "UPDATE operation_lot_cases SET status='released',updated_at=now() "
         "WHERE lot_id=%s AND unit_id=%s", (lc["lot_id"], unit_id))
     if not repo.conn.execute(
-            "SELECT 1 FROM operation_lot_cases WHERE lot_id=%s AND status<>'released'",
+            "SELECT 1 FROM operation_lot_cases WHERE lot_id=%s AND status NOT IN ('released','superseded')",
             (lc["lot_id"],)).fetchone():
         repo.conn.execute("UPDATE operation_lots SET closed_at=now() WHERE id=%s",
                           (lc["lot_id"],))
@@ -1042,8 +1367,9 @@ def resolve_exception(repo: Any, unit_id: int, actor: str, exception_id: int,
                      parent=task["id"] if task else None)
         outcome["pages"] = pages
     elif option == "allow_source":
+        from src.casefile import routines
         source = str(params.get("source") or "")
-        if source not in SOURCES:
+        if source not in routines.SOURCE_KEYS or source in routines.FORBIDDEN_SOURCES:
             raise ValueError("source_unknown")
         case = repo.operation_case(unit_id)
         scope = {**case["scope"], "sources": list(dict.fromkeys([*case["scope"].get("sources", []), source]))}
@@ -1083,6 +1409,9 @@ def resolve_exception(repo: Any, unit_id: int, actor: str, exception_id: int,
                                  nota=f"Afirmações liberadas em branco: {preset}")
         outcome["preset"] = preset
         outcome["claims"] = targets
+    elif option in ("retry_source", "acknowledge"):
+        outcome["note"] = ("A fonte será tentada de novo na próxima passada do Coordenador."
+                           if option == "retry_source" else "Registrado como feito por Renato.")
     elif option == "dismiss":
         if entry.get("kind") == "open_item":
             for cid in (detail.get("failures") or [[None, []]])[-1][1]:
@@ -1165,7 +1494,9 @@ def overview(repo: Any, unit_id: int) -> dict[str, Any] | None:
             "turns_used": sum(turns.values()),
             "turn_cap": lc["turn_cap"], "job": lc["job"], "envelope": lc["envelope"],
             "deliverable_artifact_id": lc["deliverable_artifact_id"],
-            "exceptions_open": len(open_exceptions(repo, unit_id)),
+            "exceptions_open": len(_lot_queue(repo, lc) if lc["status"] not in
+                                   ("released", "superseded") else open_exceptions(repo, unit_id)),
+            "lot_queue_ids": [e["id"] for e in _lot_queue(repo, lc)],
             "acceptances": {"total": len(acceptances),
                             "sampled": [a for a in acceptances if a["sampled"]]},
             "suspended_claim_types": [r["claim_type"] for r in repo.conn.execute(

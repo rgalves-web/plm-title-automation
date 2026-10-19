@@ -144,6 +144,168 @@ def portal_search(repo,case,source,request,holder):
         repo.operation_release_resource(resource,holder)
 
 
+# --- issue 17: public Job sources the Researcher reaches with no operator ------------
+
+UA = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                    '(KHTML, like Gecko) Chrome/130.0 Safari/537.36'}
+GLO_SEARCH = 'https://www.glo.texas.gov/archives-heritage/search-our-collections/land-grant-search'
+GLO_AJAX = 'https://www.glo.texas.gov/glo-custom/landgrant-ajax'
+GLO_HOSTS = ('www.glo.texas.gov', 'cdn.glo.texas.gov')
+GLO_FIELDS = {'abstract': 'abstractnumber', 'grantee': 'originalgrantee', 'patentee': 'patentee',
+              'file': 'filenumber', 'certificate': 'certificate'}
+TOPICS_SEARCH = 'https://topics.txcourts.gov/CitationsPublic/GetAllCitationNoticeDocs'
+CAD_VIEW = 'https://esearch.terrellcad.org/property/view/'
+
+
+def _http():
+    import httpx
+    return httpx.Client(headers=UA, timeout=httpx.Timeout(30, read=120), follow_redirects=True)
+
+
+def _network(source, exc):
+    raise SourceUnavailable(f'network_unreachable:{source}:{type(exc).__name__}') from exc
+
+
+def _text(html):
+    import re
+    html = re.sub(r'<!--.*?-->', '', html, flags=re.S)
+    return re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', html)).strip()
+
+
+def glo_search(case, request):
+    """Texas GLO land grants by county, one field at a time. The search form's
+    antibot key is read from the page's own settings, as a browser would."""
+    import json, re
+    from urllib.parse import urljoin
+    field = GLO_FIELDS.get(request.get('index') or 'grantee')
+    if not field:
+        raise ValueError('glo_index_must_be_abstract_grantee_patentee_file_or_certificate')
+    term = ' '.join(request.get('terms', [])).strip()
+    county = str(case['scope'].get('county') or '').upper()
+    if not term or not county:
+        raise ValueError('glo_search_requires_term_and_case_county')
+    try:
+        with _http() as client:
+            page = client.get(GLO_SEARCH).text
+            settings = json.loads(re.search(r'data-drupal-selector="drupal-settings-json">(.*?)</script>', page, re.S).group(1))
+            key = settings['antibot']['forms']['glo-custom-land-grant-search']['key'][::-1]
+            antibot = ''.join(key[i:i + 2][::-1] for i in range(0, len(key), 2))
+            build = re.search(r'name="form_build_id" value="([^"]+)"', page).group(1)
+            params = {name: '' for name in ('abstractnumber', 'originalgrantee', 'patentee', 'classtype', 'filenumber',
+                                            'certificate', 'titledate', 'patentdate', 'patentnumber', 'patentvolume',
+                                            'partsection', 'surveyblocktownship')}
+            params.update({'county': county, field: term, 'pageSize': '25', 'form_build_id': build,
+                           'form_id': 'glo_custom_land_grant_search', 'antibot_key': antibot})
+            results, pages, reported = [], [], None
+            for number in range(1, 21):
+                html = client.get(GLO_AJAX, params={**params, 'page': str(number)}).text
+                pages.append(number)
+                found = re.search(r'out of\s+(\d+)\s+results', _text(html))
+                reported = int(found.group(1)) if found else (0 if 'No results were found' in html else reported)
+                for row in re.findall(r'<tr[^>]*>(.*?)</tr>', html, re.S):
+                    cells = [_text(c) for c in re.findall(r'<td[^>]*>(.*?)</td>', row, re.S)]
+                    if len(cells) < 6:
+                        continue
+                    links = [urljoin(GLO_SEARCH, h) for h in re.findall(r'href="([^"]+)"', row)]
+                    # Columns: County, Abstract, District/Class, File Number, Grantee, Patentee, PDF.
+                    results.append({'county': cells[0], 'abstract': cells[1], 'district_class': cells[2],
+                                    'file_number': cells[3], 'grantee': cells[4], 'patentee': cells[5],
+                                    'pdf_status': cells[6] if len(cells) > 6 else '',
+                                    'pdf': next((l for l in links if l.lower().endswith('.pdf')), None),
+                                    'detail': next((l for l in links if '/land-grant/' in l), None)})
+                if reported is None or len(results) >= reported:
+                    break
+    except SourceUnavailable:
+        raise
+    except Exception as exc:
+        if type(exc).__module__.startswith(('httpx', 'httpcore', 'ssl', 'socket')):
+            _network('glo', exc)
+        raise SourceUnavailable(f'source_response_not_understood:glo:{type(exc).__name__}') from exc
+    return {'source': 'glo', 'source_url': GLO_SEARCH, 'observed_at': _now(), 'query': request,
+            'index_field': field, 'county': county, 'reported_total': reported, 'saved_total': len(results),
+            'pages': pages, 'pagination_complete': reported is not None and len(results) >= reported,
+            'counts_reconciled': reported == len(results), 'results': results,
+            'limitation': 'Índice de land grants do GLO por campo; não é índice de deeds do condado.'}
+
+
+def topics_search(request):
+    term = ' '.join(request.get('terms', [])).strip()
+    if not term:
+        raise ValueError('topics_search_requires_term')
+    try:
+        with _http() as client:
+            response = client.get(TOPICS_SEARCH, params={'searchData': term},
+                                  headers={'X-Requested-With': 'XMLHttpRequest'})
+            response.raise_for_status()
+            rows = response.json().get('data', [])
+    except Exception as exc:
+        if type(exc).__module__.startswith(('httpx', 'httpcore', 'ssl', 'socket')):
+            _network('topics', exc)
+        raise SourceUnavailable(f'source_response_not_understood:topics:{type(exc).__name__}') from exc
+    results = [{'style': r[0], 'cause': r[1], 'court': r[2], 'status': r[3], 'id': r[4]}
+               for r in rows if isinstance(r, list) and len(r) >= 5]
+    return {'source': 'topics', 'source_url': TOPICS_SEARCH, 'observed_at': _now(), 'query': request,
+            'reported_total': len(rows), 'saved_total': len(results), 'pages': [1],
+            'pagination_complete': True, 'results': results,
+            'limitation': 'Busca textual nas citações e notices publicados no TOPICs; não cobre todos os processos.'}
+
+
+def cad_view(case, request):
+    """Terrell CAD property card by PID (the case's PID unless the terms name one)."""
+    import re
+    pid = next((t for t in request.get('terms', []) if re.fullmatch(r'\d{1,9}', str(t).strip())), None) \
+        or str(case['scope'].get('pid') or '')
+    if not re.fullmatch(r'\d{1,9}', pid):
+        raise ValueError('terrell_cad_requires_numeric_pid')
+    try:
+        with _http() as client:
+            response = client.get(CAD_VIEW + pid)
+            response.raise_for_status()
+            text = _text(response.text)
+    except Exception as exc:
+        if type(exc).__module__.startswith(('httpx', 'httpcore', 'ssl', 'socket')):
+            _network('terrell_cad', exc)
+        raise SourceUnavailable(f'source_response_not_understood:terrell_cad:{type(exc).__name__}') from exc
+    return {'source': 'terrell_cad', 'source_url': CAD_VIEW + pid, 'observed_at': _now(), 'query': request,
+            'reported_total': 1, 'saved_total': 1, 'pages': [1], 'pagination_complete': True,
+            'results': [{'pid': pid, 'text': text[:20000]}],
+            'limitation': 'Cartão fiscal do CAD; não prova titularidade nem cadeia.'}
+
+
+def glo_capture(repo, task, locator):
+    """A public GLO land-grant PDF becomes a source document of the Case."""
+    import httpx
+    url = urlparse(locator)
+    if url.scheme != 'https' or url.hostname not in GLO_HOSTS or not url.path.lower().endswith('.pdf'):
+        raise ValueError('capture_locator_outside_approved_source')
+    request = {'source': 'glo', 'locator': locator, 'operation': 'public_pdf'}
+    job = repo.operation_source_request(task['unit_id'], 'glo', digest(request), request,
+                                        task_id=task['id'], impact=task['title'])
+    if job['status'] == 'complete':
+        return job['receipt']
+    try:
+        with _http() as client:
+            response = client.get(locator)
+            response.raise_for_status()
+            data = response.content
+    except Exception as exc:
+        receipt = {'blocked': True, 'reason': f'network_unreachable:glo:{type(exc).__name__}',
+                   'access': 'network', 'owner': 'Renato', 'source': 'glo', 'locator': locator}
+        repo.operation_source_result(job['id'], 'blocked', receipt)
+        return receipt
+    if not data.startswith(b'%PDF') or len(data) > 60_000_000:
+        raise ValueError('glo_capture_not_a_pdf_or_too_large')
+    path, sha = write_bytes(task['unit_id'], f"capturas/glo/{digest(request)}.pdf", data)
+    metadata = {'source_url': locator, 'source': 'glo', 'public_document': True, 'cost_usd': 0,
+                'observed_at': _now(), 'display_name': 'GLO ' + url.path.rsplit('/', 1)[-1],
+                'capture_status': 'captured_pending_visual_review'}
+    artifact = repo.operation_add_artifact(task['unit_id'], 'source', path, sha, len(data), metadata, task['id'])
+    repo.registrar_source_file(sha, len(data))
+    receipt = {**metadata, 'artifact_id': artifact['id'], 'path': str(path), 'sha256': sha}
+    repo.operation_source_result(job['id'], 'complete', receipt)
+    return receipt
+
+
 def execute(repo,task,source,request):
     if source not in ('local','drive') and len(request.get('terms',[]))>1:
         receipts=[execute(repo,task,source,{**request,'terms':[term]}) for term in request['terms']]
@@ -167,21 +329,44 @@ def execute(repo,task,source,request):
         repo.operation_source_result(job['id'],'complete',shared)
         repo.operation_event('source.reused','process:pesquisador',{'job_id':job['id'],'origin_job_id':shared['shared_origin_job_id']},unit_id=task['unit_id'],task_id=task['id'])
         return {**shared,'job_id':job['id']}
+    from src.casefile import routines
     try:
         if source=='local':
             receipt=local_catalog(repo,task['unit_id'],request)
         elif source=='drive':
             receipt=drive_catalog(case,request)
+        elif source=='glo':
+            receipt=glo_search(case,request)
+        elif source=='topics':
+            receipt=topics_search(request)
+        elif source=='terrell_cad':
+            receipt=cad_view(case,request)
+        elif routines.access(source)=='paid':
+            # Issue 17: a paid source is never searched automatically.
+            raise SourceUnavailable('paid_source:'+source)
         else:
             receipt=portal_search(repo,case,source,request,'task:'+str(task['id']))
         repo.operation_source_result(job['id'],'complete',receipt)
         repo.operation_event('source.complete','process:pesquisador',{'job_id':job['id'],'source':source},unit_id=task['unit_id'],task_id=task['id'])
         return {**receipt,'job_id':job['id']}
     except SourceUnavailable as exc:
-        receipt={'blocked':True,'reason':str(exc),'owner':'Renato','impact':task['title'],'source':source,'request':request}
+        receipt={'blocked':True,'reason':str(exc),'owner':'Renato','impact':task['title'],'source':source,'request':request,
+                 'access':blocked_access(source,str(exc))}
         repo.operation_source_result(job['id'],'blocked',receipt)
         repo.operation_event('source.blocked','process:pesquisador',receipt,unit_id=task['unit_id'],task_id=task['id'])
         return {**receipt,'job_id':job['id']}
+
+
+def blocked_access(source,reason):
+    """Issue 17: what an operator must provide for a blocked source."""
+    from src.casefile import routines
+    if reason.startswith('paid_source') or routines.access(source)=='paid':
+        return 'paid'
+    if reason.startswith('network_unreachable'):
+        return 'network'
+    if reason.startswith('source_response_not_understood'):
+        return 'adapter'
+    return 'login'
 
 
 def shared_receipt(repo,case,source,key):
@@ -210,6 +395,8 @@ def capture(repo,task,source,locator):
     import io
     from PIL import Image
     case=repo.operation_case(task['unit_id'])
+    if source=='glo' and source in case['scope']['sources']:
+        return glo_capture(repo,task,locator)
     recipe=case['profile'].get('source_recipes',{}).get(source)
     if source not in case['scope']['sources'] or not recipe or not recipe.get('preview_page_count_selector'):
         return {'blocked':True,'reason':'authorized_preview_capture_recipe_required','owner':'Renato'}

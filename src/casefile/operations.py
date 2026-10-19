@@ -140,10 +140,10 @@ def detail(repo,unit_id):
         except (ValueError,OSError) as exc:
             knowledge={'release_id':config['release_id'],'error':str(exc)}
     from src.casefile.knowledge_registry import overview as knowledge_versions
-    from src.casefile import rounds, autonomy
+    from src.casefile import rounds, autonomy, routines
     return serializable({'case':case,'round':rounds.state(repo,unit_id),'lot':autonomy.overview(repo,unit_id),
                          'exceptions':autonomy.open_exceptions(repo,unit_id),
-                         'presets':{'reject':list(autonomy.REJECT_PRESETS),'blank':list(autonomy.BLANK_PRESETS),'sources':list(autonomy.SOURCES)},
+                         'presets':{'reject':list(autonomy.REJECT_PRESETS),'blank':list(autonomy.BLANK_PRESETS),'sources':routines.catalog('cibola_surface'),'routines':{k:routines.catalog(k) for k in routines.ROUTINES}},
                          'knowledge':knowledge,'knowledge_registry':knowledge_versions(repo),'tasks':repo.tarefas(unit_id),'artifacts':repo.operation_artifacts(unit_id),
                          'research':repo.pesquisas(unit_id),'source_jobs':repo.operation_sources(unit_id),
                          'followups':repo.operation_followups(unit_id),
@@ -212,7 +212,7 @@ def validate_scope(scope):
         raise ValueError('invalid_scope_interval')
     if not isinstance(scope.get('sources'),list) or not scope['sources']:
         raise ValueError('approved_sources_required')
-    if set(scope['sources'])-{'local','drive','countyrecords','texasfile','rrc','cad','pacer','sos'}:
+    if set(scope['sources'])-({'local','drive','countyrecords','texasfile','rrc','cad','pacer','sos'}|routines.SOURCE_KEYS):
         raise ValueError('unknown_source')
     return scope
 

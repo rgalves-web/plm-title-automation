@@ -16,7 +16,7 @@ from src.casefile.storage import digest_file
 from tests.helpers_casefile import Msg, Use, unit_de_teste
 from tests.test_casefile_function_files import BLIND_OUTPUT
 from tests.test_casefile_operational_flow import source
-from tests.test_casefile_operations import operation_case, request  # noqa: F401
+from tests.test_casefile_operations import RESEARCH, operation_case, request  # noqa: F401
 
 QA_OUTPUT = {"lifecycle": "draft", "pronto": False, "itens": [
     {"checagem": "estrutura_formatacao", "estado": "pendente",
@@ -134,6 +134,7 @@ def _script(repo, unit, artifact, verdict="concordancia"):
                      lambda: _comparison(repo, unit, artifact, verdict)]] * 3,
         "redator": [[lambda: _writer(repo, unit)]],
         "qa_pacote": [[[Use("entregar_saida", {"saida": QA_OUTPUT})]]],
+        "pesquisador": [[[Use("entregar_saida", {"saida": RESEARCH})]]] * 6,
     })
 
 
@@ -240,58 +241,39 @@ def test_a_two_case_lot_runs_to_release_with_no_operator_action_but_release(
                              (lot["id"],)).fetchone()["closed_at"]
 
 
-def test_a_divergence_lands_in_the_queue_and_a_re_read_resolves_it(
+def test_a_divergence_is_researched_in_the_job_sources_and_ships_as_a_declared_gap(
         operation_case, tmp_path):
-    import fitz
     repo, _, _ = operation_case
     unit, artifact = _case(repo, tmp_path, "CASE-D")
-    path = Path(artifact["path"])
-    with fitz.open(path) as single, fitz.open() as double:
-        double.insert_pdf(single)
-        double.new_page().insert_text((30, 60), "Synthetic second page.")
-        double.save(tmp_path / "two-pages.pdf")
-    two = tmp_path / "two-pages.pdf"
-    repo.registrar_source_file(digest_file(two), two.stat().st_size)
-    artifact = repo.operation_add_artifact(unit["id"], "source", two, digest_file(two),
-                                           two.stat().st_size)
-    _lot(repo, [unit])
+    lot = _lot(repo, [unit])
     page = {"documento": artifact["sha256"], "pagina": 1, "modo": "texto"}
     script = _script(repo, unit, artifact, verdict="divergencia")
-    second = {"documento": artifact["sha256"], "pagina": 2, "modo": "texto"}
-    script.scripts["verificador"] = [
-        [[Use("ler_pagina_confirmada", page)], [Use("entregar_saida", {"saida": BLIND_OUTPUT})]],
-        [[Use("ler_pagina_confirmada", page, id="a"), Use("ler_pagina_confirmada", second, id="b")],
-         [Use("entregar_saida", {"saida": BLIND_OUTPUT})]]]
     script.scripts["arbitro"] = [
         [[Use("read_page", page)], lambda: _comparison(repo, unit, artifact, "divergencia")],
         [[Use("ler_pagina", page)], lambda: [Use("entregar_saida", {"saida": {
             "claim_id": repo.claims_da_unit(unit["id"])[0]["id"],
             "verificacao_id": repo.verificacoes_do_claim(
                 repo.claims_da_unit(unit["id"])[0]["id"])[-1]["id"],
-            "desfecho": "mantido", "material_conclusao_titulo": False,
+            "desfecho": "escalado", "material_conclusao_titulo": True,
             "justificativa": "Synthetic plumbing only.",
             "documento": "sha256:" + artifact["sha256"], "pagina": "1",
-            "trecho": "Synthetic fixture only."}})]],
-        [[Use("read_page", page)], lambda: _comparison(repo, unit, artifact)]]
-    assert _drive(repo, [(unit, script)]) == {unit["id"]: "awaiting_exceptions"}
-    [entry] = [e for e in autonomy.open_exceptions(repo, unit["id"])
-               if e["kind"] == "divergence"]
-    adjudication = repo.tarefa(entry["task_id"])
-    assert adjudication["output_schema"] == "adjudicacao"
-    assert adjudication["status"] == "aguardando_operador"
-    assert "re_read" in entry["options"] and "accept" in entry["options"]
-    assert _lot_task_count(repo, unit, "redator") == 0     # Writer waits
-    operations.command(repo, request(repo, unit, "resolve_exception",
-                                     exception_id=entry["id"], option="re_read"))
-    reread = [t for t in repo.tarefas(unit["id"]) if "-r1" in t["ref"]]
-    assert reread and reread[0]["parent_task_id"] == adjudication["id"]
-    assert reread[0]["input_json"]["pagina"] == "1-2"
-    final = _drive(repo, [(unit, script)])
-    assert repo.tarefa(adjudication["id"])["status"] == "aceita"
-    accepted = repo.conn.execute("SELECT * FROM operation_acceptances WHERE task_id=%s",
-                                 (adjudication["id"],)).fetchone()
-    assert accepted is not None
-    assert final[unit["id"]] in ("deliverable", "awaiting_exceptions")
+            "trecho": "Synthetic fixture only.",
+            "escalonamento": {"motivo": "material_title", "pergunta": "Synthetic arbiter question.",
+                              "opcoes": ["consultar SME", "fornecer evidência"],
+                              "evidencias": [{"documento": "sha256:" + artifact["sha256"],
+                                              "pagina": "1", "trecho": "Synthetic fixture only."}]}}})]]]
+    _drive(repo, [(unit, script)], until=("writer", "deliverable", "stopped", "awaiting_exceptions"))
+    [claim] = repo.conn.execute("SELECT * FROM claims WHERE unit_id=%s", (unit["id"],)).fetchall()
+    assert claim["status"] == "retirado"
+    [research] = [t for t in repo.tarefas(unit["id"])
+                  if t["ref"].startswith(f"lote-{lot['id']}-pesquisa-local-")]
+    assert research["input_json"]["claim_ids"] == [claim["id"]] and research["status"] == "aceita"
+    [gap] = autonomy.declared_gaps(repo, unit["id"], lot["id"])
+    assert gap["claim_id"] == claim["id"] and "Acervo local" in gap["reason"]
+    [adjudication] = [t for t in repo.tarefas(unit["id"]) if t["output_schema"] == "adjudicacao"]
+    assert adjudication["status"] == "aceita"
+    open_now = autonomy.open_exceptions(repo, unit["id"])
+    assert not [e for e in open_now if e["kind"] not in autonomy.LOT_QUEUE_KINDS]
 
 
 def _lot_task_count(repo, unit, kind):
@@ -302,23 +284,12 @@ def _lot_task_count(repo, unit, kind):
 def test_one_click_accept_and_preset_reject_from_the_queue(operation_case, tmp_path):
     repo, _, _ = operation_case
     unit, artifact = _case(repo, tmp_path, "CASE-C")
+    repo.conn.execute("INSERT INTO operation_autoaccept_suspensions(claim_type, reason) "
+                      "VALUES ('fact', 'Synthetic suspension.')")
     _lot(repo, [unit])
-    page = {"documento": artifact["sha256"], "pagina": 1, "modo": "texto"}
-    script = _script(repo, unit, artifact, verdict="divergencia")
-    adjudication = lambda: [Use("entregar_saida", {"saida": {  # noqa: E731
-        "claim_id": repo.claims_da_unit(unit["id"])[0]["id"],
-        "verificacao_id": repo.verificacoes_do_claim(
-            repo.claims_da_unit(unit["id"])[0]["id"])[-1]["id"],
-        "desfecho": "mantido", "material_conclusao_titulo": False,
-        "justificativa": "Synthetic plumbing only.",
-        "documento": "sha256:" + artifact["sha256"], "pagina": "1",
-        "trecho": "Synthetic fixture only."}})]
-    script.scripts["arbitro"] = [
-        [[Use("read_page", page)], lambda: _comparison(repo, unit, artifact, "divergencia")],
-        [[Use("ler_pagina", page)], adjudication]]
-    _drive(repo, [(unit, script)])
+    _drive(repo, [(unit, _script(repo, unit, artifact))])
     [entry] = [e for e in autonomy.open_exceptions(repo, unit["id"])
-               if e["kind"] == "divergence"]
+               if e["kind"] == "audit_suspended"]
     with pytest.raises(ValueError, match="option_not_available"):
         operations.command(repo, request(repo, unit, "resolve_exception",
                                          exception_id=entry["id"], option="raise_cap"))
@@ -499,41 +470,32 @@ def test_the_coordinator_acts_on_the_failure_class_with_one_queue_entry(
                 if e["kind"] == "escalation" and e["task_id"] == coordinator["id"]]
 
 
-def test_the_arbiter_escalation_and_the_divergence_are_one_queue_item_per_claim(
+def test_older_arbiter_escalations_join_the_coordinator_entry_for_their_claim(
         operation_case, tmp_path):
+    from tests.test_casefile_operations import task as ready_task
     repo, _, _ = operation_case
     unit, artifact = _case(repo, tmp_path, "CASE-M")
-    _lot(repo, [unit])
-    page = {"documento": artifact["sha256"], "pagina": 1, "modo": "texto"}
-    script = _script(repo, unit, artifact, verdict="divergencia")
-    script.scripts["arbitro"] = [
-        [[Use("read_page", page)], lambda: _comparison(repo, unit, artifact, "divergencia")],
-        [[Use("ler_pagina", page)], lambda: [Use("entregar_saida", {"saida": {
-            "claim_id": repo.claims_da_unit(unit["id"])[0]["id"],
-            "verificacao_id": repo.verificacoes_do_claim(
-                repo.claims_da_unit(unit["id"])[0]["id"])[-1]["id"],
-            "desfecho": "escalado", "material_conclusao_titulo": True,
-            "justificativa": "Synthetic plumbing only.",
-            "documento": "sha256:" + artifact["sha256"], "pagina": "1",
-            "trecho": "Synthetic fixture only.",
-            "escalonamento": {"motivo": "material_title",
-                              "pergunta": "Synthetic arbiter question.",
-                              "opcoes": ["consultar SME", "fornecer evidência"],
-                              "evidencias": [{"documento": "sha256:" + artifact["sha256"],
-                                              "pagina": "1",
-                                              "trecho": "Synthetic fixture only."}]}}})]]]
-    assert _drive(repo, [(unit, script)]) == {unit["id"]: "awaiting_exceptions"}
-    [claim] = repo.claims_da_unit(unit["id"])
-    about_claim = [e for e in autonomy.open_exceptions(repo, unit["id"])
-                   if e["kind"] in autonomy.RESULT_KINDS or e["motivo"] == "material_title"]
-    assert len(about_claim) == 1 and about_claim[0]["kind"] == "divergence"
-    assert "Synthetic arbiter question." in about_claim[0]["pergunta"]
-    [merged] = about_claim[0]["detail"]["merged_escalations"]
-    closed = repo.conn.execute("SELECT * FROM escalations WHERE id=%s", (merged["id"],)).fetchone()
-    assert closed["respondido_em"] and closed["resolution"]["merged_into"] == about_claim[0]["id"]
-    assert repo.conn.execute(
-        "SELECT count(*) AS n FROM operation_coordinator_decisions WHERE unit_id=%s "
-        "AND kind='merge'", (unit["id"],)).fetchone()["n"] == 1
+    lot = _lot(repo, [unit])
+    session = repo.abrir_sessao(unit["id"], "synthetic", "synthetic-model")
+    cid = repo.inserir_claim(
+        unit_id=unit["id"], claim_type="fact", entity="Synthetic",
+        value={"tipo_resultado": "fato_documental"}, source_sha256=artifact["sha256"], page="1",
+        evidence="Synthetic fixture only.", confidence="media", materiality="media",
+        session_id=session)
+    comparison = ready_task(repo, unit, role="arbitro", schema="comparacao_independente",
+                            data={"claim": {"id": cid}})
+    legacy = repo.abrir_escalonamento(unit["id"], comparison["id"], "material_title",
+                                      "Synthetic arbiter question.",
+                                      ["consultar SME", "fornecer evidência"])
+    entry = autonomy._exception(repo, lot["id"], unit["id"], None, "divergence",
+                                f"synthetic:{cid}", "Synthetic divergence.",
+                                {"claims": [{"claim_id": cid}]})
+    autonomy._merge_claim_entries(repo, autonomy.open_lot_case(repo, unit["id"]))
+    merged = repo.conn.execute("SELECT * FROM escalations WHERE id=%s", (entry,)).fetchone()
+    assert "Synthetic arbiter question." in merged["pergunta"]
+    assert [m["id"] for m in merged["detail"]["merged_escalations"]] == [legacy]
+    closed = repo.conn.execute("SELECT * FROM escalations WHERE id=%s", (legacy,)).fetchone()
+    assert closed["respondido_em"] and closed["resolution"]["merged_into"] == entry
 
 
 def test_the_job_routine_sets_the_pack_and_never_falls_back_to_the_default(
@@ -560,10 +522,10 @@ def test_the_job_routine_sets_the_pack_and_never_falls_back_to_the_default(
     assert writer["pack"] == "title-texas-oil-gas-dd"
 
 
-def test_an_open_item_blocks_auto_accept_until_dismissed(operation_case, tmp_path):
+def test_an_open_item_is_researched_and_ships_as_a_declared_gap(operation_case, tmp_path):
     repo, _, _ = operation_case
     unit, artifact = _case(repo, tmp_path, "CASE-H")
-    _lot(repo, [unit])
+    lot = _lot(repo, [unit])
     script = _script(repo, unit, artifact)
     item = None
     for _ in range(20):
@@ -580,16 +542,15 @@ def test_an_open_item_blocks_auto_accept_until_dismissed(operation_case, tmp_pat
             break
     assert item is not None
     examiner = waiting[0]
-    assert autonomy.coordinate(repo, unit["id"]) == "awaiting_exceptions"
-    [entry] = [e for e in autonomy.open_exceptions(repo, unit["id"])
-               if e["kind"] == "open_item"]
-    assert entry["task_id"] == examiner["id"]
-    assert repo.tarefa(examiner["id"])["status"] == "aguardando_operador"
-    operations.command(repo, request(repo, unit, "resolve_exception",
-                                     exception_id=entry["id"], option="dismiss"))
+    for _ in range(10):
+        autonomy.step(repo, unit["id"], script)
+        if repo.claim(item)["status"] != "ativo":
+            break
     assert repo.claim(item)["status"] == "retirado"
+    assert [g["claim_id"] for g in autonomy.declared_gaps(repo, unit["id"], lot["id"])] == [item]
     autonomy.coordinate(repo, unit["id"])
     assert repo.tarefa(examiner["id"])["status"] == "aceita"
+    assert not [e for e in autonomy.open_exceptions(repo, unit["id"]) if e["kind"] == "open_item"]
 
 
 def test_sample_audit_suspends_a_claim_type_until_turned_back_on(operation_case, tmp_path):
