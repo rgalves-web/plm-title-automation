@@ -927,6 +927,16 @@ def _failing_claims(verdict: dict[str, Any]) -> dict[int, str]:
 MAX_REPLANS = 3
 
 
+def _refusal_reason(task: dict[str, Any], last: dict[str, Any], reason: str) -> str:
+    """What the re-planning Coordinator needs to plan differently: the stop,
+    the contract the Function had to meet and the validation errors."""
+    from src.casefile.runtime import ARCHIVIST_CONTRACT
+    errors = "; ".join(str(e) for e in (last.get("validation_errors") or [])[:3])
+    contract = ARCHIVIST_CONTRACT if task["role"] == "arquivista" else \
+        f"esquema exigido {task['output_schema']}"
+    return f"{reason or 'recusada'}: nenhuma entrega válida nas tentativas ({errors}); {contract}"
+
+
 def _replans(repo: Any, lc: dict[str, Any]) -> list[dict[str, Any]]:
     return [t for t in repo.tarefas(lc["unit_id"]) if t["role"] == "coordenador"
             and (t["input_json"] or {}).get("replanejar_apos", {}).get("lot_id") == lc["lot_id"]]
@@ -945,6 +955,13 @@ def _replan(repo: Any, lc: dict[str, Any], task: dict[str, Any], last: dict[str,
     if len(done) >= MAX_REPLANS:
         return False
     cancelled, frontier = [], {task["id"]}
+    # The new plan covers all remaining work: earlier plans' pending tasks go.
+    for t in _plan_tasks(repo, lc):
+        if t["status"] in ("planejada", "pronta"):
+            repo.transicionar_tarefa(t["id"], (t["status"],), "cancelada", COORDINATOR,
+                                     "O Coordenador replaneja todo o trabalho restante do lote.")
+            cancelled.append(t["id"])
+            frontier.add(t["id"])
     while frontier:
         nxt = set()
         for t in repo.tarefas(uid):
@@ -987,17 +1004,129 @@ def _replan(repo: Any, lc: dict[str, Any], task: dict[str, Any], last: dict[str,
     return True
 
 
+def _plan_tasks(repo: Any, lc: dict[str, Any]) -> list[dict[str, Any]]:
+    """Tasks the Coordinator's plans created in this Lot (not the Lot's own
+    research, re-examination, Writer, QA or follow-ups)."""
+    return [t for t in repo.tarefas(lc["unit_id"]) if t["created_by"] == COORDINATOR
+            and t["role"] != "coordenador" and not t["ref"].startswith("lote-")
+            and t["created_at"] >= lc["lot_created_at"]]
+
+
+def _supersede_older_plan_tasks(repo: Any, lc: dict[str, Any]) -> list[int]:
+    """A pending plan task whose pending searches a newer plan already covers
+    is cancelled, so a replan never runs the same research twice."""
+    pending = [t for t in _plan_tasks(repo, lc)
+               if t["status"] in ("planejada", "pronta") and t["pendencias"]]
+    cancelled: list[int] = []
+    for t in sorted(pending, key=lambda x: x["id"]):
+        newer = set().union(*[set(o["pendencias"]) for o in pending
+                              if o["id"] > t["id"] and o["id"] not in cancelled]) if pending else set()
+        if set(t["pendencias"]) <= newer:
+            repo.transicionar_tarefa(t["id"], (t["status"],), "cancelada", COORDINATOR,
+                                     "As mesmas pesquisas estão numa tarefa mais nova do plano.")
+            cancelled.append(t["id"])
+    if cancelled:
+        _decision(repo, lc["lot_id"], lc["unit_id"], "supersede_plan_tasks",
+                  f"{len(cancelled)} tarefa(s) de planos anteriores repetiam pesquisas que um plano "
+                  "mais novo cobre; foram canceladas.", {"cancelled": cancelled})
+    return cancelled
+
+
+def _close_non_queue_entries(repo: Any, lc: dict[str, Any]) -> None:
+    """Issue 17: a rejected capture or a Claim without a physical page opened
+    before this rule is no queue item inside a Lot."""
+    repo.conn.execute(
+        "UPDATE escalations SET resposta=%s,respondido_por=%s,respondido_em=now(),resolution=%s "
+        "WHERE unit_id=%s AND respondido_em IS NULL AND kind='escalation' AND "
+        "motivo IN ('capture','document_evidence') AND created_at >= %s",
+        ("Dentro do lote não é item da fila: o motivo fica na saída da função e a afirmação segue "
+         "para pesquisa nas fontes do job ou lacuna declarada.", COORDINATOR,
+         json.dumps({"option": "not_a_queue_item_in_lot", "rule": RULE}),
+         lc["unit_id"], lc["lot_created_at"]))
+
+
+def _cancel_infeasible(repo: Any, lc: dict[str, Any]) -> list[int]:
+    """Issue 17: a pending Archivist task that names no document cannot meet
+    its contract; it is cancelled (with what depended on it) before it burns
+    turns, and the decision says why."""
+    from src.casefile.runtime import ARCHIVIST_CONTRACT, archivist_target
+    uid = lc["unit_id"]
+    bad = [t for t in repo.tarefas(uid) if t["role"] == "arquivista"
+           and t["status"] in ("planejada", "pronta") and t["created_at"] >= lc["lot_created_at"]
+           and not archivist_target(t["input_json"] or {})]
+    cancelled = []
+    frontier = set()
+    for t in bad:
+        repo.transicionar_tarefa(t["id"], (t["status"],), "cancelada", COORDINATOR,
+                                 "Contrato inviável: " + ARCHIVIST_CONTRACT)
+        cancelled.append(t["id"])
+        frontier.add(t["id"])
+    while frontier:
+        nxt = set()
+        for t in repo.tarefas(uid):
+            if t["status"] in ("planejada", "pronta") and frontier & set(t["depends_on"] or []):
+                repo.transicionar_tarefa(t["id"], (t["status"],), "cancelada", COORDINATOR,
+                                         "Dependia de uma tarefa do Arquivista com contrato inviável.")
+                cancelled.append(t["id"])
+                nxt.add(t["id"])
+        frontier = nxt
+    if cancelled:
+        _decision(repo, lc["lot_id"], uid, "cancel_infeasible",
+                  f"{len(bad)} tarefa(s) do Arquivista sem documento a registrar foram canceladas "
+                  f"(e {len(cancelled) - len(bad)} dependente(s)): {ARCHIVIST_CONTRACT}.",
+                  {"cancelled": cancelled})
+    return cancelled
+
+
+def _infeasible_refusal(repo: Any, lc: dict[str, Any], task: dict[str, Any]) -> bool:
+    """A refused Archivist task that named no document never could deliver:
+    its entry closes and what depended on it is cancelled; no replan is spent."""
+    from src.casefile.runtime import ARCHIVIST_CONTRACT, archivist_target
+    if task["role"] != "arquivista" or archivist_target(task["input_json"] or {}):
+        return False
+    uid = lc["unit_id"]
+    open_entries = repo.conn.execute(
+        "SELECT id FROM escalations WHERE unit_id=%s AND task_id=%s AND respondido_em IS NULL",
+        (uid, task["id"])).fetchall()
+    dependents = [t for t in repo.tarefas(uid)
+                  if t["status"] in ("planejada", "pronta") and task["id"] in (t["depends_on"] or [])]
+    for t in dependents:
+        repo.transicionar_tarefa(t["id"], (t["status"],), "cancelada", COORDINATOR,
+                                 "Dependia de uma tarefa do Arquivista com contrato inviável.")
+    if open_entries:
+        repo.conn.execute(
+            "UPDATE escalations SET resposta=%s,respondido_por=%s,respondido_em=now(),resolution=%s "
+            "WHERE unit_id=%s AND task_id=%s AND respondido_em IS NULL",
+            ("Contrato inviável: " + ARCHIVIST_CONTRACT, COORDINATOR,
+             json.dumps({"option": "infeasible_contract", "rule": RULE}), uid, task["id"]))
+    if open_entries or dependents:
+        _decision(repo, lc["lot_id"], uid, "infeasible_refusal",
+                  f"A tarefa {task['id']} do Arquivista não nomeava documento e não podia entregar; "
+                  f"sua entrada fecha e {len(dependents)} dependente(s) são cancelada(s): "
+                  f"{ARCHIVIST_CONTRACT}.",
+                  {"task_id": task["id"], "cancelled": [t["id"] for t in dependents]})
+    return True
+
+
 def _revivable(repo: Any, lc: dict[str, Any]) -> bool:
-    """A Lot case stopped only by refused tasks the Coordinator can replan."""
+    """A Lot case stopped only by entries the Coordinator now handles itself:
+    refused tasks it can replan, refused Archivist tasks that named no
+    document, and Lot-internal entries that are no queue items."""
+    from src.casefile.runtime import archivist_target
     if lc["status"] != "stopped" or lc["stop_reason"] != "awaiting_exceptions":
         return False
+    _close_non_queue_entries(repo, lc)
     blocking = [e for e in _lot_queue(repo, lc) if e.get("kind") not in LOT_QUEUE_KINDS]
-    if not blocking or len(_replans(repo, lc)) >= MAX_REPLANS:
+    if not blocking:
         return False
+    replans_left = len(_replans(repo, lc)) < MAX_REPLANS
     for entry in blocking:
         task = repo.tarefa(entry["task_id"]) if entry.get("task_id") else None
         if entry.get("kind") != "case_blocked" or not task or task["status"] != "recusada" \
                 or task["role"] == "coordenador":
+            return False
+        infeasible = task["role"] == "arquivista" and not archivist_target(task["input_json"] or {})
+        if not (infeasible or replans_left):
             return False
     return True
 
@@ -1146,6 +1275,9 @@ def coordinate(repo: Any, unit_id: int) -> str:
         if stop:
             _stop(repo, lc, stop[0], stop[1], "envelope:" + stop[2])
             return "stopped"
+        _cancel_infeasible(repo, lc)
+        _supersede_older_plan_tasks(repo, lc)
+        _close_non_queue_entries(repo, lc)
         for task in repo.tarefas(unit_id):
             runs = repo.runs_da_tarefa(task["id"])
             last = runs[-1] if runs else None
@@ -1156,7 +1288,9 @@ def coordinate(repo: Any, unit_id: int) -> str:
                     return acted
             elif task["status"] == "recusada" and last and \
                     task["created_at"] >= lc["lot_created_at"]:
-                if task["role"] != "coordenador" and _replan(repo, lc, task, last, reason):
+                if _infeasible_refusal(repo, lc, task):
+                    continue
+                if task["role"] != "coordenador" and _replan(repo, lc, task, last, _refusal_reason(task, last, reason)):
                     continue
                 _exception(repo, lc["lot_id"], unit_id, task["id"], "case_blocked",
                            f"task:{task['id']}:refused:run{last['id']}",
@@ -1602,7 +1736,7 @@ def wake(repo: Any, unit_id: int) -> str:
     stops the Case with a reason. A Case Renato paused stays paused."""
     from src.casefile.operations import has_unbounded_usage
     lc = open_lot_case(repo, unit_id)
-    if lc and _revivable(repo, lc) and repo.operation_case(unit_id)["execution_state"] == "waiting":
+    if lc and repo.operation_case(unit_id)["execution_state"] == "waiting" and _revivable(repo, lc):
         # Issue 17: stopped only by refused tasks; the Coordinator replans.
         repo.conn.execute(
             "UPDATE operation_lot_cases SET status='running',stop_reason='',updated_at=now() "

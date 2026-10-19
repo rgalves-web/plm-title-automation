@@ -355,6 +355,19 @@ def context(repo,task):
         'automatic_replanning':True}),ensure_ascii=False)
 
 
+# Issue 17: the Archivist's contract (documento_registrado) registers ONE
+# captured document per task; a task that names no document cannot deliver.
+ARCHIVIST_TARGET_KEYS=('documento','documentos','sha256','source_sha256','localizador','locator','url',
+                       'artifact_id','artifact_ids','arquivo','caminho','referencia_registro')
+ARCHIVIST_CONTRACT=('o Arquivista captura e registra UM documento por tarefa (documento_registrado: '
+                    'nome_canonico, paginas, checagens, estado); ledger, inventário, matriz e fila externa '
+                    'não cabem neste contrato: peça-os ao Pesquisador ou registre-os na justificativa do plano')
+
+
+def archivist_target(data):
+    return any(data.get(k) for k in ARCHIVIST_TARGET_KEYS)
+
+
 def check_plan(repo,task,output,*,teto,raiz=None,**_):
     errors=orquestracao.checar_plano(repo,task['unit_id'],output,teto=teto,pacote=task['pack'],raiz=raiz,excluir_tarefa=task['id'])
     requested={p for t in output.get('tarefas',[]) for p in t.get('pendencias',[])}
@@ -371,6 +384,8 @@ def check_plan(repo,task,output,*,teto,raiz=None,**_):
             errors.append('task_source_outside_scope')
         if set(data.get('artifact_ids',[]))-permitted:
             errors.append('task_artifacts_outside_case')
+        if item['role']=='arquivista' and not archivist_target(data):
+            errors.append('archivist_task_requires_one_document:'+item['ref']+'; '+ARCHIVIST_CONTRACT)
         if item['role']=='verificador' and not all(data.get(k) for k in ('claim_id','source_sha256','pagina')):
             errors.append('independent_review_requires_registered_claim_and_source; executor_queues_this_after_examination')
         clean=lambda value:{k:v for k,v in value.items() if k!='operation'}
@@ -470,7 +485,10 @@ def check_document(repo,task,output,**_):
 
 def persist_document(repo,task,output,session_id,**_):
     if output['estado']=='rejeitado':
-        repo.abrir_escalonamento(task['unit_id'],task['id'],'capture',output['motivo'],['recapturar','fornecer cópia completa'])
+        # Issue 17: inside a Lot a rejected capture is no queue item; the
+        # reason stays in the Archivist's output file.
+        if not orquestracao._in_open_lot(repo,task['unit_id']):
+            repo.abrir_escalonamento(task['unit_id'],task['id'],'capture',output['motivo'],['recapturar','fornecer cópia completa'])
         return []
     source=next(a for a in repo.operation_artifacts(task['unit_id']) if a['sha256']==output['sha256'])
     repo.registrar_source_file(source['sha256'],source['size_bytes'])
@@ -522,7 +540,7 @@ def queue_claim_review(repo,uid,claim,parent=None):
         if review and review['status'] in ('planejada','pronta'):
             repo.transicionar_tarefa(review['id'],(review['status'],),'bloqueada','process:source-identity','physical_source_page_required_before_paid_review')
         question='Afirmação '+str(claim['id'])+' sem página física verificável. Corrigir a referência ou fornecer a evidência de pesquisa; não inferir ausência de documento.'
-        if not any(e['pergunta']==question for e in repo.escalonamentos(uid,abertos=True)):
+        if not orquestracao._in_open_lot(repo,uid) and not any(e['pergunta']==question for e in repo.escalonamentos(uid,abertos=True)):
             repo.abrir_escalonamento(uid,review['id'] if review else None,'document_evidence',question,['corrigir referência','fornecer pesquisa completa'])
 
 

@@ -174,8 +174,8 @@ def test_a_refused_task_is_replanned_not_queued_and_a_stopped_lot_resumes(operat
     repo.transicionar_tarefa(coordinator["id"], ("pronta",), "cancelada", "process:test", "Synthetic.")
     orquestracao.registrar_versoes(repo)
     first, second = repo.criar_tarefas(uid, [
-        {"ref": "synthetic-preflight", "role": "arquivista", "pack": "title-texas-surface",
-         "title": "Synthetic preflight", "output_schema": "documento_registrado", "input_json": {},
+        {"ref": "synthetic-preflight", "role": "pesquisador", "pack": "title-texas-surface",
+         "title": "Synthetic preflight", "output_schema": "resultado_pesquisa", "input_json": {},
          "acceptance": "Synthetic.", "depends_on_refs": [], "budget_usd": 1, "priority": 0,
          "verificacao": "nenhuma"},
         {"ref": "synthetic-after", "role": "pesquisador", "pack": "title-texas-surface",
@@ -203,3 +203,101 @@ def test_a_refused_task_is_replanned_not_queued_and_a_stopped_lot_resumes(operat
     assert not [e for e in autonomy.open_exceptions(repo, uid) if e["task_id"] == first["id"]]
     autonomy.coordinate(repo, uid)
     assert len([t for t in repo.tarefas(uid) if "-replano-" in t["ref"]]) == 1
+
+
+def test_an_archivist_task_must_name_one_document(operation_case, tmp_path):
+    from src.casefile import orquestracao
+    repo, _, _ = operation_case
+    unit, artifact = _case(repo, tmp_path, "CASE-S7")
+    uid = unit["id"]
+    _lot(repo, [unit])
+    coordinator = [t for t in repo.tarefas(uid) if t["role"] == "coordenador"][0]
+    item = {"ref": "ledger", "role": "arquivista", "title": "Synthetic ledger", "input_json": {"pid": "x"},
+            "acceptance": "Synthetic.", "depends_on": [], "budget_usd": 1, "priority": 0,
+            "justificativa": "Synthetic."}
+    errors = runtime.check_plan(repo, coordinator, {"tarefas": [item]}, teto=50)
+    assert any(e.startswith("archivist_task_requires_one_document:ledger") for e in errors)
+    capture = {**item, "ref": "capture", "input_json": {"documento": "sha256:" + artifact["sha256"]}}
+    assert not [e for e in runtime.check_plan(repo, coordinator, {"tarefas": [capture]}, teto=50)
+                if e.startswith("archivist_task_requires_one_document")]
+    orquestracao.registrar_versoes(repo)
+    ledger, after = repo.criar_tarefas(uid, [
+        {"ref": "synthetic-ledger", "role": "arquivista", "pack": "title-texas-surface",
+         "title": "Synthetic ledger", "output_schema": "documento_registrado", "input_json": {},
+         "acceptance": "Synthetic.", "depends_on_refs": [], "budget_usd": 1, "priority": 0,
+         "verificacao": "nenhuma"},
+        {"ref": "synthetic-after-ledger", "role": "examinador", "pack": "title-texas-surface",
+         "title": "Synthetic dependent", "output_schema": "claims", "input_json": {},
+         "acceptance": "Synthetic.", "depends_on_refs": ["synthetic-ledger"], "budget_usd": 1,
+         "priority": 0, "verificacao": "nenhuma"}], "process:test")
+    cancelled = autonomy._cancel_infeasible(repo, autonomy.open_lot_case(repo, uid))
+    assert cancelled == [ledger["id"], after["id"]]
+    assert repo.tarefa(ledger["id"])["status"] == "cancelada"
+
+
+def test_older_plan_research_covered_by_a_newer_plan_is_cancelled(operation_case, tmp_path):
+    from src.casefile import orquestracao
+    repo, _, _ = operation_case
+    unit, _ = _case(repo, tmp_path, "CASE-S8")
+    uid = unit["id"]
+    _lot(repo, [unit])
+    orquestracao.registrar_versoes(repo)
+    def research(ref, pending):
+        return {"ref": ref, "role": "pesquisador", "pack": "title-texas-surface", "title": ref,
+                "output_schema": "resultado_pesquisa", "input_json": {"grupo": ref},
+                "acceptance": "Synthetic.", "depends_on_refs": [], "budget_usd": 1, "priority": 0,
+                "verificacao": "nenhuma", "pendencias": pending}
+    old, partial = repo.criar_tarefas(uid, [research("old", ["pesquisa:1", "pesquisa:2"]),
+                                            research("partial", ["pesquisa:3", "pesquisa:9"])],
+                                      autonomy.COORDINATOR)
+    newer = repo.criar_tarefas(uid, [research("newer", ["pesquisa:1", "pesquisa:2", "pesquisa:3"])],
+                               autonomy.COORDINATOR)[0]
+    repo.promover_prontas(uid, "process:test")
+    assert autonomy._supersede_older_plan_tasks(repo, autonomy.open_lot_case(repo, uid)) == [old["id"]]
+    assert repo.tarefa(partial["id"])["status"] != "cancelada"
+    assert repo.tarefa(newer["id"])["status"] != "cancelada"
+
+
+def test_a_refused_archivist_task_without_a_document_closes_without_a_replan(operation_case, tmp_path):
+    from src.casefile import orquestracao
+    repo, _, _ = operation_case
+    unit, _ = _case(repo, tmp_path, "CASE-S9")
+    uid = unit["id"]
+    lot = _lot(repo, [unit])
+    coordinator = [t for t in repo.tarefas(uid) if t["role"] == "coordenador"][0]
+    repo.transicionar_tarefa(coordinator["id"], ("pronta",), "cancelada", "process:test", "Synthetic.")
+    orquestracao.registrar_versoes(repo)
+    ledger = repo.criar_tarefas(uid, [
+        {"ref": "synthetic-ledger", "role": "arquivista", "pack": "title-texas-surface",
+         "title": "Synthetic ledger", "output_schema": "documento_registrado", "input_json": {},
+         "acceptance": "Synthetic.", "depends_on_refs": [], "budget_usd": 1, "priority": 0,
+         "verificacao": "nenhuma"}], "process:test")[0]
+    repo.promover_prontas(uid, "process:test")
+    got = orquestracao.pegar(repo, uid, "synthetic", teto=50, max_active_per_unit=1, rodada=True)
+    repo.fechar_run(got[1]["id"], "synthetic", output_json=None, output_valid=False,
+                    validation_errors=["synthetic"], stop_reason="sem_entrega", para="recusada")
+    autonomy._exception(repo, lot["id"], uid, ledger["id"], "case_blocked",
+                        f"task:{ledger['id']}:refused", "Synthetic refusal.", {})
+    repo.conn.execute("UPDATE operation_lot_cases SET status='stopped',stop_reason='awaiting_exceptions' "
+                      "WHERE unit_id=%s", (uid,))
+    repo.operation_update(uid, execution_state="waiting")
+    repo.abrir_escalonamento(uid, ledger["id"], "capture", "Synthetic rejected capture.", ["a", "b"])
+    autonomy.wake(repo, uid)
+    assert not [e for e in autonomy.open_exceptions(repo, uid) if e["task_id"] == ledger["id"]]
+    assert not [t for t in repo.tarefas(uid) if "-replano-" in t["ref"]]
+    assert autonomy.open_lot_case(repo, uid)["status"] == "running"
+
+
+def test_inside_a_lot_a_rejected_capture_opens_no_queue_item(operation_case, tmp_path):
+    repo, _, _ = operation_case
+    unit, _ = _case(repo, tmp_path, "CASE-S10")
+    uid = unit["id"]
+    _lot(repo, [unit])
+    archivist = ready_task(repo, unit, role="arquivista", schema="documento_registrado",
+                           data={"documento": "sha256:synthetic"})
+    runtime.persist_document(repo, archivist, {"estado": "rejeitado", "motivo": "Synthetic rejected capture.",
+                                               "nome_canonico": "x", "paginas": 1, "checagens": []}, None)
+    assert not [e for e in autonomy.open_exceptions(repo, uid) if e["motivo"] == "capture"]
+    repo.abrir_escalonamento(uid, archivist["id"], "capture", "Synthetic older capture.", ["a", "b"])
+    autonomy._close_non_queue_entries(repo, autonomy.open_lot_case(repo, uid))
+    assert not [e for e in autonomy.open_exceptions(repo, uid) if e["motivo"] == "capture"]
