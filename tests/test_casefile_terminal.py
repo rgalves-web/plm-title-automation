@@ -211,3 +211,29 @@ def test_terminal_reply_after_expired_lease_is_not_dispatched(operation_case):
         client=Late([[Use('entregar_saida',{'saida':RESEARCH})]]))
     assert result['tarefa']['status']=='bloqueada' and not result['gravados']
     assert repo.conn.execute('SELECT receipt FROM operation_terminal_calls').fetchone()['receipt']['billing_mode']=='subscription'
+
+
+def claude_events(calls, native):
+    return ([{'type':'assistant','message':{'content':[
+                {'type':'tool_use','id':'toolu_'+str(i),'name':name,'input':args}]}}
+             for i,(name,args) in enumerate(native)]
+            + [{'type':'result','subtype':'success','is_error':False,
+                'structured_output':{'text':'synthetic','calls':calls},
+                'usage':{'input_tokens':3,'output_tokens':2}}])
+
+
+def test_a_host_function_called_natively_inside_the_cli_becomes_a_request():
+    tool={'name':'read','input_schema':{'type':'object','properties':{'page':{'type':'integer'}},'required':['page']}}
+    reply=terminal.TerminalAdapter('A').parse(claude_events([],[('read',{'page':3}),('read',{'page':'x'}),('shell',{})]),[tool])
+    uses=[b for b in reply.content if b.type=='tool_use']
+    assert [(b.name,b.input) for b in uses]==[('read',{'page':3})]
+    assert reply.terminal_receipt['native_attempts']==['read','read','shell']
+    assert reply.terminal_receipt['native_attempts_dispatched']==['read']
+
+
+def test_structured_calls_win_over_native_attempts():
+    tool={'name':'read','input_schema':{'type':'object','properties':{'page':{'type':'integer'}},'required':['page']}}
+    reply=terminal.TerminalAdapter('A').parse(
+        claude_events([{'name':'read','arguments':'{"page":1}'}],[('read',{'page':9})]),[tool])
+    assert [b.input for b in reply.content if b.type=='tool_use']==[{'page':1}]
+    assert reply.terminal_receipt['native_attempts_dispatched']==[]

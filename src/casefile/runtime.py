@@ -291,8 +291,26 @@ def tools(repo,task):
                 'populations':counts,'limited_reply':True,'next_result_offset':25 if len(saved)>25 else None,
                 'file_name_matches_are_not_document_findings':True,
                 'hint':'Para nomes de controles e logs, consulte ler_case_file(secao=controles,filtro=termo), depois ler_controle por ID. Nomes e texto local não substituem busca registral.'}
+    def accepted_claims(offset=0,limite=50,**_):
+        from src.casefile import report_writer
+        uid=task['unit_id']
+        ready,held=[],{}
+        for claim in repo.claims_da_unit(uid):
+            error=report_writer.claim_error(repo,uid,claim['id'])
+            if error:
+                key=error.split(':',1)[0]
+                held[key]=held.get(key,0)+1
+            else:
+                ready.append({k:claim[k] for k in ('id','claim_type','entity','value','source_sha256','page','evidence','confidence','materiality')})
+        offset,limite=max(0,int(offset)),max(1,min(int(limite),100))
+        window=ready[offset:offset+limite]
+        return {'total':len(ready),'offset':offset,'claims':window,
+                'next_offset':offset+limite if offset+limite<len(ready) else None,
+                'nao_prontos':held,
+                'regra':'Só estes claims podem sustentar uma célula: ativos neste caso, com revisão independente em concordância e, se materiais, aceitos. Status ativo no Case File não basta sozinho.'}
     items={
         'read_page':(read_spec,read_page),
+        'ler_claims_aceitos':(tool('ler_claims_aceitos','Liste, com paginação, os claims que podem sustentar uma célula do entregável (a mesma regra da validação da entrega) e quantos ainda não podem, por motivo.',{'offset':{'type':'integer'},'limite':{'type':'integer'}}),accepted_claims),
         'registrar_claims':(tool('registrar_claims','Persista imediatamente um pequeno lote de claims no esquema da tarefa. Cada um recebe revisão independente; esta gravação não conclui a tarefa.',{'claims':{'type':'array','items':{'type':'object'}}},['claims']),checkpoint_claims),
         'ler_case_file':(tool('ler_case_file','Consulte o registro deste caso com paginação e IDs.',
                             {'secao':{'type':'string'},'offset':{'type':'integer'},'limite':{'type':'integer'},

@@ -601,7 +601,8 @@ def _lot_task(repo: Any, unit_id: int, lot_id: int, kind: str) -> dict[str, Any]
     return rows[-1] if rows else None
 
 
-def _create_phase_task(repo: Any, lot: dict[str, Any], kind: str) -> dict[str, Any]:
+def _create_phase_task(repo: Any, lot: dict[str, Any], kind: str,
+                       previous: dict[str, Any] | None = None) -> dict[str, Any]:
     from src.casefile import orquestracao
     uid, lot_id = lot["unit_id"], lot["lot_id"]
     n = 1 + sum(t["ref"].startswith(f"lote-{lot_id}-{kind}-") for t in repo.tarefas(uid))
@@ -620,11 +621,58 @@ def _create_phase_task(repo: Any, lot: dict[str, Any], kind: str) -> dict[str, A
     created = repo.criar_tarefas(uid, [{
         **row, "ref": f"lote-{lot_id}-{kind}-{n}", "pack": repo.operation_pack(uid),
         "input_json": {"operation": True, "lot_id": lot_id, "job": job,
-                       "lacunas_declaradas": declared_gaps(repo, uid, lot_id)},
+                       "lacunas_declaradas": declared_gaps(repo, uid, lot_id),
+                       **({"tentativa_anterior": previous} if previous else {})},
         "depends_on_refs": [], "budget_usd": 1.0, "priority": 0,
         "verificacao": "operador"}], COORDINATOR)[0]
     repo.promover_prontas(uid, COORDINATOR)
     return created
+
+
+PHASE_ATTEMPTS = 2
+
+
+def _phase_kind(lc: dict[str, Any], task: dict[str, Any]) -> str | None:
+    for kind in ("redator", "qa"):
+        if task["ref"].startswith(f"lote-{lc['lot_id']}-{kind}-"):
+            return kind
+    return None
+
+
+def _phase_retry_left(repo: Any, lc: dict[str, Any], task: dict[str, Any]) -> bool:
+    kind = _phase_kind(lc, task)
+    if not kind:
+        return False
+    rows = [t for t in repo.tarefas(lc["unit_id"]) if t["ref"].startswith(f"lote-{lc['lot_id']}-{kind}-")]
+    return any(t["id"] > task["id"] for t in rows) or len(rows) < PHASE_ATTEMPTS
+
+
+def _phase_retry(repo: Any, lc: dict[str, Any], task: dict[str, Any], last: dict[str, Any],
+                 reason: str) -> bool:
+    """A refused Writer or QA task is the Coordinator's own phase: it gets a
+    fresh attempt with the failure in its input (at most PHASE_ATTEMPTS per
+    Lot), not a replan and not a queue item."""
+    kind = _phase_kind(lc, task)
+    if not kind or not _phase_retry_left(repo, lc, task):
+        return False
+    uid = lc["unit_id"]
+    rows = [t for t in repo.tarefas(uid) if t["ref"].startswith(f"lote-{lc['lot_id']}-{kind}-")]
+    repo.conn.execute(
+        "UPDATE escalations SET resposta=%s,respondido_por=%s,respondido_em=now(),resolution=%s "
+        "WHERE unit_id=%s AND task_id=%s AND respondido_em IS NULL",
+        ("O Coordenador repete a etapa com a falha na entrada.", COORDINATOR,
+         json.dumps({"option": "phase_retry", "rule": RULE}), uid, task["id"]))
+    if any(t["id"] > task["id"] for t in rows):
+        return True
+    errors = [str(e) for e in (last.get("validation_errors") or [])[:3]]
+    created = _create_phase_task(repo, lc, kind, {"task_id": task["id"], "motivo": reason or "recusada",
+                                                  "erros": errors})
+    _decision(repo, lc["lot_id"], uid, "phase_retry",
+              f"A tarefa {task['id']} ({task['title']}) foi recusada ({reason}); o Coordenador "
+              f"cria a tarefa {created['id']} com a falha na entrada "
+              f"({len(rows) + 1} de {PHASE_ATTEMPTS} tentativas da etapa).",
+              {"task_id": task["id"], "new_task_id": created["id"], "errors": errors})
+    return True
 
 
 def _writer_prerequisites(repo: Any, unit_id: int) -> list[str]:
@@ -1126,7 +1174,10 @@ def _revivable(repo: Any, lc: dict[str, Any]) -> bool:
                 or task["role"] == "coordenador":
             return False
         infeasible = task["role"] == "arquivista" and not archivist_target(task["input_json"] or {})
-        if not (infeasible or replans_left):
+        if _phase_kind(lc, task):
+            if not _phase_retry_left(repo, lc, task):
+                return False
+        elif not (infeasible or replans_left):
             return False
     return True
 
@@ -1290,7 +1341,10 @@ def coordinate(repo: Any, unit_id: int) -> str:
                     task["created_at"] >= lc["lot_created_at"]:
                 if _infeasible_refusal(repo, lc, task):
                     continue
-                if task["role"] != "coordenador" and _replan(repo, lc, task, last, _refusal_reason(task, last, reason)):
+                if _phase_kind(lc, task):
+                    if _phase_retry(repo, lc, task, last, reason):
+                        continue
+                elif task["role"] != "coordenador" and _replan(repo, lc, task, last, _refusal_reason(task, last, reason)):
                     continue
                 _exception(repo, lc["lot_id"], unit_id, task["id"], "case_blocked",
                            f"task:{task['id']}:refused:run{last['id']}",

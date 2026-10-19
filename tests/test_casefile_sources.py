@@ -301,3 +301,34 @@ def test_inside_a_lot_a_rejected_capture_opens_no_queue_item(operation_case, tmp
     repo.abrir_escalonamento(uid, archivist["id"], "capture", "Synthetic older capture.", ["a", "b"])
     autonomy._close_non_queue_entries(repo, autonomy.open_lot_case(repo, uid))
     assert not [e for e in autonomy.open_exceptions(repo, uid) if e["motivo"] == "capture"]
+
+
+def test_a_refused_writer_gets_one_fresh_attempt_then_stops(operation_case, tmp_path):
+    from src.casefile import orquestracao
+    repo, _, _ = operation_case
+    unit, _ = _case(repo, tmp_path, "CASE-S11")
+    uid = unit["id"]
+    lot = _lot(repo, [unit])
+    for t in repo.tarefas(uid):
+        if t["status"] in ("planejada", "pronta"):
+            repo.transicionar_tarefa(t["id"], (t["status"],), "cancelada", "process:test", "Synthetic.")
+    lc = autonomy.open_lot_case(repo, uid)
+
+    def refuse(writer):
+        got = orquestracao.pegar(repo, uid, "synthetic", teto=50, max_active_per_unit=1, rodada=True)
+        assert got[0]["id"] == writer["id"]
+        repo.fechar_run(got[1]["id"], "synthetic", output_json=None, output_valid=False,
+                        validation_errors=["synthetic"], stop_reason="sem_entrega", para="recusada")
+
+    first = autonomy._create_phase_task(repo, lc, "redator")
+    refuse(first)
+    autonomy.coordinate(repo, uid)
+    writers = [t for t in repo.tarefas(uid) if t["ref"].startswith(f"lote-{lot['id']}-redator-")]
+    assert len(writers) == 2 and writers[-1]["input_json"]["tentativa_anterior"]["task_id"] == first["id"]
+    autonomy.coordinate(repo, uid)
+    assert len([t for t in repo.tarefas(uid) if t["ref"].startswith(f"lote-{lot['id']}-redator-")]) == 2
+    refuse(writers[-1])
+    autonomy.coordinate(repo, uid)
+    assert [e for e in autonomy.open_exceptions(repo, uid)
+            if e["kind"] == "case_blocked" and e["task_id"] == writers[-1]["id"]]
+    assert not [t for t in repo.tarefas(uid) if "-replano-" in t["ref"]]

@@ -157,6 +157,8 @@ def test_primary_blind_extraction_ai_comparison_and_formula_protection(operation
     repo.operation_update(unit['id'],profile={'template_artifact_id':entry['id'],'lead_example_artifact_id':entry['id'],
         'sample_data_clearance':'clear_declared_cells','sample_cells':[{'sheet':'Surface','cell_ref':'A1'}]})
     writer=task(repo,unit,'redator','projecao_celulas',mode='operador')
+    listed=runtime.tools(repo,writer)['ler_claims_aceitos'][1]()
+    assert [c['id'] for c in listed['claims']]==[cid] and listed['total']==1 and listed['next_offset'] is None
     assert report_writer.validate(repo,writer,{'celulas':[{'sheet':'Surface','cell_ref':'B1','value':'bad','claim_ids':[cid]}],'brancos':[]})
     run(repo,unit,[[Use('entregar_saida',{'saida':{'celulas':[{'sheet':'Surface','cell_ref':'A1','value':'Synthetic report value','claim_ids':[cid]}],'brancos':[]}})]])
     report=repo.operation_artifacts(unit['id'],'working_report')[-1]

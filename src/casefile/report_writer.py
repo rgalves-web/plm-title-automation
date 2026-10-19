@@ -37,6 +37,23 @@ def inspected(path,offset=0,limit=100):
                      for s in workbook], 'formula_sha256':digest(sorted((s,c,str(v)) for (s,c),v in formula_set(workbook).items()))}
 
 
+def claim_error(repo,unit_id,cid):
+    """Why a Claim cannot back a cell, or None when it can: active in this
+    Case, independently reviewed in concurrence and, if material, accepted."""
+    claim=repo.claim(cid)
+    if not claim or claim['unit_id']!=unit_id or claim['status']!='ativo':
+        return 'claim_outside_case_or_superseded:'+str(cid)
+    if claim['materiality']=='alta':
+        parents=repo.conn.execute('SELECT t.status FROM task_claims k JOIN tasks t ON t.id=k.task_id WHERE k.claim_id=%s AND t.verificacao=%s',
+                                   (cid,'obrigatoria_e_operador')).fetchall()
+        if not parents or any(p['status']!='aceita' for p in parents):
+            return 'material_claim_without_operator_acceptance:'+str(cid)
+    reviews=[v for v in repo.verificacoes_do_claim(cid) if v.get('status','valida')=='valida']
+    if not reviews or reviews[-1]['verdict']!='concordancia':
+        return 'claim_without_independent_review:'+str(cid)
+    return None
+
+
 def validate(repo,task,output):
     case=repo.operation_case(task['unit_id'])
     template_id=case['profile'].get('template_artifact_id')
@@ -81,18 +98,9 @@ def validate(repo,task,output):
         if str(item.get('value','')).startswith('='):
             errors.append('formula_injection:'+str(key))
         for cid in item.get('claim_ids',[]):
-            claim=repo.claim(cid)
-            if not claim or claim['unit_id']!=task['unit_id'] or claim['status']!='ativo':
-                errors.append('claim_outside_case_or_superseded:'+str(cid))
-                continue
-            if claim['materiality']=='alta':
-                parents=repo.conn.execute('SELECT t.status FROM task_claims k JOIN tasks t ON t.id=k.task_id WHERE k.claim_id=%s AND t.verificacao=%s',
-                                           (cid,'obrigatoria_e_operador')).fetchall()
-                if not parents or any(p['status']!='aceita' for p in parents):
-                    errors.append('material_claim_without_operator_acceptance:'+str(cid))
-            reviews=[v for v in repo.verificacoes_do_claim(cid) if v.get('status','valida')=='valida']
-            if not reviews or reviews[-1]['verdict']!='concordancia':
-                errors.append('claim_without_independent_review:'+str(cid))
+            error=claim_error(repo,task['unit_id'],cid)
+            if error:
+                errors.append(error)
     return errors
 
 

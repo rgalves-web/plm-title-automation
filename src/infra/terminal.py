@@ -274,7 +274,16 @@ class TerminalAdapter:
         receipt = None
         result = None
         usage = None
+        native = []
         for event in events:
+            if self.family == 'A' and event.get('type') == 'assistant':
+                # With --tools '' the CLI answers "No such tool available" to a
+                # host function called natively; the model then reports the
+                # function as missing. The attempt is kept as a request.
+                for block in (event.get('message') or {}).get('content') or []:
+                    if isinstance(block, dict) and block.get('type') == 'tool_use' \
+                            and block.get('name') != 'StructuredOutput':
+                        native.append({'name': block.get('name'), 'input': block.get('input') or {}})
             if self.family == 'A' and event.get('type') == 'result':
                 if event.get('is_error') or event.get('subtype') != 'success':
                     raise TerminalError('terminal_failed_requires_review:A', json.dumps(
@@ -313,6 +322,18 @@ class TerminalAdapter:
             except (ValueError, KeyError, jsonschema.ValidationError):
                 raise TerminalError('terminal_tool_contract_invalid') from None
             blocks.append(SimpleNamespace(type='tool_use', name=call['name'], input=data, id='cli_' + uuid.uuid4().hex))
+        recovered = []
+        if not result['calls']:
+            for attempt in native:
+                if len(recovered) >= SCHEMA['properties']['calls']['maxItems']:
+                    break
+                try:
+                    jsonschema.validate(attempt['input'], definitions[attempt['name']])
+                except (KeyError, jsonschema.ValidationError):
+                    continue
+                recovered.append(attempt['name'])
+                blocks.append(SimpleNamespace(type='tool_use', name=attempt['name'], input=attempt['input'],
+                                              id='cli_' + uuid.uuid4().hex))
         cached = int(usage.get('cached_input_tokens', usage.get('cache_read_input_tokens', 0)))
         raw_input = int(usage.get('input_tokens', 0))
         normalized = SimpleNamespace(input_tokens=max(0, raw_input - cached) if self.family == 'B' else raw_input,
@@ -323,4 +344,5 @@ class TerminalAdapter:
                 'transport': 'claude_code' if self.family == 'A' else 'codex_cli',
                 'billing_mode': 'subscription', 'provider_receipt': receipt,
                 'api_charge_usd': 0, 'subscription_charge_usd': None,
-                'note': 'Uso da assinatura; estimativa do CLI não é cobrança confirmada.'})
+                'note': 'Uso da assinatura; estimativa do CLI não é cobrança confirmada.',
+                'native_attempts': [a['name'] for a in native], 'native_attempts_dispatched': recovered})
