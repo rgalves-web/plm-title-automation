@@ -35,7 +35,7 @@ function render(){
   $('#case-subtitle').textContent=`Surface title · Terrell County · ${states[c.execution_state]} · ${c.scope.through_date?'through '+c.scope.through_date:'through date a confirmar'}`;
   $('#start').innerHTML=resumable(c)?'▶ Retomar agentes':Number(c.approved_budget_usd)>0?'▶ Aprovar nova rodada':'▶ Iniciar agentes';
   $('#pause').disabled=c.execution_state!=='running';$('#start').disabled=c.execution_state==='running';
-  $('#start').hidden=!!(c.lot&&c.lot.status!=='released');
+  $('#start').hidden=!!(c.lot&&c.lot.status!=='released')&&!(c.lot.status==='running'&&c.execution_state==='paused'&&resumable(c));
   const known=Number(c.approved_budget_usd)>0;
   if(!known)notice('Fontes e trabalho anterior estão registrados. Aprove o escopo e o orçamento para iniciar os agentes.');
   else if(c.execution_state==='waiting')notice('Este tract aguarda uma decisão ou dependência. Abra a fila para ver o responsável e a próxima ação.');

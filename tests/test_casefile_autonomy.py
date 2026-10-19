@@ -340,6 +340,8 @@ def test_envelope_exhaustion_stops_the_case_and_never_continues(operation_case, 
         assert autonomy.step(repo, unit["id"], script) == "idle"
     assert repo.conn.execute("SELECT count(*) AS n FROM operation_terminal_calls"
                              ).fetchone()["n"] == calls == 2
+    with pytest.raises(ValueError, match="lot_case_stopped_resume_from_exceptions_queue"):
+        operations.command(repo, request(repo, unit, "resume"))
     operations.command(repo, request(repo, unit, "resolve_exception",
                                      exception_id=entry["id"], option="raise_cap",
                                      params={"turns": 20}))

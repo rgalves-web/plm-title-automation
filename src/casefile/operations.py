@@ -270,6 +270,11 @@ def command(repo,body,actor=ACTOR):
                 raise ValueError('initial_approval_required')
             if has_unbounded_usage(repo,uid):
                 raise ValueError('reconcile_provider_usage_before_resume')
+            from src.casefile import autonomy
+            lot_case=autonomy.open_lot_case(repo,uid)
+            if lot_case and lot_case['status']!='running':
+                # Issue 13: a stopped Lot Case resumes from the exceptions queue.
+                raise ValueError('lot_case_stopped_resume_from_exceptions_queue')
             from src.casefile import rounds
             current_round=rounds.state(repo,uid)
             if not current_round or not current_round['open'] or current_round['turns_remaining']<=0:
