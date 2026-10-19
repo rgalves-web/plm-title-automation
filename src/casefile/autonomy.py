@@ -924,6 +924,84 @@ def _failing_claims(verdict: dict[str, Any]) -> dict[int, str]:
     return needing
 
 
+MAX_REPLANS = 3
+
+
+def _replans(repo: Any, lc: dict[str, Any]) -> list[dict[str, Any]]:
+    return [t for t in repo.tarefas(lc["unit_id"]) if t["role"] == "coordenador"
+            and (t["input_json"] or {}).get("replanejar_apos", {}).get("lot_id") == lc["lot_id"]]
+
+
+def _replan(repo: Any, lc: dict[str, Any], task: dict[str, Any], last: dict[str, Any],
+            reason: str) -> bool:
+    """Issue 17: a refused task in a Lot is not a question for Renato. Its
+    pending dependents are cancelled and the Coordinator plans again with the
+    failure in its input; at most MAX_REPLANS times per Lot."""
+    from src.casefile import agentes, orquestracao, routines
+    uid, lot_id = lc["unit_id"], lc["lot_id"]
+    done = _replans(repo, lc)
+    if any(t["input_json"]["replanejar_apos"].get("task_id") == task["id"] for t in done):
+        return True
+    if len(done) >= MAX_REPLANS:
+        return False
+    cancelled, frontier = [], {task["id"]}
+    while frontier:
+        nxt = set()
+        for t in repo.tarefas(uid):
+            if t["status"] in ("planejada", "pronta") and frontier & set(t["depends_on"] or []):
+                repo.transicionar_tarefa(t["id"], (t["status"],), "cancelada", COORDINATOR,
+                                         f"Depende da tarefa {task['id']}, recusada; o Coordenador replaneja.")
+                cancelled.append(t["id"])
+                nxt.add(t["id"])
+        frontier = nxt
+    repo.conn.execute(
+        "UPDATE escalations SET resposta=%s,respondido_por=%s,respondido_em=now(),resolution=%s "
+        "WHERE unit_id=%s AND task_id=%s AND respondido_em IS NULL",
+        ("O Coordenador replaneja sem esta tarefa.", COORDINATOR,
+         json.dumps({"option": "replan", "rule": RULE}), uid, task["id"]))
+    case = repo.operation_case(uid)
+    routine = (lc["job"] or {}).get("routine")
+    chosen = routines.get(routine) if routine else None
+    role = next(f for f in agentes.carregar() if f.tipo == "Role" and f.nome == "coordenador")
+    orquestracao.registrar_versoes(repo)
+    repo.criar_tarefas(uid, [{
+        "ref": f"lote-{lot_id}-replano-{len(done) + 1}", "role": "coordenador",
+        "pack": repo.operation_pack(uid), "output_schema": role.front["saida_esquema"],
+        "title": "Replanejar o trabalho restante depois de uma tarefa recusada",
+        "acceptance": "Cobrir as pendências atuais sem repetir a tarefa recusada; usar apenas "
+                      "escopo, fontes e orçamento aprovados.",
+        "input_json": {"operation": True, "scope": case["scope"],
+                       "operation_revision": case["revision"],
+                       **({"routine": {k: chosen[k] for k in ("id", "pack", "label")}} if chosen else {}),
+                       "replanejar_apos": {"lot_id": lot_id, "task_id": task["id"], "ref": task["ref"],
+                                           "title": task["title"], "role": task["role"],
+                                           "motivo": reason, "dependentes_cancelados": cancelled}},
+        "budget_usd": 1.0, "verificacao": "operador", "depends_on_refs": [], "priority": 0,
+        "pendencias": []}], COORDINATOR)
+    repo.promover_prontas(uid, COORDINATOR)
+    _decision(repo, lot_id, uid, "replan",
+              f"A tarefa {task['id']} ({task['title']}) foi recusada ({reason}). O Coordenador "
+              f"cancela {len(cancelled)} tarefa(s) que dependiam dela e replaneja "
+              f"({len(done) + 1} de {MAX_REPLANS}).",
+              {"refused_task": task["id"], "cancelled": cancelled})
+    return True
+
+
+def _revivable(repo: Any, lc: dict[str, Any]) -> bool:
+    """A Lot case stopped only by refused tasks the Coordinator can replan."""
+    if lc["status"] != "stopped" or lc["stop_reason"] != "awaiting_exceptions":
+        return False
+    blocking = [e for e in _lot_queue(repo, lc) if e.get("kind") not in LOT_QUEUE_KINDS]
+    if not blocking or len(_replans(repo, lc)) >= MAX_REPLANS:
+        return False
+    for entry in blocking:
+        task = repo.tarefa(entry["task_id"]) if entry.get("task_id") else None
+        if entry.get("kind") != "case_blocked" or not task or task["status"] != "recusada" \
+                or task["role"] == "coordenador":
+            return False
+    return True
+
+
 ATTEMPTS = 3
 RESULT_KINDS = ("divergence", "insufficient_evidence", "needs_decision", "open_item",
                 "audit_suspended")
@@ -1078,6 +1156,8 @@ def coordinate(repo: Any, unit_id: int) -> str:
                     return acted
             elif task["status"] == "recusada" and last and \
                     task["created_at"] >= lc["lot_created_at"]:
+                if task["role"] != "coordenador" and _replan(repo, lc, task, last, reason):
+                    continue
                 _exception(repo, lc["lot_id"], unit_id, task["id"], "case_blocked",
                            f"task:{task['id']}:refused:run{last['id']}",
                            f"Tarefa {task['id']} ({task['title']}) foi recusada após as "
@@ -1509,7 +1589,8 @@ def overview(repo: Any, unit_id: int) -> dict[str, Any] | None:
 def parked_lot_cases(repo: Any) -> list[int]:
     return [r["unit_id"] for r in repo.conn.execute(
         "SELECT lc.unit_id FROM operation_lot_cases lc JOIN operation_cases o "
-        "ON o.unit_id=lc.unit_id WHERE lc.status='running' AND o.execution_state='waiting' "
+        "ON o.unit_id=lc.unit_id WHERE o.execution_state='waiting' AND (lc.status='running' "
+        "OR (lc.status='stopped' AND lc.stop_reason='awaiting_exceptions')) "
         "ORDER BY lc.unit_id").fetchall()]
 
 
@@ -1521,6 +1602,12 @@ def wake(repo: Any, unit_id: int) -> str:
     stops the Case with a reason. A Case Renato paused stays paused."""
     from src.casefile.operations import has_unbounded_usage
     lc = open_lot_case(repo, unit_id)
+    if lc and _revivable(repo, lc) and repo.operation_case(unit_id)["execution_state"] == "waiting":
+        # Issue 17: stopped only by refused tasks; the Coordinator replans.
+        repo.conn.execute(
+            "UPDATE operation_lot_cases SET status='running',stop_reason='',updated_at=now() "
+            "WHERE lot_id=%s AND unit_id=%s", (lc["lot_id"], unit_id))
+        lc = open_lot_case(repo, unit_id)
     if not lc or lc["status"] != "running" or \
             repo.operation_case(unit_id)["execution_state"] != "waiting":
         return "idle"

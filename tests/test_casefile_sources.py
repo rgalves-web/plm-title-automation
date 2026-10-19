@@ -162,3 +162,44 @@ def test_inside_a_lot_a_function_asks_only_for_the_four_kinds(operation_case, tm
         "declarada": True, "dependencias_externas": ["Synthetic external dependency"],
         "decisoes_do_operador": ["Synthetic operator decision"]}}, None)
     assert len(autonomy.open_exceptions(repo, unit["id"])) == before
+
+
+def test_a_refused_task_is_replanned_not_queued_and_a_stopped_lot_resumes(operation_case, tmp_path):
+    from src.casefile import orquestracao
+    repo, _, _ = operation_case
+    unit, _ = _case(repo, tmp_path, "CASE-S6")
+    uid = unit["id"]
+    lot = _lot(repo, [unit])
+    coordinator = [t for t in repo.tarefas(uid) if t["role"] == "coordenador"][0]
+    repo.transicionar_tarefa(coordinator["id"], ("pronta",), "cancelada", "process:test", "Synthetic.")
+    orquestracao.registrar_versoes(repo)
+    first, second = repo.criar_tarefas(uid, [
+        {"ref": "synthetic-preflight", "role": "arquivista", "pack": "title-texas-surface",
+         "title": "Synthetic preflight", "output_schema": "documento_registrado", "input_json": {},
+         "acceptance": "Synthetic.", "depends_on_refs": [], "budget_usd": 1, "priority": 0,
+         "verificacao": "nenhuma"},
+        {"ref": "synthetic-after", "role": "pesquisador", "pack": "title-texas-surface",
+         "title": "Synthetic dependent", "output_schema": "resultado_pesquisa", "input_json": {},
+         "acceptance": "Synthetic.", "depends_on_refs": ["synthetic-preflight"], "budget_usd": 1,
+         "priority": 0, "verificacao": "nenhuma"}], "process:test")
+    repo.promover_prontas(uid, "process:test")
+    got = orquestracao.pegar(repo, uid, "synthetic", teto=50, max_active_per_unit=1, rodada=True)
+    assert got[0]["id"] == first["id"]
+    repo.fechar_run(got[1]["id"], "synthetic", output_json=None, output_valid=False,
+                    validation_errors=["synthetic"], stop_reason="sem_entrega", para="recusada")
+    lc = autonomy.open_lot_case(repo, uid)
+    repo.conn.execute("UPDATE operation_lot_cases SET status='stopped',stop_reason='awaiting_exceptions' "
+                      "WHERE unit_id=%s", (uid,))
+    repo.operation_update(uid, execution_state="waiting")
+    autonomy._exception(repo, lot["id"], uid, first["id"], "case_blocked",
+                        f"task:{first['id']}:refused:run{got[1]['id']}", "Synthetic refusal.", {})
+    assert autonomy._revivable(repo, autonomy.open_lot_case(repo, uid))
+    assert autonomy.wake(repo, uid) == "working"
+    assert autonomy.open_lot_case(repo, uid)["status"] == "running"
+    assert repo.tarefa(second["id"])["status"] == "cancelada"
+    [replan] = [t for t in repo.tarefas(uid) if t["ref"] == f"lote-{lot['id']}-replano-1"]
+    assert replan["input_json"]["replanejar_apos"]["task_id"] == first["id"]
+    assert replan["input_json"]["replanejar_apos"]["dependentes_cancelados"] == [second["id"]]
+    assert not [e for e in autonomy.open_exceptions(repo, uid) if e["task_id"] == first["id"]]
+    autonomy.coordinate(repo, uid)
+    assert len([t for t in repo.tarefas(uid) if "-replano-" in t["ref"]]) == 1
